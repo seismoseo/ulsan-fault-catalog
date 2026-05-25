@@ -49,6 +49,7 @@ KS_KG/HypoInv/STA/hypoinverse/
 KS_KG/HypoInv/*.csv
 KS_KG/models/original/
 KS_KG/models/pipeline/notebooks/
+KS_KG/models/*/*.log
 
 # ---- Jupyter / Python noise ----
 **/.ipynb_checkpoints/
