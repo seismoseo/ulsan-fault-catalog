@@ -34,6 +34,12 @@ models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
 - **Output**: `picks_<year>.<doy>.csv` with columns `station, phase, peak_time, probability`, where
   `station` is the **canonical `NET.STA`** (e.g. `KG.BBK`) normalized from the pick `trace_id`.
 - **Resume**: days whose CSV already exists are skipped (`--no-skip-existing` to recompute).
+- **PhaseNet+ backend** (`--model phasenet_plus`): routes to EQNet's PhaseNet+ (in-process import of
+  `eqnet`; needs a local EQNet clone, `config.EQNET_DIR`). Per station-day it builds a comma-joined E/N/Z
+  `data_list`, runs EQNet's `SeismicTraceIterableDataset` (raw demean + internal moving-norm; **no
+  bandpass**) + `detect_peaks`/`extract_picks`, and writes the **same canonical pick schema** plus raw
+  outputs (polarity, amplitude, single-station event detection) under `phasenet_plus_raw/`. Threshold
+  `config.PNPLUS_MIN_PROB=0.3`, optional highpass `config.PNPLUS_HIGHPASS`.
 
 ## 2. Association — `association.py`
 

@@ -90,8 +90,17 @@ def detect_day(pn_model, stations, jday, base_dir, workers=None):
 
 
 def run_detection_year(model, year, days=None, stations=None, skip_existing=True,
-                       device=None, workers=None, force=False):
-    """Run PhaseNet(model) detection for a year; write daily picks CSVs."""
+                       device=None, workers=None, force=False, min_prob=None, highpass=None):
+    """Run detection for a year; write daily picks CSVs.
+
+    Routes to the EQNet PhaseNet+ backend for models in config.EQNET_MODELS,
+    otherwise uses the SeisBench PhaseNet backend (`from_pretrained(model)`).
+    """
+    if model in config.EQNET_MODELS:
+        return _run_detection_year_eqnet(
+            model, year, days=days, stations=stations, skip_existing=skip_existing,
+            device=device, workers=(workers or 0), force=force, min_prob=min_prob, highpass=highpass)
+
     import torch
     import seisbench.models as sbm
 
@@ -127,6 +136,144 @@ def run_detection_year(model, year, days=None, stations=None, skip_existing=True
         n_written += 1
         print(f"  {jday}: {len(df)} picks -> {os.path.relpath(out, config.MODELS)}")
     print(f"[detection] done: {n_written} daily file(s) written into {os.path.relpath(out_dir, config.MODELS)}")
+    return out_dir
+
+
+# ------------------------------------------- detection (1b): EQNet PhaseNet+
+def _pnplus_postprocess(meta, output, polarity_scale=1, event_scale=16):
+    """Trim model outputs back to the un-padded patch size (mirrors EQNet predict.py)."""
+    nt, nx = int(meta["nt"]), int(meta["nx"])
+    meta["data"] = meta["data"][:, :, :nt, :nx]
+    if "phase" in output:
+        output["phase"] = output["phase"][:, :, :nt, :nx]
+    if output.get("polarity") is not None:
+        output["polarity"] = output["polarity"][:, :, : (nt - 1) // polarity_scale + 1, :nx]
+    if output.get("event_center") is not None:
+        output["event_center"] = output["event_center"][:, :, : (nt - 1) // event_scale + 1, :nx]
+    if output.get("event_time") is not None:
+        output["event_time"] = output["event_time"][:, :, : (nt - 1) // event_scale + 1, :nx]
+    return meta, output
+
+
+def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existing=True,
+                              device=None, workers=0, force=False, min_prob=None, highpass=None):
+    """EQNet PhaseNet+ detection backend (in-process; no wandb, no edits to the EQNet clone).
+
+    Writes canonical per-day picks (station="NET.STA", phase, peak_time, probability) so the
+    rest of the pipeline is unchanged, plus the raw PhaseNet+ picks (with polarity/amplitude)
+    and single-station event detections under phasenet_plus_raw/ for later use.
+
+    PhaseNet+ expects raw (demeaned) data + its own internal normalization — no bandpass.
+    """
+    import tempfile
+    import torch
+    import torch.utils.data
+
+    config.assert_writable(model, force)
+    if config.EQNET_DIR not in sys.path:
+        sys.path.insert(0, config.EQNET_DIR)
+    import eqnet  # noqa: F401
+    from eqnet.data import SeismicTraceIterableDataset
+    from eqnet.utils import detect_peaks, extract_picks, extract_events
+
+    min_prob = config.PNPLUS_MIN_PROB if min_prob is None else min_prob
+    highpass = config.PNPLUS_HIGHPASS if highpass is None else highpass
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    base_dir = config.CONTINUOUS
+    out_dir = config.picks_dir(model, year)
+    raw_dir = config.phasenet_plus_raw_dir(model, year)
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(raw_dir, exist_ok=True)
+
+    print(f"[detection/phasenet_plus] year={year} device={device} min_prob={min_prob} highpass={highpass}")
+    net = eqnet.models.__dict__["phasenet_plus"].build_model(backbone="unet", in_channels=1, out_channels=3)
+    ckpt = torch.load(config.EQNET_WEIGHTS, map_location="cpu", weights_only=False)  # trusted local file
+    net.load_state_dict(ckpt["model"], strict=True)
+    net.to(torch.device(device)).eval()
+
+    if stations is None:
+        stations = discover_stations(base_dir, year)
+    print(f"[detection/phasenet_plus] {len(stations)} stations with {year} data")
+    if days is None:
+        days = range(1, config.days_in_year(year) + 1)
+
+    n_written = 0
+    for day in days:
+        jday = f"{year}.{day:03d}"
+        out = os.path.join(out_dir, f"picks_{jday}.csv")
+        if skip_existing and os.path.exists(out):
+            continue
+        # one data_list line per station = comma-joined component files for this day
+        lines = []
+        for code in stations:
+            comps = sorted(glob.glob(f"{base_dir}/{code}/*/*.{jday}"))
+            if comps:
+                lines.append(",".join(comps))
+        if not lines:
+            continue
+
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tf:
+            tf.write("\n".join(lines))
+            list_path = tf.name
+        try:
+            # NOTE: build with cut_patch=False (its __init__ _count() only supports cut_patch for
+            # HDF5), then enable time-tiling on the instance — sample() honors it at iteration.
+            dataset = SeismicTraceIterableDataset(
+                data_path="", data_list=list_path, format="mseed", dataset="seismic_trace",
+                training=False, sampling_rate=config.SAMPLING_RATE, highpass_filter=highpass,
+                cut_patch=False, nt=config.PNPLUS_NT,
+            )
+            dataset.cut_patch = True
+            loader = torch.utils.data.DataLoader(
+                dataset, batch_size=1, num_workers=workers, collate_fn=None, drop_last=False)
+            picks_all, events_all = [], []
+            with torch.inference_mode():
+                for meta in loader:
+                    output = net(meta)                      # model moves data to its device
+                    meta, output = _pnplus_postprocess(meta, output)
+                    dt = meta["dt_s"]
+                    phase_scores = torch.softmax(output["phase"], dim=1)
+                    polarity_scores = (
+                        torch.softmax(output["polarity"], dim=1) if output.get("polarity") is not None else None)
+                    topk_scores, topk_inds = detect_peaks(phase_scores, vmin=min_prob, kernel=128, dt=dt.min().item())
+                    phase_picks = extract_picks(
+                        topk_inds, topk_scores,
+                        file_name=meta["file_name"], station_id=meta["station_id"],
+                        begin_time=meta.get("begin_time"), begin_time_index=meta.get("begin_time_index"),
+                        dt=dt, vmin=min_prob, phases=["P", "S"],
+                        polarity_score=polarity_scores, waveform=meta["data"],
+                    )
+                    for p in phase_picks:
+                        picks_all.extend(p)
+                    if output.get("event_center") is not None:
+                        ec = torch.sigmoid(output["event_center"])
+                        et = output["event_time"]
+                        es, ei = detect_peaks(ec, vmin=min_prob, kernel=16, dt=dt.min().item() * 16.0)
+                        evs = extract_events(
+                            ei, es, file_name=meta["file_name"], station_id=meta["station_id"],
+                            begin_time=meta.get("begin_time"), begin_time_index=meta.get("begin_time_index"),
+                            dt=dt, vmin=min_prob, event_time=et, waveform=meta["data"],
+                        )
+                        for e in evs:
+                            events_all.extend(e)
+        finally:
+            os.unlink(list_path)
+
+        if events_all:
+            pd.DataFrame(events_all).to_csv(os.path.join(raw_dir, f"events_{jday}.csv"), index=False)
+        if picks_all:
+            raw = pd.DataFrame(picks_all)
+            raw.to_csv(os.path.join(raw_dir, f"picks_{jday}.csv"), index=False)   # keep polarity/amplitude
+            pd.DataFrame({
+                "station": raw["station_id"].map(canonical_station),
+                "phase": raw["phase_type"],
+                "peak_time": raw["phase_time"],
+                "probability": raw["phase_score"],
+            }).to_csv(out, index=False)
+            n_written += 1
+            print(f"  {jday}: {len(raw)} picks ({len(events_all)} events) -> {os.path.relpath(out, config.MODELS)}")
+    print(f"[detection/phasenet_plus] done: {n_written} daily file(s) written into "
+          f"{os.path.relpath(out_dir, config.MODELS)}")
     return out_dir
 
 

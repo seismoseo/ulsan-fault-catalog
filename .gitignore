@@ -23,6 +23,7 @@ KS_KG/vel_model
 KS_KG/models/stead/
 KS_KG/models/*/pyocto/
 KS_KG/models/*/station_table/
+KS_KG/models/*/phasenet_plus_raw/
 KS_KG/models/*/HypoInv/STA
 KS_KG/models/*/HypoInv/PHS/
 KS_KG/models/*/HypoInv/kim1983/
@@ -47,6 +48,7 @@ KS_KG/HypoInv/UF*.sh
 KS_KG/HypoInv/STA/hypoinverse/
 KS_KG/HypoInv/*.csv
 KS_KG/models/original/
+KS_KG/models/pipeline/notebooks/
 
 # ---- Jupyter / Python noise ----
 **/.ipynb_checkpoints/

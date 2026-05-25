@@ -49,6 +49,22 @@ PYOCTO_VELMODEL = "kim1983"
 DEFAULT_VELMODEL = "kim2011"          # which crustal model UF<year>.sh used
 PHASE_CHANNELS = {"P": "HHZ", "S": "HHN"}
 
+# ------------------------------------------------ picker backends (by model)
+# SeisBench PhaseNet weights run via the default backend; EQNet PhaseNet+ runs
+# via the in-process EQNet backend (see core._run_detection_year_eqnet).
+SEISBENCH_MODELS = {"stead", "original", "instance", "ethz", "scedc", "geofon", "neic"}
+EQNET_MODELS = {"phasenet_plus"}
+
+# EQNet (AI4EPS) — external clone required for PhaseNet+ (not vendored in this repo)
+EQNET_DIR = "/home/msseo/works/14.EQNet/EQNet"
+EQNET_WEIGHTS = os.path.join(EQNET_DIR, "docs", "model_phasenet_plus", "model_99.pth")
+
+# PhaseNet+ params. NOTE: PhaseNet-style pickers expect RAW (demeaned) data + their
+# own internal normalization — do NOT bandpass. A gentle highpass is optional.
+PNPLUS_MIN_PROB = 0.3          # EQNet default pick threshold
+PNPLUS_HIGHPASS = 0.0          # Hz; 0.0 = no filter (raw). Set ~1.0 for a gentle highpass.
+PNPLUS_NT = 1024 * 36          # time-samples per inference patch (cut_patch)
+
 
 def days_in_year(year):
     return 366 if calendar.isleap(year) else 365
@@ -67,6 +83,7 @@ def hyp_dir(model):                 return os.path.join(MODELS, model, "HypoInv"
 def phs_dir(model):                 return os.path.join(hyp_dir(model), "PHS")
 def phs_file(model, y):             return os.path.join(phs_dir(model), f"UF{y}.phs")
 def velmodel_dir(model, vm):        return os.path.join(hyp_dir(model), vm)
+def phasenet_plus_raw_dir(model, y): return os.path.join(MODELS, model, "phasenet_plus_raw", str(y))
 
 
 # --------------------------------------------------------------- safety guard

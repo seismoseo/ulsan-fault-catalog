@@ -41,8 +41,13 @@ tools/                   git helpers (nbstrip.py)
 
 ## Two independent "model" dimensions — keep them straight
 
-- **Picker model** (`--model`): the PhaseNet weights — `stead` vs `original`. Top of `models/`.
+- **Picker model** (`--model`): `stead` / `original` (SeisBench PhaseNet) or `phasenet_plus` (EQNet
+  PhaseNet+, in-process; needs a local EQNet clone at `config.EQNET_DIR`). Top of `models/`.
 - **Velocity model** (`--velmodel`): the crustal model — `kim1983` vs `kim2011`. Used by PyOcto/HYPOINVERSE.
+
+**Preprocessing**: PhaseNet-style pickers want **raw** (demeaned) data + their own normalization — no
+bandpass. (The legacy stead/original detection notebooks applied a 1–40 Hz bandpass; the `pipeline/`
+SeisBench path and the `phasenet_plus` backend feed minimally-processed data.)
 
 ## Conventions / rules
 
@@ -80,6 +85,15 @@ Detection is idempotent (skips days whose picks already exist). Full details: `d
   `*.prt/*.arc/*.sum`); `tuto_material/`.
 - A git clean filter (`tools/nbstrip.py`, enabled once via `bash tools/setup-git-filters.sh`) strips
   notebook outputs **if** a notebook is ever intentionally added — kept as a safety net.
+
+## Status & next steps (2026-05-25)
+
+- **stead** catalog complete (2010–2024 located `kim2011/UF<year>.sum`). Summary in
+  `KS_KG/HypoInv/catalog_summary.ipynb` (model-parameterized; writes `catalog_<model>_2010_2024.csv`).
+- **original** + **phasenet_plus** full 2010–2024 re-runs launched in background (`models/<model>/run_2010_2024.log`).
+- **#1 gap**: HYPOINVERSE `.sum` `MAG` column is empty → no magnitudes ⇒ no FMD/Mc/b-value yet. Top TODO:
+  compute **Md** (coda duration via HYPOINVERSE) or **ML** (Wood–Anderson amplitudes + station corrections).
+- Later: 3-picker comparison once re-runs finish; **HypoDD** relative relocation.
 
 ## Gotchas
 

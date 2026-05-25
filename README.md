@@ -15,14 +15,17 @@ re-run as new data and new picker models become available.
 
 | Stage | Tool | Status |
 |-------|------|--------|
-| Detection | SeisBench PhaseNet | ✅ automated (`stead` reference + `original` runs) |
+| Detection | SeisBench PhaseNet (`stead`, `original`) | ✅ automated |
+| Detection | EQNet **PhaseNet+** (`phasenet_plus`) | ✅ automated (needs a local EQNet clone) |
 | Association | PyOcto | ✅ automated |
 | Absolute location | HYPOINVERSE (`hyp1.40`) | ✅ automated |
 | Relative relocation | HypoDD | ⏳ planned |
 | 2nd network (`NS`, post-2018/19) | — | ⏳ deferred |
 
-The pipeline supports two independent dimensions: **picker model** (`stead` vs `original` PhaseNet
-weights) and **velocity model** (`kim1983` vs `kim2011`).
+The pipeline supports two independent dimensions: **picker model** (`--model`: `stead` / `original`
+SeisBench PhaseNet, or `phasenet_plus` from EQNet) and **velocity model** (`--velmodel`: `kim1983` /
+`kim2011`). PhaseNet-style pickers run on **raw** (demeaned) data with their own internal normalization
+— no bandpass.
 
 ## Quickstart
 

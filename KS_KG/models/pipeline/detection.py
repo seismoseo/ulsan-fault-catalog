@@ -31,12 +31,17 @@ def main():
     ap.add_argument("--workers", type=int, default=None, help="preprocess worker processes (default: all cores)")
     ap.add_argument("--no-skip-existing", dest="skip_existing", action="store_false",
                     help="recompute days whose picks CSV already exists")
+    ap.add_argument("--min-prob", type=float, default=None,
+                    help="pick probability threshold (EQNet phasenet_plus backend; default config.PNPLUS_MIN_PROB)")
+    ap.add_argument("--highpass", type=float, default=None,
+                    help="highpass freq Hz for phasenet_plus (0=raw; default config.PNPLUS_HIGHPASS)")
     ap.add_argument("--force", action="store_true", help="allow writing into model='stead'")
     a = ap.parse_args()
     stations = a.stations.split(",") if a.stations else None
     core.run_detection_year(a.model, a.year, days=parse_days(a.days), stations=stations,
                             skip_existing=a.skip_existing, device=a.device,
-                            workers=a.workers, force=a.force)
+                            workers=a.workers, force=a.force,
+                            min_prob=a.min_prob, highpass=a.highpass)
 
 
 if __name__ == "__main__":
