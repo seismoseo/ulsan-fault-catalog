@@ -1,0 +1,2 @@
+# Strip Jupyter notebook outputs on commit (see tools/setup-git-filters.sh).
+*.ipynb filter=nbstripout

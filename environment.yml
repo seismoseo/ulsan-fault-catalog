@@ -1,0 +1,21 @@
+# Conda environment for the Ulsan Fault catalog pipeline.
+#   conda env create -f environment.yml
+#   conda activate ulsan
+# Then install the torch build matching your CUDA (see docs/how-to-run.md).
+name: ulsan
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib-base
+  - obspy=1.4.2
+  - tqdm
+  - pip
+  - pip:
+      - seisbench==0.11.0
+      - pyocto==0.1.10
+      # torch: install separately to match your CUDA, e.g.
+      #   pip install torch --index-url https://download.pytorch.org/whl/cu128

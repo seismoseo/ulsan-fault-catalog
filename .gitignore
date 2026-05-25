@@ -1,0 +1,56 @@
+# ==========================================================================
+# Ulsan Fault catalog — version control tracks CODE + DOCS + small METADATA.
+# Waveforms (~7 TB) and regenerable outputs are deliberately NOT tracked.
+# ==========================================================================
+
+# ---- Raw waveform data (TBs) ----
+/NS/
+KS_KG/continuous/
+
+# ---- Oversized exploratory notebook (424 MB) ----
+/01.PhaseNet_detection_test.ipynb
+
+# ---- Third-party / tutorial material (large .h5, FMF package) ----
+/tuto_material/
+
+# ---- Pipeline data products (regenerable) ----
+**/picks/
+KS_KG/pyocto/
+KS_KG/vel_model
+**/vel_model
+
+# ---- models/<model> generated scaffold (recreated by build_original_tree.py) ----
+KS_KG/models/stead/
+KS_KG/models/*/pyocto/
+KS_KG/models/*/station_table/
+KS_KG/models/*/HypoInv/STA
+KS_KG/models/*/HypoInv/PHS/
+KS_KG/models/*/HypoInv/kim1983/
+KS_KG/models/*/HypoInv/kim2011/
+KS_KG/models/*/hypodd/
+
+# ---- HYPOINVERSE results (keep *.crh / *.sh / *.sta; drop the big outputs) ----
+KS_KG/HypoInv/**/*.prt
+KS_KG/HypoInv/**/*.arc
+KS_KG/HypoInv/**/*.sum
+**/*.phs
+KS_KG/HypoInv/event_waveforms/
+KS_KG/HypoInv/filtered_waveforms/
+
+# ---- Pre-existing exploratory notebooks/scripts + generated copies ----
+# (kept on the workstation, deliberately NOT versioned — the repo tracks the
+#  new automated pipeline + docs + small reference metadata only)
+/02.Multi-station_detection.ipynb
+KS_KG/detection_location/
+KS_KG/HypoInv/*.ipynb
+KS_KG/HypoInv/UF*.sh
+KS_KG/HypoInv/STA/hypoinverse/
+KS_KG/HypoInv/*.csv
+KS_KG/models/original/
+
+# ---- Jupyter / Python noise ----
+**/.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+.DS_Store
+.virtual_documents/

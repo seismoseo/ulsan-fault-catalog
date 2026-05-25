@@ -1,0 +1,17 @@
+# Core dependencies for the Ulsan Fault catalog pipeline.
+# Verified-working versions (miniforge Python 3.12, CUDA 12.8 GPU).
+# NOTE: install the torch build that matches YOUR CUDA — https://pytorch.org
+#       A GPU is strongly recommended for the detection stage.
+
+seisbench==0.11.0
+pyocto==0.1.10
+obspy==1.4.2
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+matplotlib>=3.7
+tqdm>=4.6
+torch>=2.2
+
+# External tool (NOT pip-installable):
+#   HYPOINVERSE `hyp1.40` binary must be on PATH for the location stage.
