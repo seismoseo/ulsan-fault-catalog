@@ -30,6 +30,20 @@ BANDPASS = dict(freqmin=1.0, freqmax=40.0, corners=4, zerophase=False)
 MERGE = dict(method=1, fill_value=0)
 P_THRESHOLD = 0.2
 S_THRESHOLD = 0.2
+# SHARED 64-core server — keep the footprint polite. Detection sizes its preprocessing
+# pool and torch threads from the process CPU affinity (os.sched_getaffinity), so launching
+# under `taskset -c <cores>` automatically scopes everything to that core budget. MAX_CORES
+# is a safety ceiling applied even if taskset is forgotten. The forkserver pool is created
+# ONCE per year (lean workers, never forks the model/CUDA parent); inference runs on the GPU.
+# See docs/performance-notes.md ("Polite CPU use").
+MAX_CORES = 24
+# Fragmentation handling. Some station-days are stored as tens of thousands of short
+# contiguous miniSEED records (e.g. YSB 2010.082 = 55,572 records). The DATA is real and
+# continuous — obspy merge() stitches it correctly but is ~O(n^2) in record count (~100 s
+# for 55k). We process such days LOSSLESSLY (the merge is just slow) and only log them.
+# A hard cap guards against a truly corrupt file that would stall for many minutes.
+MAX_SEGMENTS = 2000          # above this: log "fragmented, slow merge" but still process
+HARD_MAX_SEGMENTS = 300000   # above this: skip (abnormal — avoid an unbounded stall)
 
 # ---------------------------------------------- association (PyOcto) defaults
 REGION = dict(

@@ -64,10 +64,23 @@ SeisBench path and the `phasenet_plus` backend feed minimally-processed data.)
 
 ```bash
 cd KS_KG/models/pipeline
-python run_pipeline.py --model original --years 2010-2024      # full chain
-python detection.py    --model original --year 2024 --days 1-5 # one stage / slice
+# SHARED 64-core box: ALWAYS pin cores with taskset + set OMP_NUM_THREADS.
+OMP_NUM_THREADS=1  taskset -c 0-7  python run_pipeline.py --model original      --years 2010-2024
+OMP_NUM_THREADS=16 taskset -c 8-23 python run_pipeline.py --model phasenet_plus --years 2010-2024
+python detection.py --model original --year 2024 --days 1-5    # one stage / slice
 ```
 Detection is idempotent (skips days whose picks already exist). Full details: `docs/how-to-run.md`.
+
+### Performance & shared-server CPU (see `docs/performance-notes.md`)
+
+This is a **shared 64-core server** — keep the footprint polite. Detection sizes its preprocessing
+pool and `torch` threads from the process CPU **affinity** (`os.sched_getaffinity`), capped by
+`config.MAX_CORES` (24), so launching under **`taskset -c <cores>`** auto-scopes the whole job
+(and all worker threads) to that core budget. Without pinning, PhaseNet+ grabbed ~49 cores / 193
+threads and starved everything. Inference is **GPU-preferred** (warns loudly, never silently falls
+back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`** per year
+(created before the model loads, so workers are lean) — not the old per-day pool that forked the
+23 GB CUDA parent 5,475×.
 
 ## Environment
 
@@ -86,11 +99,20 @@ Detection is idempotent (skips days whose picks already exist). Full details: `d
 - A git clean filter (`tools/nbstrip.py`, enabled once via `bash tools/setup-git-filters.sh`) strips
   notebook outputs **if** a notebook is ever intentionally added — kept as a safety net.
 
-## Status & next steps (2026-05-25)
+## Status & next steps (2026-05-26)
 
 - **stead** catalog complete (2010–2024 located `kim2011/UF<year>.sum`). Summary in
-  `KS_KG/HypoInv/catalog_summary.ipynb` (model-parameterized; writes `catalog_<model>_2010_2024.csv`).
-- **original** + **phasenet_plus** full 2010–2024 re-runs launched in background (`models/<model>/run_2010_2024.log`).
+  `KS_KG/HypoInv/catalog_summary.ipynb` (model-parameterized; writes `catalog_<model>_2010_2024.csv`;
+  includes maps, depth sections, cumulative/rate, network growth, KMA comparison, and hour-of-day
+  (KST) diurnal + spatial-variation analysis for blast vs tectonic discrimination).
+- **Detection performance fixed** (was a ~35-day ETA): reused forkserver pool, lossless handling of
+  fragmented station-days, GPU-preferred inference, polite `taskset` CPU budget. Root-cause writeup
+  in `docs/performance-notes.md`. **original** + **phasenet_plus** 2010–2024 re-runs running pinned
+  to ~24 cores (`models/<model>/run_2010_2024.log`).
+- **PhaseNet+ inspection**: `core.annotate_phasenet_plus(year, day, station, t0, t1)` returns the
+  per-sample P/S/noise probability, first-motion polarity, and single-station event-detection traces
+  (the PhaseNet+ analogue of SeisBench `annotate`); used by the rebuilt
+  `models/pipeline/notebooks/phasenet_plus_test.ipynb`.
 - **#1 gap**: HYPOINVERSE `.sum` `MAG` column is empty → no magnitudes ⇒ no FMD/Mc/b-value yet. Top TODO:
   compute **Md** (coda duration via HYPOINVERSE) or **ML** (Wood–Anderson amplitudes + station corrections).
 - Later: 3-picker comparison once re-runs finish; **HypoDD** relative relocation.
@@ -100,5 +122,9 @@ Detection is idempotent (skips days whose picks already exist). Full details: `d
 - 2010 & 2013 detection notebooks originally pointed at an outdated `2014_sequence/continuous`
   path; the `models/original` copies are repointed to `KS_KG/continuous`.
 - `detection_location/2022/picks/` (stead) has ~670 files (a likely double run) — sanity-check.
-- Detection runs all stations into a single per-day `classify()` call (efficient); preprocessing
-  is parallelized with `ProcessPoolExecutor`.
+- Detection runs all stations into a single per-day GPU `classify()` call; preprocessing is
+  parallelized with one reused `forkserver` `ProcessPoolExecutor` (see Performance note above).
+- **YSB is fragmented in 2010** (~142 days stored as tens of thousands of ~5 s miniSEED records —
+  real continuous data, but obspy `merge()` is ~O(n²) ⇒ ~100 s/day). It is processed **losslessly**
+  (`config.MAX_SEGMENTS` only logs a warning; `HARD_MAX_SEGMENTS` is the sole skip for a corrupt
+  file). The pre-fix run had silently *lost* YSB on those days. Fragmentation is YSB-/2010-specific.

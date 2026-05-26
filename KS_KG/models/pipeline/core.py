@@ -11,6 +11,7 @@ import os
 import sys
 import glob
 import concurrent.futures
+import multiprocessing
 
 import numpy as np
 import pandas as pd
@@ -42,6 +43,17 @@ def preprocess_station(code, jday, base_dir):
         stream = read(f"{base_dir}/{code}/*/*.{jday}")
         if not stream:
             return None
+        # Heavily-fragmented station-days (tens of thousands of short contiguous records,
+        # e.g. YSB 2010.082 = 55,572) hold REAL continuous data; merge() stitches it
+        # correctly but is ~O(n^2) (~100 s for 55k). Process losslessly, just log it.
+        # Hard cap only guards against a truly abnormal file. See docs/performance-notes.md.
+        nseg = len(stream)
+        if nseg > cfg.HARD_MAX_SEGMENTS:
+            print(f"  ! skip [{code}] {jday}: {nseg} segments > HARD_MAX_SEGMENTS "
+                  f"({cfg.HARD_MAX_SEGMENTS}) — abnormal, skipping to avoid an unbounded stall")
+            return None
+        if nseg > cfg.MAX_SEGMENTS:
+            print(f"  . [{code}] {jday}: {nseg} fragmented records — lossless merge (slow ~{nseg//400}s)")
         stream.interpolate(sampling_rate=cfg.SAMPLING_RATE)
         stream.merge(**cfg.MERGE)
         t_start = max(tr.stats.starttime for tr in stream)
@@ -70,16 +82,30 @@ def canonical_station(trace_id):
     return parts[0]
 
 
-def detect_day(pn_model, stations, jday, base_dir, workers=None):
-    """Preprocess all stations in parallel, then a single classify() for the day."""
+def detect_day(pn_model, stations, jday, base_dir, executor=None, workers=None):
+    """Preprocess all stations in parallel (CPU), then a single GPU classify() for the day.
+
+    Prefers a shared, reused `executor` (passed by run_detection_year). Falls back to a
+    one-off pool only if none is given (legacy callers) — that path is the slow one and
+    should be avoided for full-year runs.
+    """
     from obspy import Stream
     daily = Stream()
-    with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+
+    def _gather(ex):
+        local = Stream()
         futures = [ex.submit(preprocess_station, c, jday, base_dir) for c in stations]
         for fut in concurrent.futures.as_completed(futures):
             res = fut.result()
             if res:
-                daily += res
+                local += res
+        return local
+
+    if executor is not None:
+        daily = _gather(executor)
+    else:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+            daily = _gather(ex)
     if not daily:
         return None
     outputs = pn_model.classify(daily, P_threshold=config.P_THRESHOLD, S_threshold=config.S_THRESHOLD)
@@ -103,18 +129,22 @@ def run_detection_year(model, year, days=None, stations=None, skip_existing=True
 
     import torch
     import seisbench.models as sbm
+    # Size everything to the CPU-affinity budget (set by `taskset -c`), capped at MAX_CORES.
+    navail = max(1, min(len(os.sched_getaffinity(0)), config.MAX_CORES))
+    torch.set_num_threads(navail)
 
     config.assert_writable(model, force)
     base_dir = config.CONTINUOUS
     out_dir = config.picks_dir(model, year)
     os.makedirs(out_dir, exist_ok=True)
 
+    # GPU preferred for inference; warn loudly rather than silently fall back to CPU.
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu":
+        print("  ! WARNING: CUDA not available — running PhaseNet inference on CPU (much slower). "
+              "Check the GPU/torch install if a GPU is expected.")
     print(f"[detection] model={model} year={year} device={device}")
-
-    pn_model = sbm.PhaseNet.from_pretrained(model)
-    pn_model.to(torch.device(device))
 
     if stations is None:
         stations = discover_stations(base_dir, year)
@@ -123,18 +153,28 @@ def run_detection_year(model, year, days=None, stations=None, skip_existing=True
     if days is None:
         days = range(1, config.days_in_year(year) + 1)
 
+    # ONE lean worker pool for the whole year, created with 'forkserver' BEFORE the model
+    # is loaded so workers never inherit the ~23 GB torch/CUDA parent. Capped to the number
+    # of stations (more workers than stations is pointless). This is the speed fix — the old
+    # code created a fresh os.cpu_count()-wide pool *per day*, forking the bloated parent each time.
+    n_workers = max(1, min(len(stations), (workers or navail)))
+    ctx = multiprocessing.get_context("forkserver")
     n_written = 0
-    for day in days:
-        jday = f"{year}.{day:03d}"
-        out = os.path.join(out_dir, f"picks_{jday}.csv")
-        if skip_existing and os.path.exists(out):
-            continue
-        df = detect_day(pn_model, stations, jday, base_dir, workers=workers)
-        if df is None or df.empty:
-            continue
-        df.to_csv(out, index=False)
-        n_written += 1
-        print(f"  {jday}: {len(df)} picks -> {os.path.relpath(out, config.MODELS)}")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
+        print(f"[detection] preprocessing pool: {n_workers} forkserver workers (reused across days)")
+        pn_model = sbm.PhaseNet.from_pretrained(model)
+        pn_model.to(torch.device(device))
+        for day in days:
+            jday = f"{year}.{day:03d}"
+            out = os.path.join(out_dir, f"picks_{jday}.csv")
+            if skip_existing and os.path.exists(out):
+                continue
+            df = detect_day(pn_model, stations, jday, base_dir, executor=ex)
+            if df is None or df.empty:
+                continue
+            df.to_csv(out, index=False)
+            n_written += 1
+            print(f"  {jday}: {len(df)} picks -> {os.path.relpath(out, config.MODELS)}")
     print(f"[detection] done: {n_written} daily file(s) written into {os.path.relpath(out_dir, config.MODELS)}")
     return out_dir
 
@@ -155,6 +195,56 @@ def _pnplus_postprocess(meta, output, polarity_scale=1, event_scale=16):
     return meta, output
 
 
+def _load_pnplus(device):
+    """Build PhaseNet+ and load the bundled EQNet weights onto `device` (GPU preferred).
+    Shared by the batch detector and annotate_phasenet_plus — single source of truth."""
+    import torch
+    if config.EQNET_DIR not in sys.path:
+        sys.path.insert(0, config.EQNET_DIR)
+    import eqnet  # noqa: F401
+    net = eqnet.models.__dict__["phasenet_plus"].build_model(
+        backbone="unet", in_channels=1, out_channels=3)
+    ckpt = torch.load(config.EQNET_WEIGHTS, map_location="cpu", weights_only=False)  # trusted local file
+    net.load_state_dict(ckpt["model"], strict=True)
+    net.to(torch.device(device)).eval()
+    return net
+
+
+def _pnplus_infer(net, meta, min_prob):
+    """One PhaseNet+ forward pass for a patch. Returns the per-sample probability tensors
+    (phase softmax, polarity softmax, event-center sigmoid, event-time) plus the extracted
+    picks (with polarity/amplitude) and single-station events.
+
+    Channel order: phase 0=noise, 1=P, 2=S ; polarity 1=up, 2=down (see EQNet postprocess).
+    Used by both _run_detection_year_eqnet and annotate_phasenet_plus (single source of truth).
+    """
+    import torch
+    from eqnet.utils import detect_peaks, extract_picks, extract_events
+    output = net(meta)
+    meta, output = _pnplus_postprocess(meta, output)
+    dt = meta["dt_s"]
+    phase = torch.softmax(output["phase"], dim=1)
+    polarity = (torch.softmax(output["polarity"], dim=1)
+                if output.get("polarity") is not None else None)
+    ts, ti = detect_peaks(phase, vmin=min_prob, kernel=128, dt=dt.min().item())
+    picks = extract_picks(
+        ti, ts, file_name=meta["file_name"], station_id=meta["station_id"],
+        begin_time=meta.get("begin_time"), begin_time_index=meta.get("begin_time_index"),
+        dt=dt, vmin=min_prob, phases=["P", "S"], polarity_score=polarity, waveform=meta["data"])
+    event_prob = event_time = None
+    events = []
+    if output.get("event_center") is not None:
+        event_prob = torch.sigmoid(output["event_center"])
+        event_time = output["event_time"]
+        es, ei = detect_peaks(event_prob, vmin=min_prob, kernel=16, dt=dt.min().item() * 16.0)
+        events = extract_events(
+            ei, es, file_name=meta["file_name"], station_id=meta["station_id"],
+            begin_time=meta.get("begin_time"), begin_time_index=meta.get("begin_time_index"),
+            dt=dt, vmin=min_prob, event_time=event_time, waveform=meta["data"])
+    return dict(phase=phase, polarity=polarity, event_prob=event_prob, event_time=event_time,
+                picks=picks, events=events, meta=meta)
+
+
 def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existing=True,
                               device=None, workers=0, force=False, min_prob=None, highpass=None):
     """EQNet PhaseNet+ detection backend (in-process; no wandb, no edits to the EQNet clone).
@@ -168,17 +258,19 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
     import tempfile
     import torch
     import torch.utils.data
+    torch.set_num_threads(max(1, min(len(os.sched_getaffinity(0)), config.MAX_CORES)))  # taskset budget
 
     config.assert_writable(model, force)
     if config.EQNET_DIR not in sys.path:
         sys.path.insert(0, config.EQNET_DIR)
     import eqnet  # noqa: F401
     from eqnet.data import SeismicTraceIterableDataset
-    from eqnet.utils import detect_peaks, extract_picks, extract_events
 
     min_prob = config.PNPLUS_MIN_PROB if min_prob is None else min_prob
     highpass = config.PNPLUS_HIGHPASS if highpass is None else highpass
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    if device == "cpu":
+        print("  ! WARNING: CUDA not available — PhaseNet+ inference on CPU (much slower).")
     base_dir = config.CONTINUOUS
     out_dir = config.picks_dir(model, year)
     raw_dir = config.phasenet_plus_raw_dir(model, year)
@@ -186,10 +278,7 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
     os.makedirs(raw_dir, exist_ok=True)
 
     print(f"[detection/phasenet_plus] year={year} device={device} min_prob={min_prob} highpass={highpass}")
-    net = eqnet.models.__dict__["phasenet_plus"].build_model(backbone="unet", in_channels=1, out_channels=3)
-    ckpt = torch.load(config.EQNET_WEIGHTS, map_location="cpu", weights_only=False)  # trusted local file
-    net.load_state_dict(ckpt["model"], strict=True)
-    net.to(torch.device(device)).eval()
+    net = _load_pnplus(device)
 
     if stations is None:
         stations = discover_stations(base_dir, year)
@@ -229,33 +318,11 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
             picks_all, events_all = [], []
             with torch.inference_mode():
                 for meta in loader:
-                    output = net(meta)                      # model moves data to its device
-                    meta, output = _pnplus_postprocess(meta, output)
-                    dt = meta["dt_s"]
-                    phase_scores = torch.softmax(output["phase"], dim=1)
-                    polarity_scores = (
-                        torch.softmax(output["polarity"], dim=1) if output.get("polarity") is not None else None)
-                    topk_scores, topk_inds = detect_peaks(phase_scores, vmin=min_prob, kernel=128, dt=dt.min().item())
-                    phase_picks = extract_picks(
-                        topk_inds, topk_scores,
-                        file_name=meta["file_name"], station_id=meta["station_id"],
-                        begin_time=meta.get("begin_time"), begin_time_index=meta.get("begin_time_index"),
-                        dt=dt, vmin=min_prob, phases=["P", "S"],
-                        polarity_score=polarity_scores, waveform=meta["data"],
-                    )
-                    for p in phase_picks:
+                    r = _pnplus_infer(net, meta, min_prob)
+                    for p in r["picks"]:
                         picks_all.extend(p)
-                    if output.get("event_center") is not None:
-                        ec = torch.sigmoid(output["event_center"])
-                        et = output["event_time"]
-                        es, ei = detect_peaks(ec, vmin=min_prob, kernel=16, dt=dt.min().item() * 16.0)
-                        evs = extract_events(
-                            ei, es, file_name=meta["file_name"], station_id=meta["station_id"],
-                            begin_time=meta.get("begin_time"), begin_time_index=meta.get("begin_time_index"),
-                            dt=dt, vmin=min_prob, event_time=et, waveform=meta["data"],
-                        )
-                        for e in evs:
-                            events_all.extend(e)
+                    for e in r["events"]:
+                        events_all.extend(e)
         finally:
             os.unlink(list_path)
 
@@ -275,6 +342,101 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
     print(f"[detection/phasenet_plus] done: {n_written} daily file(s) written into "
           f"{os.path.relpath(out_dir, config.MODELS)}")
     return out_dir
+
+
+def annotate_phasenet_plus(year, day, station, t0=0.0, t1=600.0, device=None, min_prob=None):
+    """Run PhaseNet+ on one station-day and return its per-sample probability traces for
+    inspection — the PhaseNet+ analogue of SeisBench `model.annotate`. Returns, over the
+    window [t0, t1) seconds from the data start:
+
+        t (s), prob_P, prob_S, prob_noise        phase softmax (channels: 0 noise, 1 P, 2 S)
+        polarity                                  first-motion up-minus-down (>0 up, <0 down)
+        t_event (s), event_prob                   single-station event-detection probability
+        picks, events                             extract_picks/extract_events dicts (windowed)
+        meta                                      {sampling_rate, t0, t1, station, jday, comps}
+
+    Inference runs on the GPU when available. Plot prob_* on `t`; a pick at `phase_index`
+    sits at `phase_index / sampling_rate - t0` seconds on that axis.
+    """
+    import tempfile
+    import numpy as np
+    import torch
+    import torch.utils.data
+    if config.EQNET_DIR not in sys.path:
+        sys.path.insert(0, config.EQNET_DIR)
+    import eqnet  # noqa: F401
+    from eqnet.data import SeismicTraceIterableDataset
+
+    min_prob = config.PNPLUS_MIN_PROB if min_prob is None else min_prob
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    if device == "cpu":
+        print("  ! WARNING: CUDA not available — PhaseNet+ annotate on CPU.")
+    sr = config.SAMPLING_RATE
+    jday = f"{year}.{day:03d}"
+    comps = sorted(glob.glob(f"{config.CONTINUOUS}/{station}/*/*.{jday}"))
+    if not comps:
+        raise FileNotFoundError(f"no waveforms for {station} {jday} under {config.CONTINUOUS}")
+    i0, i1 = int(t0 * sr), int(t1 * sr)
+    n = i1 - i0
+    EV_SCALE = 16
+    e0, e1 = i0 // EV_SCALE, i1 // EV_SCALE
+
+    P = np.zeros(n, np.float32); S = np.zeros(n, np.float32); N = np.zeros(n, np.float32)
+    POL = np.full(n, np.nan, np.float32)
+    EV = np.zeros(max(0, e1 - e0), np.float32)
+    picks, events = [], []
+
+    net = _load_pnplus(device)
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tf:
+        tf.write(",".join(comps))
+        list_path = tf.name
+    try:
+        dataset = SeismicTraceIterableDataset(
+            data_path="", data_list=list_path, format="mseed", dataset="seismic_trace",
+            training=False, sampling_rate=sr, highpass_filter=config.PNPLUS_HIGHPASS,
+            cut_patch=False, nt=config.PNPLUS_NT)
+        dataset.cut_patch = True
+        loader = torch.utils.data.DataLoader(dataset, batch_size=1, num_workers=0)
+        with torch.inference_mode():
+            for meta in loader:
+                bidx = int(meta["begin_time_index"][0]) if meta.get("begin_time_index") is not None else 0
+                npatch = int(meta["nt"])
+                if bidx + npatch <= i0 or bidx >= i1:       # patch outside the window
+                    continue
+                r = _pnplus_infer(net, meta, min_prob)
+                picks += [p for sub in r["picks"] for p in sub]
+                events += [e for sub in r["events"] for e in sub]
+                ph = r["phase"][0].cpu().numpy()             # [3, L, nx=1]
+                L = ph.shape[1]                              # actual patch length (may be < nt)
+                lo, hi = max(i0, bidx), min(i1, bidx + L)    # global-sample overlap with window
+                if hi <= lo:
+                    continue
+                ws, we, ps, pe = lo - i0, hi - i0, lo - bidx, hi - bidx
+                N[ws:we], P[ws:we], S[ws:we] = ph[0, ps:pe, 0], ph[1, ps:pe, 0], ph[2, ps:pe, 0]
+                if r["polarity"] is not None:
+                    pol = r["polarity"][0].cpu().numpy()     # [3, L, nx]
+                    POL[ws:we] = pol[1, ps:pe, 0] - pol[2, ps:pe, 0]
+                if r["event_prob"] is not None:
+                    ep = r["event_prob"][0].cpu().numpy()    # [1, ~L/16, nx]
+                    eb = bidx // EV_SCALE
+                    elo, ehi = max(e0, eb), min(e1, eb + ep.shape[1])
+                    if ehi > elo:
+                        EV[elo - e0:ehi - e0] = ep[0, elo - eb:ehi - eb, 0]
+    finally:
+        os.unlink(list_path)
+
+    # keep only picks/events whose sample index falls in the window
+    def _in_win(d):
+        idx = d.get("phase_index", d.get("event_index"))
+        return idx is not None and i0 <= int(idx) < i1
+    picks = [p for p in picks if _in_win(p)]
+    events = [e for e in events if e.get("event_index") is None or i0 <= int(e["event_index"]) < i1]
+
+    return dict(
+        t=np.arange(n) / sr, prob_P=P, prob_S=S, prob_noise=N, polarity=POL,
+        t_event=(np.arange(len(EV)) * EV_SCALE) / sr, event_prob=EV,
+        picks=picks, events=events,
+        meta=dict(sampling_rate=sr, t0=t0, t1=t1, station=station, jday=jday, comps=comps))
 
 
 # ============================================================ association (2)
