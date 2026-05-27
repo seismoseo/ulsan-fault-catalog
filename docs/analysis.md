@@ -29,8 +29,14 @@ All three are **PARAMS-driven** (edit the first cell, re-run) and `model`-parame
 - `flag_blasts(summary, day_frac_min=0.75, alpha=0.01, peak_in_day=(6,18), …)` → adds `is_blast`.
 - `decluster(df, summary, keep_noise=True)` → events not in flagged-blast clusters.
 
-**Maps** (PyGMT unless noted) — `plot_faults`/`plot_faults_mpl`, `epicenter_map`, `hour_map` (cyclic cmap
-on `hour_kst`), `map_by_cluster` (matplotlib), `error_ellipse_map`/`error_section` (matplotlib).
+**Spatial residual-blast mask** (catches quarry shots left as noise) — `grid_blast_stats(df, cell_deg=0.02)`
+(per-cell hour-of-day stats), `flag_blast_cells(grid, n_min=10, day_frac_min=0.80, alpha=0.01)` (→
+`is_quarry_cell`), `decluster_spatial(df, grid)` (drop daytime events in quarry cells), `decluster_full(df,
+summary, …)` (cluster-level then spatial), `blast_grid_map(df, …)` (gridded daytime-fraction + flagged cells).
+
+**Maps** (PyGMT unless noted) — `plot_faults`/`plot_faults_mpl`, `coast_mpl`/`coast_mpl_km` (cartopy 10m
+coastline for matplotlib maps), `epicenter_map`, `hour_map` (cyclic cmap on `hour_kst`), `map_by_cluster`
+(matplotlib), `error_ellipse_map(…, erh_max=None)`/`error_section` (matplotlib).
 
 **`.prt` error ellipses** — `parse_prt`, `load_prt_errors`, `attach_prt_errors`, `error_ellipse`,
 `error_ellipse_map`, `error_section` (see below).
@@ -47,6 +53,15 @@ falls in daytime. Tectonic clusters are deeper and ~uniform/night-leaning — co
 Outputs a **declustered catalog** (blast clusters removed, noise kept as background) + a per-cluster
 summary. Empirically (stead, mcs=30): 36 clusters / 24 blasts; 16,771 → ~11,065 events; daytime
 fraction 0.64 → 0.47. The before/after epicenter **and cyclic hour-of-day maps** confirm the removal.
+
+**Spatial residual-blast mask (§9b).** Cluster-level declustering misses diffuse quarry blasts that HDBSCAN
+labels **noise** (sparse daytime shots — still obvious on the hour-of-day map). Since a quarry is a fixed
+location, grid the region (`CELL_DEG=0.02°`), flag **quarry cells** (`n≥10`, daytime_frac>0.80, Rayleigh
+p<0.01), and drop the **daytime** events there (clustered or noise) → `catalog_*_blastclean.csv`.
+Empirically: 22 quarry cells, +302 events removed (**295 = 98% from noise**), 11,065 → 10,763, daytime
+fraction 0.473 → 0.458, and **0 events removed from the subregion** (the east-of-fault zone is blast-free).
+The flag is daytime-fraction + Rayleigh only (weekend_ratio reported, not gating); it does **not** require
+shallow depth — residual blasts are reported deep (~9 km median) but avoid weekends (ratio ~0.56).
 
 ## 2 — East-of-fault subregion seismicity (`04`)
 

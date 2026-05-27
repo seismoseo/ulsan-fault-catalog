@@ -165,6 +165,103 @@ def decluster(df, summary, label_col="cluster", keep_noise=True):
     return df[mask].copy()
 
 
+# ----------------------------------------- spatial residual-blast (quarry-cell) mask
+# Cluster-level declustering misses quarry blasts that HDBSCAN leaves as NOISE (diffuse
+# daytime shots that never form a dense cluster). A quarry is a FIXED LOCATION, so we grid
+# the region, find cells whose hour-of-day is daytime-concentrated + non-uniform ("quarry
+# cells"), and drop the daytime events there (clustered or noise). NOTE: residual blasts are
+# reported deep (median ~9 km) but avoid weekends — so the flag does NOT require shallow depth.
+def _cell_index(df, cell_deg, reg):
+    gi = np.floor((df["lon"] - reg[0]) / cell_deg).astype(int)
+    gj = np.floor((df["lat"] - reg[2]) / cell_deg).astype(int)
+    return gi, gj
+
+
+def grid_blast_stats(df, cell_deg=0.02, reg=REGION, kst=KST, day=(6, 17), label_col="cluster"):
+    """Per spatial-cell hour-of-day stats over `reg` (lon/lat grid, `cell_deg`°). Columns:
+    gi, gj, lon_c, lat_c, n, n_noise, daytime_frac (06-18 KST), rayleigh_p, peak_hour,
+    median_depth, weekend_ratio. `df` needs hour/dow (add_kst_columns)."""
+    if "hour" not in df.columns:
+        df = add_kst_columns(df, kst)
+    d = df[df["lon"].between(reg[0], reg[1]) & df["lat"].between(reg[2], reg[3])].copy()
+    d["gi"], d["gj"] = _cell_index(d, cell_deg, reg)
+    rows = []
+    for (gi, gj), g in d.groupby(["gi", "gj"]):
+        rt = rayleigh_test(g["hour"].values)
+        rows.append(dict(
+            gi=int(gi), gj=int(gj),
+            lon_c=reg[0] + (gi + 0.5) * cell_deg, lat_c=reg[2] + (gj + 0.5) * cell_deg,
+            n=int(len(g)), n_noise=int((g[label_col] == -1).sum()) if label_col in g else 0,
+            daytime_frac=float(g["hour"].between(day[0], day[1]).mean()),
+            rayleigh_p=rt["p"], peak_hour=rt["peak_hour"],
+            median_depth=float(g["depth"].median()),
+            weekend_ratio=float((g["dow"] >= 5).mean() / (2.0 / 7.0)),
+        ))
+    return pd.DataFrame(rows)
+
+
+def flag_blast_cells(grid, n_min=10, day_frac_min=0.80, alpha=0.01, peak_in_day=(6, 18)):
+    """Add `is_quarry_cell` = n>=n_min & daytime_frac>day_frac_min & rayleigh_p<alpha & peak
+    in daytime. (weekend_ratio is reported in `grid` for transparency but does NOT gate.)"""
+    g = grid.copy()
+    g["is_quarry_cell"] = (
+        (g["n"] >= n_min) & (g["daytime_frac"] > day_frac_min) & (g["rayleigh_p"] < alpha)
+        & (g["peak_hour"] >= peak_in_day[0]) & (g["peak_hour"] < peak_in_day[1])
+    )
+    return g
+
+
+def decluster_spatial(df, grid, cell_deg=0.02, reg=REGION, kst=KST, daytime=(6, 17)):
+    """Drop DAYTIME (06-18 KST) events that fall in a flagged quarry cell; night events in
+    those cells are kept. Returns the cleaned df."""
+    if "hour" not in df.columns:
+        df = add_kst_columns(df, kst)
+    quarry = set(zip(grid.loc[grid["is_quarry_cell"], "gi"],
+                     grid.loc[grid["is_quarry_cell"], "gj"]))
+    gi, gj = _cell_index(df, cell_deg, reg)
+    in_quarry = pd.Series(list(zip(gi, gj)), index=df.index).isin(quarry)
+    drop = in_quarry & df["hour"].between(daytime[0], daytime[1])
+    return df[~drop].copy()
+
+
+def decluster_full(df, summary, cell_deg=0.02, reg=REGION, kst=KST, daytime=(6, 17),
+                   n_min=10, day_frac_min=0.80, alpha=0.01, keep_noise=True):
+    """Cluster-level decluster THEN the spatial quarry-cell mask. Returns (clean_df, grid)."""
+    d = decluster(df, summary, keep_noise=keep_noise)
+    grid = flag_blast_cells(grid_blast_stats(d, cell_deg, reg, kst), n_min, day_frac_min, alpha)
+    return decluster_spatial(d, grid, cell_deg, reg, kst, daytime), grid
+
+
+def blast_grid_map(df, reg=REGION, cell_deg=0.02, kst=KST, n_min=10, day_frac_min=0.80,
+                   alpha=0.01, subregion=SUBREGION, fault_trace=FAULT_TRACE, ax=None):
+    """matplotlib pcolormesh of per-cell daytime fraction; flagged quarry cells outlined red,
+    cells with n<n_min greyed; faults + subregion box + coastline overlaid."""
+    import matplotlib.pyplot as plt
+    grid = flag_blast_cells(grid_blast_stats(df, cell_deg, reg, kst), n_min, day_frac_min, alpha)
+    ni = int(np.ceil((reg[1] - reg[0]) / cell_deg)); nj = int(np.ceil((reg[3] - reg[2]) / cell_deg))
+    Z = np.full((nj, ni), np.nan)
+    for r in grid.itertuples():
+        if 0 <= r.gj < nj and 0 <= r.gi < ni and r.n >= n_min:
+            Z[r.gj, r.gi] = r.daytime_frac
+    xe = reg[0] + np.arange(ni + 1) * cell_deg
+    ye = reg[2] + np.arange(nj + 1) * cell_deg
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 8), dpi=120)
+    pm = ax.pcolormesh(xe, ye, Z, cmap="coolwarm", vmin=0, vmax=1, zorder=1)
+    plt.colorbar(pm, ax=ax, label="daytime fraction (06–18 KST)", shrink=0.8)
+    coast_mpl(ax, reg, color="0.35", zorder=2.5)
+    plot_faults_mpl(ax, fault_trace, color="k", lw=0.7, zorder=2)
+    for r in grid[grid["is_quarry_cell"]].itertuples():     # outline quarry cells
+        ax.add_patch(plt.Rectangle((reg[0] + r.gi * cell_deg, reg[2] + r.gj * cell_deg),
+                                   cell_deg, cell_deg, fill=False, edgecolor="red", lw=1.3, zorder=3))
+    if subregion is not None:
+        bl, ba = _subregion_box(subregion); ax.plot(bl, ba, "b-", lw=1.5, zorder=4)
+    ax.set(xlim=reg[:2], ylim=reg[2:], xlabel="longitude", ylabel="latitude",
+           title=f"daytime-fraction grid (red = {int(grid.is_quarry_cell.sum())} quarry cells)")
+    ax.set_aspect("equal", "box")
+    return ax.figure
+
+
 # --------------------------------------------------------------- map utilities
 def read_fault_segments(fault_trace=FAULT_TRACE):
     """GMT multi-segment fault file -> list of (n,2) [lat, lon] arrays (segments split by '>')."""
@@ -210,6 +307,52 @@ def plot_faults_mpl(ax, fault_trace=FAULT_TRACE, **kw):
     kw = dict(dict(color="0.3", lw=0.5, zorder=1), **kw)
     for s in read_fault_segments(fault_trace):
         ax.plot(s[:, 1], s[:, 0], **kw)
+
+
+# ---- coastlines for matplotlib maps (cartopy 10m; matches the PyGMT fig.coast maps) ----
+_COAST_CACHE: dict = {}
+
+
+def _coast_segments(reg, pad=0.1):
+    """10m coastline (cartopy NaturalEarth) clipped to `reg` (±pad°) as a list of (n,2)
+    [lon,lat] arrays. Cached per region. Returns [] gracefully if cartopy/the cached
+    shapefile is unavailable (so maps still render). Only the coastLINE is used — the 10m
+    land/ocean polygons are not cached and would trigger a download."""
+    key = tuple(np.round(reg, 3))
+    if key in _COAST_CACHE:
+        return _COAST_CACHE[key]
+    segs = []
+    try:
+        import cartopy.feature as cf
+        from shapely.geometry import box
+        bb = box(reg[0] - pad, reg[2] - pad, reg[1] + pad, reg[3] + pad)
+        for g in cf.NaturalEarthFeature("physical", "coastline", "10m").geometries():
+            if not g.intersects(bb):
+                continue
+            clip = g.intersection(bb)
+            for p in getattr(clip, "geoms", [clip]):
+                xy = np.asarray(p.coords)
+                if len(xy) >= 2:
+                    segs.append(xy)
+    except Exception as exc:                                # noqa: BLE001
+        print(f"[coast] coastline unavailable ({exc}); skipping")
+    _COAST_CACHE[key] = segs
+    return segs
+
+
+def coast_mpl(ax, reg, color="0.5", lw=0.6, zorder=0.5, **kw):
+    """Draw the 10m coastline on a lon/lat matplotlib Axes (beneath the data)."""
+    for s in _coast_segments(reg):
+        ax.plot(s[:, 0], s[:, 1], color=color, lw=lw, zorder=zorder, **kw)
+
+
+def coast_mpl_km(ax, reg, transformer, color="0.5", lw=0.6, zorder=0.5, **kw):
+    """Draw the 10m coastline on a local E–N km Axes, transforming lon/lat via `transformer`
+    (the pyproj Transformer returned by to_cartesian_km)."""
+    for s in _coast_segments(reg):
+        cx, cy = transformer.transform(s[:, 0], s[:, 1])
+        ax.plot(np.asarray(cx) / 1000, np.asarray(cy) / 1000, color=color, lw=lw,
+                zorder=zorder, **kw)
 
 
 def _subregion_box(subregion):
@@ -266,10 +409,11 @@ def map_by_cluster(df, reg, title, label_col="cluster", subregion=SUBREGION,
     import matplotlib.pyplot as plt
     if ax is None:
         _, ax = plt.subplots(figsize=(7, 7), dpi=120)
+    coast_mpl(ax, reg)
     plot_faults_mpl(ax, fault_trace)
     noise = df[df[label_col] == -1]
     clus = df[df[label_col] != -1]
-    ax.scatter(noise["lon"], noise["lat"], s=s * 0.6, c=noise_color, lw=0,
+    ax.scatter(noise["lon"], noise["lat"], s=s * 0.5, c=noise_color, lw=0, alpha=0.4,
                label=f"noise ({len(noise)})", zorder=2)
     if len(clus):
         ax.scatter(clus["lon"], clus["lat"], s=s, c=clus[label_col].values, cmap="tab20",
@@ -423,19 +567,23 @@ def error_ellipse(cov_ee, cov_en, cov_nn, confidence=0.95):
 
 
 def error_ellipse_map(df, reg, title, confidence=0.95, color_by="erh", max_events=None,
-                      sta=None, fault_trace=FAULT_TRACE, subregion=SUBREGION, lw=0.6):
+                      erh_max=None, sta=None, fault_trace=FAULT_TRACE, subregion=SUBREGION, lw=0.6):
     """Per-event horizontal confidence ellipses on a true-shape local E-N km frame
-    (events/faults/stations transformed via to_cartesian_km). `color_by` in df (erh/depth)."""
+    (events/faults/stations transformed via to_cartesian_km). `color_by` in df (erh/depth).
+    `erh_max` (km): keep only well-located events with ERH <= erh_max."""
     import matplotlib.pyplot as plt
     import matplotlib as mpl
     from matplotlib.patches import Ellipse
     from matplotlib.collections import PatchCollection
     d = df.dropna(subset=["cov_ee", "cov_nn", "cov_en"]).copy()
     d = d[d.lon.between(reg[0], reg[1]) & d.lat.between(reg[2], reg[3])]
+    if erh_max is not None:
+        d = d[d["erh"] <= erh_max]
     if max_events and len(d) > max_events:
         d = d.sample(max_events, random_state=0)
     d, T = to_cartesian_km(d)
     fig, ax = plt.subplots(figsize=(8, 8), dpi=120)
+    coast_mpl_km(ax, reg, T)
     for seg in read_fault_segments(fault_trace):
         fx, fy = T.transform(seg[:, 1], seg[:, 0])
         ax.plot(np.asarray(fx) / 1000, np.asarray(fy) / 1000, color="0.45", lw=0.5, zorder=1)
@@ -450,7 +598,8 @@ def error_ellipse_map(df, reg, title, confidence=0.95, color_by="erh", max_event
     norm = mpl.colors.Normalize(vmin=np.nanpercentile(vals, 5), vmax=np.nanpercentile(vals, 95))
     cmap = plt.get_cmap("magma_r" if color_by == "erh" else "viridis_r")
     ax.add_collection(PatchCollection(patches, facecolors="none",
-                                      edgecolors=cmap(norm(vals)), linewidths=lw, alpha=0.7))
+                                      edgecolors=cmap(norm(vals)), linewidths=lw, alpha=0.7,
+                                      zorder=3))
     sta = STA if sta is None else sta
     if len(sta):
         sx, sy = T.transform(sta.Longitude.values, sta.Latitude.values)
@@ -464,8 +613,9 @@ def error_ellipse_map(df, reg, title, confidence=0.95, color_by="erh", max_event
     sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
     plt.colorbar(sm, ax=ax, label=color_by, shrink=0.8)
     ax.set_aspect("equal")
+    q = f", ERH≤{erh_max} km" if erh_max is not None else ""
     ax.set(xlabel="E (km)", ylabel="N (km)",
-           title=f"{title} — {int(confidence*100)}% error ellipses (n={len(patches)})")
+           title=f"{title} — {int(confidence*100)}% error ellipses{q} (n={len(patches)})")
     fig.tight_layout()
     return fig
 

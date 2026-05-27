@@ -118,6 +118,13 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
   hour-of-day **quarry-blast discrimination** (writes a declustered catalog), an **east-of-fault subregion**
   long-term-seismicity study, and **95% HYPOINVERSE error ellipses** parsed from the `.prt` covariance.
   `uf_cluster.py` is tracked; the notebooks + their CSV/HTML outputs are gitignored.
+- **Residual quarry blasts** survive cluster-level declustering as HDBSCAN **noise** (diffuse daytime shots).
+  A second-stage **spatial daytime-fraction grid mask** (`grid_blast_stats`/`flag_blast_cells`/
+  `decluster_spatial`/`decluster_full`; cell 0.02°, N≥10, daytime_frac>0.80, Rayleigh p<0.01) removes daytime
+  events in flagged "quarry cells" → `catalog_*_blastclean.csv`. Empirically (stead): 22 cells, +302 events
+  (295 from noise), 11,065→10,763, daytime frac 0.473→0.458, and **0 subregion events** (east-of-fault zone is
+  blast-free). Residual blasts are reported **deep** (~9 km) but **avoid weekends** — so the flag does NOT
+  require shallow depth.
 - **#1 gap**: HYPOINVERSE `.sum` `MAG` column is empty → no magnitudes ⇒ no FMD/Mc/b-value yet. Top TODO:
   compute **Md** (coda duration via HYPOINVERSE) or **ML** (Wood–Anderson amplitudes + station corrections).
 - Later: 3-picker comparison once re-runs finish; **HypoDD** relative relocation.
@@ -140,3 +147,8 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
   QC-excluded so harmless); origin seconds can be negative; longitude carries an `E`/`W` letter. A few
   2023 events lack `.prt` covariance because the filtered `.sum` and `UF2023.prt` are from different runs
   (~0.4 s / ~1 km apart) — left unmatched (≈99.9% coverage). Parser/maps in `uf_cluster.py`.
+- **matplotlib maps draw coastlines** via `uf_cluster.coast_mpl`/`coast_mpl_km` (cartopy 0.25 NaturalEarth
+  10m, lon/lat or local-km frame) to match the PyGMT `fig.coast` maps. Only the coastline **line** is used —
+  the 10m land/ocean polygons aren't cached and would trigger a download (helpers degrade gracefully if the
+  cache is missing). Z-order on every map: coast 0.5 < faults 1 < noise 2 (small + translucent) < clusters /
+  seismicity 3 < subregion box 4–5, so clusters always render above the noise background.
