@@ -130,8 +130,10 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
   for the deep residual blasts that depth can't catch. Notebook 03 also **maps the final blast-clean catalog**
   (§9c: epicenter + cyclic hour-of-day) and includes a **grid-only-vs-two-step robustness check** (§9d, compared
   by catalog index; the two-step is kept — grid-only on the full catalog raises subregion false-positives).
-  Notebook 04 defaults to the blast-clean catalog (`USE_BLASTCLEAN=True`) and adds **per-year subregion
-  small-multiples** (`uf.annual_maps`, epicenters + density) for year-to-year spatial comparison.
+  Notebook 04 defaults to the blast-clean catalog (`USE_BLASTCLEAN=True`) and adds a wide cumulative-count
+  curve (§3b) + **per-year subregion small-multiples** (`uf.annual_maps`, depth-coloured epicenters + density
+  normalised **per-year** so quiet years aren't washed out — colorbar = fraction of that year's peak; edge-only
+  ticks). Single equal-aspect maps height-match their colorbar via `uf._match_cbar`.
 - **#1 gap**: HYPOINVERSE `.sum` `MAG` column is empty → no magnitudes ⇒ no FMD/Mc/b-value yet. Top TODO:
   compute **Md** (coda duration via HYPOINVERSE) or **ML** (Wood–Anderson amplitudes + station corrections).
 - Later: 3-picker comparison once re-runs finish; **HypoDD** relative relocation.

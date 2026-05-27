@@ -43,8 +43,11 @@ summary, …, weekend_max=None)` (cluster-level then spatial), `blast_grid_map(d
 
 **Maps** (PyGMT unless noted) — `plot_faults`/`plot_faults_mpl`, `coast_mpl`/`coast_mpl_km` (cartopy 10m
 coastline for matplotlib maps), `epicenter_map`, `hour_map` (cyclic cmap on `hour_kst`), `map_by_cluster`
-(matplotlib), `annual_maps(df, reg, kind="scatter"|"density", …)` (per-year small-multiples, shared colour
-scale), `error_ellipse_map(…, erh_max=None)`/`error_section` (matplotlib).
+(matplotlib), `annual_maps(df, reg, kind="scatter"|"density", …, density_norm="per_year")` (per-year
+small-multiples — depth-coloured epicenters with a shared scale, or density where `density_norm` is
+`per_year` (each panel ÷ its own annual max, colorbar = fraction of peak) / `shared` / `shared_log`; edge-only
+tick labels), `error_ellipse_map(…, erh_max=None)`/`error_section` (matplotlib). Single equal-aspect maps use
+`_match_cbar` so the colorbar height tracks the map.
 
 **`.prt` error ellipses** — `parse_prt`, `load_prt_errors`, `attach_prt_errors`, `error_ellipse`,
 `error_ellipse_map`, `error_section` (see below).
@@ -85,8 +88,9 @@ whereas the two-step's spatial step removes **0** from the subregion — so the 
 Mask the catalog to the `SUBREGION` box and study long-term patterns on **both** the full and the
 fully-filtered (blast-clean, `USE_BLASTCLEAN=True`) catalog (side-by-side): cumulative + annual/monthly rate,
 depth cross-sections, hour-of-day (histograms + cyclic maps), along-strike PCA migration, inter-event times,
-spatial density, and **per-year small-multiples** (`annual_maps`: epicenters coloured by depth + event
-density, shared scales) for comparing how the spatial distribution evolves year-to-year. Result: only ~3% of
+spatial density, a wide **cumulative-count** curve (§3b, for spotting bursts/rate changes by eye), and
+**per-year small-multiples** (`annual_maps`: depth-coloured epicenters + density where each panel is
+normalised to its own annual max) for comparing how the spatial distribution evolves year-to-year. Result: only ~3% of
 subregion events are blasts (vs 34% region-wide) — the east-of-fault zone is essentially clean tectonic
 seismicity (blasts cluster elsewhere); the choice of declustered vs blast-clean input does not change it
 (0 subregion events removed by the spatial mask). *Magnitude-based stats (FMD/Mc/b-value) are deferred —

@@ -261,7 +261,7 @@ def blast_grid_map(df, reg=REGION, cell_deg=0.02, kst=KST, n_min=10, day_frac_mi
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 8), dpi=120)
     pm = ax.pcolormesh(xe, ye, Z, cmap="coolwarm", vmin=0, vmax=1, zorder=1)
-    plt.colorbar(pm, ax=ax, label="daytime fraction (06–18 KST)", shrink=0.8)
+    _match_cbar(pm, ax, "daytime fraction (06–18 KST)")
     coast_mpl(ax, reg, color="0.35", zorder=2.5)
     plot_faults_mpl(ax, fault_trace, color="k", lw=0.7, zorder=2)
     for r in grid[grid["is_quarry_cell"]].itertuples():     # outline quarry cells
@@ -374,6 +374,14 @@ def _subregion_box(subregion):
     return bl, ba
 
 
+def _match_cbar(mappable, ax, label, size="4.5%", pad=0.1):
+    """Attach a colorbar whose height tracks `ax` (via make_axes_locatable). For equal-aspect
+    maps a default colorbar over/undershoots the map height; this keeps them matched."""
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    cax = make_axes_locatable(ax).append_axes("right", size=size, pad=pad)
+    return ax.figure.colorbar(mappable, cax=cax, label=label)
+
+
 def epicenter_map(df, reg, title, dmax=50.0, subregion=SUBREGION, sta=None,
                   fault_trace=FAULT_TRACE):
     """PyGMT epicenter map coloured by depth (port of catalog_summary `epicenter_map`)."""
@@ -439,28 +447,43 @@ def map_by_cluster(df, reg, title, label_col="cluster", subregion=SUBREGION,
     return ax.figure
 
 
-def _panel_decor(ax, reg, subregion, title):
-    """Shared per-panel framing for small-multiple maps (extent, box, aspect, small fonts)."""
+def _panel_decor(ax, reg, subregion, title, show_x=True, show_y=True):
+    """Shared per-panel framing for small-multiple maps (extent, box, aspect, small fonts).
+    Tick labels are shown only on edge panels (`show_x`/`show_y`) to avoid overlap; both axes
+    are limited to ~3 ticks."""
+    from matplotlib.ticker import MaxNLocator
     if subregion is not None:
         bl, ba = _subregion_box(subregion)
         ax.plot(bl, ba, "b-", lw=1.0, zorder=4)
     ax.set(xlim=reg[:2], ylim=reg[2:])
     ax.set_aspect("equal", "box")
+    ax.xaxis.set_major_locator(MaxNLocator(3))
+    ax.yaxis.set_major_locator(MaxNLocator(3))
     ax.tick_params(labelsize=7)
+    if not show_x:
+        ax.set_xticklabels([])
+    if not show_y:
+        ax.set_yticklabels([])
     ax.set_title(title, fontsize=8)
 
 
 def annual_maps(df, reg, kind="scatter", ncols=5, color_by="depth", bins=30, years=None,
                 subregion=None, fault_trace=FAULT_TRACE, share_clim=True, cmap=None,
-                dmax=None, panel=2.6):
+                dmax=None, panel=2.6, density_norm="per_year"):
     """Small-multiple maps, one panel per calendar year, over `reg` — for comparing the
     temporal variation of the spatial distribution.
 
     `kind="scatter"`: epicenters coloured by `color_by` (e.g. depth), with a shared colour
-    norm across years (`share_clim`). `kind="density"`: per-year `hist2d` (bins×bins over
-    `reg`) with a shared `vmax` across years. Every panel draws the coastline + fault traces
-    (+ optional `subregion` box) with the same z-order as the other maps. Years with no
-    events render as empty framed axes; spare axes are hidden. Returns the figure."""
+    norm across years (`share_clim`). `kind="density"`: per-year 2-D histogram (bins×bins
+    over `reg`); `density_norm` sets the colour scale:
+      - `"per_year"` (default): each panel normalised to its OWN year's max → colorbar is the
+        *fraction of that year's peak* (0–1), so every year's spatial pattern is equally
+        visible (absolute counts NOT comparable across years).
+      - `"shared"`: one shared `vmax` (absolute counts) across all years.
+      - `"shared_log"`: shared log-scaled counts (comparable, lifts quiet years).
+    Every panel draws the coastline + fault traces (+ optional `subregion` box). Tick labels
+    appear only on the left column + bottom row (no overlap). Years with no events render as
+    empty framed axes; spare axes are hidden. Returns the figure."""
     import matplotlib.pyplot as plt
     import matplotlib as mpl
     d = df.copy()
@@ -472,6 +495,10 @@ def annual_maps(df, reg, kind="scatter", ncols=5, color_by="depth", bins=30, yea
                              dpi=120, squeeze=False)
     axes = axes.ravel()
     rng = [reg[:2], reg[2:]]
+    n_last_row = len(years) - ncols      # panels at index >= this are on the bottom content row
+
+    def _edges(i):
+        return dict(show_x=(i >= n_last_row), show_y=(i % ncols == 0))
 
     if kind == "scatter":
         cm = plt.get_cmap(cmap or "viridis_r")
@@ -481,38 +508,47 @@ def annual_maps(df, reg, kind="scatter", ncols=5, color_by="depth", bins=30, yea
             vmax = dmax if dmax is not None else np.nanpercentile(vals, 98)
             norm = mpl.colors.Normalize(vmin=np.nanpercentile(vals, 2), vmax=vmax)
         sc = None
-        for ax, yr in zip(axes, years):
+        for i, (ax, yr) in enumerate(zip(axes, years)):
             coast_mpl(ax, reg)
             plot_faults_mpl(ax, fault_trace)
             g = d[d["_yr"] == yr]
             if len(g):
                 sc = ax.scatter(g["lon"], g["lat"], c=g[color_by], cmap=cm, norm=norm,
                                 s=7, lw=0, zorder=3)
-            _panel_decor(ax, reg, subregion, f"{yr} (n={len(g)})")
+            _panel_decor(ax, reg, subregion, f"{yr} (n={len(g)})", **_edges(i))
         if sc is not None:
             fig.colorbar(sc, ax=axes.tolist(), label=color_by, shrink=0.6)
     elif kind == "density":
         cm = cmap or "hot_r"
-        vmax = dmax
-        if share_clim and vmax is None:
-            mx = 0
-            for yr in years:
-                g = d[d["_yr"] == yr]
-                if len(g):
-                    H, _, _ = np.histogram2d(g["lon"], g["lat"], bins=bins, range=rng)
-                    mx = max(mx, H.max())
-            vmax = mx or None
+        if density_norm == "shared":           # one absolute vmax across years
+            vmax = dmax
+            if vmax is None:
+                vmax = max((np.histogram2d(d[d._yr == y].lon, d[d._yr == y].lat, bins=bins,
+                                           range=rng)[0].max() for y in years if (d._yr == y).any()),
+                           default=0) or None
+            norm = None
+        elif density_norm == "shared_log":
+            norm = mpl.colors.LogNorm(vmin=1, vmax=dmax)
         im = None
-        for ax, yr in zip(axes, years):
+        for i, (ax, yr) in enumerate(zip(axes, years)):
             g = d[d["_yr"] == yr]
             if len(g):
-                im = ax.hist2d(g["lon"], g["lat"], bins=bins, range=rng, cmap=cm,
-                               vmin=0, vmax=vmax, zorder=1)[3]
+                H, xe, ye = np.histogram2d(g["lon"], g["lat"], bins=bins, range=rng)
+                if density_norm == "per_year":
+                    Z = H / H.max() if H.max() > 0 else H
+                    im = ax.pcolormesh(xe, ye, Z.T, cmap=cm, vmin=0, vmax=1, zorder=1)
+                elif density_norm == "shared":
+                    im = ax.pcolormesh(xe, ye, H.T, cmap=cm, vmin=0, vmax=vmax, zorder=1)
+                else:                           # shared_log
+                    im = ax.pcolormesh(xe, ye, np.where(H > 0, H, np.nan).T, cmap=cm,
+                                       norm=norm, zorder=1)
             coast_mpl(ax, reg, color="0.25", zorder=2.5)
-            plot_faults_mpl(ax, fault_trace, color="cyan", lw=0.8, zorder=2)
-            _panel_decor(ax, reg, subregion, f"{yr} (n={len(g)})")
+            plot_faults_mpl(ax, fault_trace, color="cyan", lw=0.4, alpha=0.6, zorder=2)
+            _panel_decor(ax, reg, subregion, f"{yr} (n={len(g)})", **_edges(i))
         if im is not None:
-            fig.colorbar(im, ax=axes.tolist(), label="events / cell", shrink=0.6)
+            lab = {"per_year": "fraction of annual max", "shared": "events / cell",
+                   "shared_log": "events / cell (log)"}[density_norm]
+            fig.colorbar(im, ax=axes.tolist(), label=lab, shrink=0.6)
     else:
         raise ValueError("kind must be 'scatter' or 'density'")
 
@@ -705,9 +741,9 @@ def error_ellipse_map(df, reg, title, confidence=0.95, color_by="erh", max_event
         ax.plot(np.asarray(bx) / 1000, np.asarray(by) / 1000, "b-", lw=1.2, zorder=5)
     cx, cy = T.transform([reg[0], reg[1]], [reg[2], reg[3]])
     ax.set_xlim(cx[0] / 1000, cx[1] / 1000); ax.set_ylim(cy[0] / 1000, cy[1] / 1000)
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
-    plt.colorbar(sm, ax=ax, label=color_by, shrink=0.8)
     ax.set_aspect("equal")
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
+    _match_cbar(sm, ax, color_by)
     q = f", ERH≤{erh_max} km" if erh_max is not None else ""
     ax.set(xlabel="E (km)", ylabel="N (km)",
            title=f"{title} — {int(confidence*100)}% error ellipses{q} (n={len(patches)})")
