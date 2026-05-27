@@ -113,6 +113,11 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
   per-sample P/S/noise probability, first-motion polarity, and single-station event-detection traces
   (the PhaseNet+ analogue of SeisBench `annotate`); used by the rebuilt
   `models/pipeline/notebooks/phasenet_plus_test.ipynb`.
+- **Post-location analysis** (`KS_KG/HypoInv/uf_cluster.py` + notebooks `03_blast_decluster_hdbscan`,
+  `04_subregion_seismicity`, `05_error_ellipses`; see `docs/analysis.md`): 3D HDBSCAN clustering with
+  hour-of-day **quarry-blast discrimination** (writes a declustered catalog), an **east-of-fault subregion**
+  long-term-seismicity study, and **95% HYPOINVERSE error ellipses** parsed from the `.prt` covariance.
+  `uf_cluster.py` is tracked; the notebooks + their CSV/HTML outputs are gitignored.
 - **#1 gap**: HYPOINVERSE `.sum` `MAG` column is empty → no magnitudes ⇒ no FMD/Mc/b-value yet. Top TODO:
   compute **Md** (coda duration via HYPOINVERSE) or **ML** (Wood–Anderson amplitudes + station corrections).
 - Later: 3-picker comparison once re-runs finish; **HypoDD** relative relocation.
@@ -128,3 +133,10 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
   real continuous data, but obspy `merge()` is ~O(n²) ⇒ ~100 s/day). It is processed **losslessly**
   (`config.MAX_SEGMENTS` only logs a warning; `HARD_MAX_SEGMENTS` is the sole skip for a corrupt
   file). The pre-fix run had silently *lost* YSB on those days. Fragmentation is YSB-/2010-specific.
+- **HYPOINVERSE `.prt` errors are 1-σ.** ERH ≈ 1-σ horizontal semi-major and ERZ ≈ √var_Z (verified
+  median ratios ≈ 1.0), so a 95% **joint** horizontal error ellipse needs `k = √χ²₂,₀.₉₅ = 2.448×` the
+  1-σ axes (depth 95% = 1.96·σ_z). `.prt` covariance fields are fixed-width 8-char (slice, don't split —
+  they glue when large); overflow prints `********`→NaN (junk events with 20–99 km errors, all
+  QC-excluded so harmless); origin seconds can be negative; longitude carries an `E`/`W` letter. A few
+  2023 events lack `.prt` covariance because the filtered `.sum` and `UF2023.prt` are from different runs
+  (~0.4 s / ~1 km apart) — left unmatched (≈99.9% coverage). Parser/maps in `uf_cluster.py`.

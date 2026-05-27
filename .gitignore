@@ -47,6 +47,7 @@ KS_KG/HypoInv/*.ipynb
 KS_KG/HypoInv/UF*.sh
 KS_KG/HypoInv/STA/hypoinverse/
 KS_KG/HypoInv/*.csv
+KS_KG/HypoInv/*.html         # notebook outputs (e.g. cluster3d_*.html); uf_cluster.py IS tracked
 KS_KG/models/original/
 KS_KG/models/pipeline/notebooks/
 KS_KG/models/*/*.log
