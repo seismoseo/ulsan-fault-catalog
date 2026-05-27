@@ -26,17 +26,25 @@ All three are **PARAMS-driven** (edit the first cell, re-run) and `model`-parame
 - `add_kst_columns(df, kst=9)` → adds `hour` (0–23), `hour_kst` (continuous), `dow`.
 - `rayleigh_test(hours)` → `{n,R,z,p,peak_hour}` circular non-uniformity (p clamped [0,1]).
 - `cluster_blast_stats(df)` → per-cluster table: n, centroid, median_depth, `daytime_frac`, `rayleigh_R/p`, `peak_hour`, `weekend_ratio`.
-- `flag_blasts(summary, day_frac_min=0.75, alpha=0.01, peak_in_day=(6,18), …)` → adds `is_blast`.
+- `flag_blasts(summary, day_frac_min=0.75, alpha=0.01, peak_in_day=(6,18), …, weekend_max=None)` → adds
+  `is_blast`; `weekend_max` (None = off) optionally also requires `weekend_ratio < weekend_max`.
 - `decluster(df, summary, keep_noise=True)` → events not in flagged-blast clusters.
 
+`weekend_ratio` = (Sat/Sun event fraction) ÷ (2/7): **1.0** = no weekday/weekend preference (tectonic), **<1**
+= avoids weekends (blast-like, ~0.5–0.6 for the residual quarry shots), **>1** = weekend-preferring. Reported
+in the cluster + grid tables; an **optional** blast signal via `weekend_max` (default off — daytime + Rayleigh
+only), useful for the deep residual blasts where depth doesn't help.
+
 **Spatial residual-blast mask** (catches quarry shots left as noise) — `grid_blast_stats(df, cell_deg=0.02)`
-(per-cell hour-of-day stats), `flag_blast_cells(grid, n_min=10, day_frac_min=0.80, alpha=0.01)` (→
-`is_quarry_cell`), `decluster_spatial(df, grid)` (drop daytime events in quarry cells), `decluster_full(df,
-summary, …)` (cluster-level then spatial), `blast_grid_map(df, …)` (gridded daytime-fraction + flagged cells).
+(per-cell hour-of-day stats), `flag_blast_cells(grid, n_min=10, day_frac_min=0.80, alpha=0.01, weekend_max=None)`
+(→ `is_quarry_cell`), `decluster_spatial(df, grid)` (drop daytime events in quarry cells), `decluster_full(df,
+summary, …, weekend_max=None)` (cluster-level then spatial), `blast_grid_map(df, …)` (gridded daytime-fraction
++ flagged cells).
 
 **Maps** (PyGMT unless noted) — `plot_faults`/`plot_faults_mpl`, `coast_mpl`/`coast_mpl_km` (cartopy 10m
 coastline for matplotlib maps), `epicenter_map`, `hour_map` (cyclic cmap on `hour_kst`), `map_by_cluster`
-(matplotlib), `error_ellipse_map(…, erh_max=None)`/`error_section` (matplotlib).
+(matplotlib), `annual_maps(df, reg, kind="scatter"|"density", …)` (per-year small-multiples, shared colour
+scale), `error_ellipse_map(…, erh_max=None)`/`error_section` (matplotlib).
 
 **`.prt` error ellipses** — `parse_prt`, `load_prt_errors`, `attach_prt_errors`, `error_ellipse`,
 `error_ellipse_map`, `error_section` (see below).
@@ -60,16 +68,28 @@ location, grid the region (`CELL_DEG=0.02°`), flag **quarry cells** (`n≥10`, 
 p<0.01), and drop the **daytime** events there (clustered or noise) → `catalog_*_blastclean.csv`.
 Empirically: 22 quarry cells, +302 events removed (**295 = 98% from noise**), 11,065 → 10,763, daytime
 fraction 0.473 → 0.458, and **0 events removed from the subregion** (the east-of-fault zone is blast-free).
-The flag is daytime-fraction + Rayleigh only (weekend_ratio reported, not gating); it does **not** require
-shallow depth — residual blasts are reported deep (~9 km median) but avoid weekends (ratio ~0.56).
+The flag is daytime-fraction + Rayleigh only by default (weekend_ratio reported, not gating — but available
+as the optional `WEEKEND_MAX` knob); it does **not** require shallow depth — residual blasts are reported
+deep (~9 km median) but avoid weekends (ratio ~0.56).
+
+**Final maps + robustness (§9c/§9d).** §9c maps the **fully-filtered blast-clean catalog** (epicenters +
+cyclic hour-of-day) — the downstream product, after both filters (ALL 16,771 → declustered 11,065 →
+blast-clean 10,763). §9d is a **grid-only-vs-two-step robustness check**: it reruns the spatial quarry-cell
+mask on the *full* catalog and compares removals by catalog index. The two approaches agree on the bulk
+(Jaccard ≈ 0.87) and the two-step removes a bit more (dense quarries' night/edge events the daytime-only cell
+mask keeps); but grid-only on the full catalog lights up many more cells and trims ~49 subregion events,
+whereas the two-step's spatial step removes **0** from the subregion — so the **two-step is kept**.
 
 ## 2 — East-of-fault subregion seismicity (`04`)
 
 Mask the catalog to the `SUBREGION` box and study long-term patterns on **both** the full and the
-declustered catalog (side-by-side): cumulative + annual/monthly rate, depth cross-sections, hour-of-day
-(histograms + cyclic maps), along-strike PCA migration, inter-event times, spatial density. Result: only
-~3% of subregion events are blasts (vs 34% region-wide) — the east-of-fault zone is essentially clean
-tectonic seismicity (blasts cluster elsewhere). *Magnitude-based stats (FMD/Mc/b-value) are deferred —
+fully-filtered (blast-clean, `USE_BLASTCLEAN=True`) catalog (side-by-side): cumulative + annual/monthly rate,
+depth cross-sections, hour-of-day (histograms + cyclic maps), along-strike PCA migration, inter-event times,
+spatial density, and **per-year small-multiples** (`annual_maps`: epicenters coloured by depth + event
+density, shared scales) for comparing how the spatial distribution evolves year-to-year. Result: only ~3% of
+subregion events are blasts (vs 34% region-wide) — the east-of-fault zone is essentially clean tectonic
+seismicity (blasts cluster elsewhere); the choice of declustered vs blast-clean input does not change it
+(0 subregion events removed by the spatial mask). *Magnitude-based stats (FMD/Mc/b-value) are deferred —
 the `.sum` magnitude column is empty (#1 gap).*
 
 ## 3 — 95% error ellipses from the HYPOINVERSE `.prt` (`05`)

@@ -138,10 +138,12 @@ def cluster_blast_stats(df, label_col="cluster", kst=KST, day=(6, 17)):
 
 
 def flag_blasts(summary, day_frac_min=0.75, alpha=0.01, peak_in_day=(6, 18),
-                require_shallow=False, shallow_med_km=5.0):
+                require_shallow=False, shallow_med_km=5.0, weekend_max=None):
     """Add `is_blast`: a non-noise cluster that is daytime-concentrated (daytime_frac >
     day_frac_min), statistically non-uniform (rayleigh_p < alpha), and peaks in daytime.
-    Optionally also require a shallow median depth (corroboration)."""
+    Optionally also require a shallow median depth (`require_shallow`) and/or weekend
+    avoidance (`weekend_max`: require weekend_ratio < weekend_max; None = off) as
+    corroborating anthropogenic signals."""
     s = summary.copy()
     is_blast = (
         (s["cluster"] != -1)
@@ -151,6 +153,8 @@ def flag_blasts(summary, day_frac_min=0.75, alpha=0.01, peak_in_day=(6, 18),
     )
     if require_shallow:
         is_blast &= s["median_depth"] < shallow_med_km
+    if weekend_max is not None:
+        is_blast &= s["weekend_ratio"] < weekend_max
     s["is_blast"] = is_blast
     return s
 
@@ -200,14 +204,18 @@ def grid_blast_stats(df, cell_deg=0.02, reg=REGION, kst=KST, day=(6, 17), label_
     return pd.DataFrame(rows)
 
 
-def flag_blast_cells(grid, n_min=10, day_frac_min=0.80, alpha=0.01, peak_in_day=(6, 18)):
+def flag_blast_cells(grid, n_min=10, day_frac_min=0.80, alpha=0.01, peak_in_day=(6, 18),
+                     weekend_max=None):
     """Add `is_quarry_cell` = n>=n_min & daytime_frac>day_frac_min & rayleigh_p<alpha & peak
-    in daytime. (weekend_ratio is reported in `grid` for transparency but does NOT gate.)"""
+    in daytime. `weekend_ratio` is reported in `grid` for transparency and does NOT gate
+    unless `weekend_max` is set (then also require weekend_ratio < weekend_max)."""
     g = grid.copy()
     g["is_quarry_cell"] = (
         (g["n"] >= n_min) & (g["daytime_frac"] > day_frac_min) & (g["rayleigh_p"] < alpha)
         & (g["peak_hour"] >= peak_in_day[0]) & (g["peak_hour"] < peak_in_day[1])
     )
+    if weekend_max is not None:
+        g["is_quarry_cell"] &= g["weekend_ratio"] < weekend_max
     return g
 
 
@@ -225,19 +233,24 @@ def decluster_spatial(df, grid, cell_deg=0.02, reg=REGION, kst=KST, daytime=(6, 
 
 
 def decluster_full(df, summary, cell_deg=0.02, reg=REGION, kst=KST, daytime=(6, 17),
-                   n_min=10, day_frac_min=0.80, alpha=0.01, keep_noise=True):
-    """Cluster-level decluster THEN the spatial quarry-cell mask. Returns (clean_df, grid)."""
+                   n_min=10, day_frac_min=0.80, alpha=0.01, keep_noise=True,
+                   weekend_max=None):
+    """Cluster-level decluster THEN the spatial quarry-cell mask. Returns (clean_df, grid).
+    `weekend_max` (None = off) is forwarded to `flag_blast_cells`."""
     d = decluster(df, summary, keep_noise=keep_noise)
-    grid = flag_blast_cells(grid_blast_stats(d, cell_deg, reg, kst), n_min, day_frac_min, alpha)
+    grid = flag_blast_cells(grid_blast_stats(d, cell_deg, reg, kst),
+                            n_min, day_frac_min, alpha, weekend_max=weekend_max)
     return decluster_spatial(d, grid, cell_deg, reg, kst, daytime), grid
 
 
 def blast_grid_map(df, reg=REGION, cell_deg=0.02, kst=KST, n_min=10, day_frac_min=0.80,
-                   alpha=0.01, subregion=SUBREGION, fault_trace=FAULT_TRACE, ax=None):
+                   alpha=0.01, subregion=SUBREGION, fault_trace=FAULT_TRACE, ax=None,
+                   weekend_max=None):
     """matplotlib pcolormesh of per-cell daytime fraction; flagged quarry cells outlined red,
     cells with n<n_min greyed; faults + subregion box + coastline overlaid."""
     import matplotlib.pyplot as plt
-    grid = flag_blast_cells(grid_blast_stats(df, cell_deg, reg, kst), n_min, day_frac_min, alpha)
+    grid = flag_blast_cells(grid_blast_stats(df, cell_deg, reg, kst),
+                            n_min, day_frac_min, alpha, weekend_max=weekend_max)
     ni = int(np.ceil((reg[1] - reg[0]) / cell_deg)); nj = int(np.ceil((reg[3] - reg[2]) / cell_deg))
     Z = np.full((nj, ni), np.nan)
     for r in grid.itertuples():
@@ -424,6 +437,88 @@ def map_by_cluster(df, reg, title, label_col="cluster", subregion=SUBREGION,
     ax.set(xlim=reg[:2], ylim=reg[2:], xlabel="longitude", ylabel="latitude", title=title)
     ax.set_aspect("equal", "box")
     return ax.figure
+
+
+def _panel_decor(ax, reg, subregion, title):
+    """Shared per-panel framing for small-multiple maps (extent, box, aspect, small fonts)."""
+    if subregion is not None:
+        bl, ba = _subregion_box(subregion)
+        ax.plot(bl, ba, "b-", lw=1.0, zorder=4)
+    ax.set(xlim=reg[:2], ylim=reg[2:])
+    ax.set_aspect("equal", "box")
+    ax.tick_params(labelsize=7)
+    ax.set_title(title, fontsize=8)
+
+
+def annual_maps(df, reg, kind="scatter", ncols=5, color_by="depth", bins=30, years=None,
+                subregion=None, fault_trace=FAULT_TRACE, share_clim=True, cmap=None,
+                dmax=None, panel=2.6):
+    """Small-multiple maps, one panel per calendar year, over `reg` — for comparing the
+    temporal variation of the spatial distribution.
+
+    `kind="scatter"`: epicenters coloured by `color_by` (e.g. depth), with a shared colour
+    norm across years (`share_clim`). `kind="density"`: per-year `hist2d` (bins×bins over
+    `reg`) with a shared `vmax` across years. Every panel draws the coastline + fault traces
+    (+ optional `subregion` box) with the same z-order as the other maps. Years with no
+    events render as empty framed axes; spare axes are hidden. Returns the figure."""
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+    d = df.copy()
+    d["_yr"] = pd.to_datetime(d["time"], utc=True).dt.year
+    if years is None:
+        years = list(range(int(d["_yr"].min()), int(d["_yr"].max()) + 1)) if len(d) else []
+    nrow = int(np.ceil(len(years) / ncols)) if years else 1
+    fig, axes = plt.subplots(nrow, ncols, figsize=(panel * ncols, panel * nrow + 0.4),
+                             dpi=120, squeeze=False)
+    axes = axes.ravel()
+    rng = [reg[:2], reg[2:]]
+
+    if kind == "scatter":
+        cm = plt.get_cmap(cmap or "viridis_r")
+        vals = d[color_by].values
+        norm = None
+        if share_clim and len(vals):
+            vmax = dmax if dmax is not None else np.nanpercentile(vals, 98)
+            norm = mpl.colors.Normalize(vmin=np.nanpercentile(vals, 2), vmax=vmax)
+        sc = None
+        for ax, yr in zip(axes, years):
+            coast_mpl(ax, reg)
+            plot_faults_mpl(ax, fault_trace)
+            g = d[d["_yr"] == yr]
+            if len(g):
+                sc = ax.scatter(g["lon"], g["lat"], c=g[color_by], cmap=cm, norm=norm,
+                                s=7, lw=0, zorder=3)
+            _panel_decor(ax, reg, subregion, f"{yr} (n={len(g)})")
+        if sc is not None:
+            fig.colorbar(sc, ax=axes.tolist(), label=color_by, shrink=0.6)
+    elif kind == "density":
+        cm = cmap or "hot_r"
+        vmax = dmax
+        if share_clim and vmax is None:
+            mx = 0
+            for yr in years:
+                g = d[d["_yr"] == yr]
+                if len(g):
+                    H, _, _ = np.histogram2d(g["lon"], g["lat"], bins=bins, range=rng)
+                    mx = max(mx, H.max())
+            vmax = mx or None
+        im = None
+        for ax, yr in zip(axes, years):
+            g = d[d["_yr"] == yr]
+            if len(g):
+                im = ax.hist2d(g["lon"], g["lat"], bins=bins, range=rng, cmap=cm,
+                               vmin=0, vmax=vmax, zorder=1)[3]
+            coast_mpl(ax, reg, color="0.25", zorder=2.5)
+            plot_faults_mpl(ax, fault_trace, color="cyan", lw=0.8, zorder=2)
+            _panel_decor(ax, reg, subregion, f"{yr} (n={len(g)})")
+        if im is not None:
+            fig.colorbar(im, ax=axes.tolist(), label="events / cell", shrink=0.6)
+    else:
+        raise ValueError("kind must be 'scatter' or 'density'")
+
+    for ax in axes[len(years):]:
+        ax.axis("off")
+    return fig
 
 
 # ============================================================================

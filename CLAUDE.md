@@ -123,8 +123,15 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
   `decluster_spatial`/`decluster_full`; cell 0.02°, N≥10, daytime_frac>0.80, Rayleigh p<0.01) removes daytime
   events in flagged "quarry cells" → `catalog_*_blastclean.csv`. Empirically (stead): 22 cells, +302 events
   (295 from noise), 11,065→10,763, daytime frac 0.473→0.458, and **0 subregion events** (east-of-fault zone is
-  blast-free). Residual blasts are reported **deep** (~9 km) but **avoid weekends** — so the flag does NOT
-  require shallow depth.
+  blast-free). Residual blasts are reported **deep** (~9 km) but **avoid weekends** — `weekend_ratio` =
+  (Sat/Sun fraction)÷(2/7) (1.0 = no preference, <1 = weekday-only/blast-like). It is **reported** in the
+  cluster + grid tables and is an **optional gate** (`flag_blasts`/`flag_blast_cells`/`decluster_full`/notebook-03
+  `WEEKEND_MAX`, default **off** — daytime + Rayleigh only); enable (e.g. <0.7) to also demand weekend-avoidance
+  for the deep residual blasts that depth can't catch. Notebook 03 also **maps the final blast-clean catalog**
+  (§9c: epicenter + cyclic hour-of-day) and includes a **grid-only-vs-two-step robustness check** (§9d, compared
+  by catalog index; the two-step is kept — grid-only on the full catalog raises subregion false-positives).
+  Notebook 04 defaults to the blast-clean catalog (`USE_BLASTCLEAN=True`) and adds **per-year subregion
+  small-multiples** (`uf.annual_maps`, epicenters + density) for year-to-year spatial comparison.
 - **#1 gap**: HYPOINVERSE `.sum` `MAG` column is empty → no magnitudes ⇒ no FMD/Mc/b-value yet. Top TODO:
   compute **Md** (coda duration via HYPOINVERSE) or **ML** (Wood–Anderson amplitudes + station corrections).
 - Later: 3-picker comparison once re-runs finish; **HypoDD** relative relocation.
