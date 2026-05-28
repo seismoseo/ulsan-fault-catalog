@@ -626,6 +626,23 @@ STO
 """
 
 
+def ensure_sta(model):
+    """Ensure models/<model>/HypoInv/STA exists. The repo ships the per-year HYPOINVERSE
+    station files in KS_KG/HypoInv/STA as shared, picker-INDEPENDENT metadata; every model
+    symlinks them (cf. build_original_tree.py). If a model is set up without this link (as
+    phasenet_plus was), HYPOINVERSE finds no stations, rejects every phase as 'UNKNOWN
+    STATION', and locates ~0 events. Idempotent: never overwrites an existing (real or
+    symlinked) STA, so original/stead are untouched. Returns the STA path."""
+    sta = os.path.join(config.hyp_dir(model), "STA")
+    if os.path.lexists(sta):
+        return sta
+    shared = os.path.join(config.ROOT, "HypoInv", "STA")
+    os.makedirs(config.hyp_dir(model), exist_ok=True)
+    os.symlink(shared, sta)
+    print(f"[sta] linked {os.path.relpath(sta, config.MODELS)} -> {shared}")
+    return sta
+
+
 def run_hypoinverse_year(model, year, velmodel=None, force=False):
     """Run hyp1.40 for one year/velocity-model; outputs land in models/<model>/HypoInv/<velmodel>/."""
     import shutil
@@ -635,6 +652,7 @@ def run_hypoinverse_year(model, year, velmodel=None, force=False):
     velmodel = velmodel or config.DEFAULT_VELMODEL
     hd = config.hyp_dir(model)
     region = f"UF{year}"
+    ensure_sta(model)                         # control file reads STA/UF<year>_hyp.sta (must exist)
 
     phs = config.phs_file(model, year)
     if not os.path.exists(phs):
@@ -653,5 +671,15 @@ def run_hypoinverse_year(model, year, velmodel=None, force=False):
         print("---- hyp1.40 stderr (tail) ----\n", proc.stderr[-2000:])
         raise RuntimeError(f"HYPOINVERSE produced no summary file: {sumf}")
     n = sum(1 for _ in open(sumf))
+    # Sanity: a healthy run locates a large fraction of associated events. A near-zero count
+    # almost always means the station file didn't match the PHS (e.g. a missing STA link, see
+    # ensure_sta) — make that loud instead of silently shipping a 1-event catalog.
+    try:
+        n_ev = max(0, sum(1 for _ in open(config.pyocto_events(model, year))) - 1)
+    except OSError:
+        n_ev = None
+    if n_ev and n < max(5, 0.02 * n_ev):
+        print(f"[hypoinverse] !! WARNING: only {n} located of ~{n_ev} associated events for "
+              f"{model} {year} — likely a station-file/PHS mismatch (check STA/{region}_hyp.sta).")
     print(f"[hypoinverse] {n} located events -> {os.path.relpath(sumf, config.MODELS)}")
     return sumf

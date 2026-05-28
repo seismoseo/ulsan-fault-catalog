@@ -145,6 +145,13 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
 - `detection_location/2022/picks/` (stead) has ~670 files (a likely double run) — sanity-check.
 - Detection runs all stations into a single per-day GPU `classify()` call; preprocessing is
   parallelized with one reused `forkserver` `ProcessPoolExecutor` (see Performance note above).
+- **Each model's `HypoInv/STA` MUST be a symlink to the shared `KS_KG/HypoInv/STA`** (per-year
+  `UF<year>_hyp.sta` — picker-independent station metadata). `build_original_tree.py` links it for
+  `original`; **phasenet_plus was set up without it**, so HYPOINVERSE rejected every phase as `*** SKIP
+  PHASE CARD WITH UNKNOWN STATION` and located ~0 events/year despite ~15k associated. Fixed:
+  `core.ensure_sta(model)` (called by `run_hypoinverse_year`) auto-creates the symlink, and a low-located-
+  count WARNING now flags such a mismatch instead of silently shipping a 1-event catalog. The symlink is an
+  untracked filesystem artifact (like `original`'s).
 - **YSB is fragmented in 2010** (~142 days stored as tens of thousands of ~5 s miniSEED records —
   real continuous data, but obspy `merge()` is ~O(n²) ⇒ ~100 s/day). It is processed **losslessly**
   (`config.MAX_SEGMENTS` only logs a warning; `HARD_MAX_SEGMENTS` is the sole skip for a corrupt
