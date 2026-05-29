@@ -157,9 +157,20 @@ but the `.arc` residuals were multi-second → wrong travel-time predictions →
 `core.ensure_crh(model, velmodel)` (copies the shared `.crh` into the model's velmodel dir, mirroring
 `ensure_sta` for the station file) + a **median-RMS > 1 s** warning in `run_hypoinverse_year`; all 15 years
 were then re-located. **Post-fix:** filtered median RMS ≈ **0.08 s for both** models; phasenet_plus yields
-**~26k filtered vs stead ~17k** (more sensitive picker → more high-quality events) with the same spatial/
-depth/temporal structure. The unfiltered phasenet_plus `.sum` still carries the expected marginal-
-association tail (few-pick, one-sided), removed by QC.
+**~26k filtered vs stead ~17k** (~1.7×) with the same spatial/depth/temporal structure. The unfiltered
+phasenet_plus `.sum` still carries the expected marginal-association tail (few-pick, one-sided), removed by QC.
+
+**Caveat — the ~1.7× is NOT a controlled sensitivity measurement.** The two pickers run with **different
+detection settings** (`config.py`): stead = SeisBench PhaseNet, `P/S_threshold=0.2`, input **bandpassed
+1–40 Hz** (`preprocess_station`); phasenet_plus = EQNet, `min_prob=0.3` (single), input **raw / no filter**
+(`PNPLUS_HIGHPASS=0.0`). The two models' probability scales are **not comparable** (a "0.3" in EQNet ≠ a
+"0.2" in SeisBench), and the preprocessing differs. Empirically (2020 sample), phasenet_plus emits ~**6× more
+picks/day** than stead *despite* its higher nominal threshold, with a different P/S mix (≈44 % P vs stead's
+≈23 % — i.e. ~12× more P picks, which is what drives the extra associable events); phasenet_plus's pick
+*count* only matches stead's when thresholded near ~0.6. So the larger phasenet_plus catalog reflects **each
+picker under its own settings + preprocessing**, not a like-for-like sensitivity test. A fair comparison
+would harmonise preprocessing and pick a matched operating point (equal false-alarm rate, or count-matched),
+then re-associate/locate — a parameter study, not run here.
 
 ## Reproducing
 
