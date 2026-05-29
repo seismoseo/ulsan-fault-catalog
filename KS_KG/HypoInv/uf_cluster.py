@@ -38,6 +38,76 @@ SHALLOW_KM = 2.0
 UTM52N = "EPSG:32652"                        # Korea ~ UTM zone 52N (metres)
 
 
+# --------------------------------------------------------------- catalog loading
+# HYPOINVERSE .sum quality filter — the confirmed legacy criterion that produced stead's
+# UF{year}_filtered.sum (from the per-year 03.Draw_HypInv_Epicenters_*.ipynb notebooks):
+#     (ERH < 5) & (ERZ < 5) & (GAP < 270) & (NUM > 5)
+# i.e. strict `<` on the error/gap and num>5 (>= 6 picks). Applied identically to every picker
+# model (stead / original / phasenet_plus) so the catalogs are directly comparable, and computed
+# in-pandas from the raw .sum so no precomputed _filtered.sum is needed.
+QC = dict(erh=5.0, erz=5.0, gap=270.0, num=5)
+
+_SUM_COLMAP = [("LAT", "lat"), ("LON", "lon"), ("DEPTH", "depth"), ("NUM", "num"),
+               ("GAP", "gap"), ("RMS", "rms"), ("ERH", "erh"), ("ERZ", "erz"), ("QASR", "qual")]
+
+
+def _col(df, name):
+    """A single column by (stripped) name, taking the first if duplicated — space-padded HYPOINVERSE
+    headers can strip to the same name."""
+    s = df[name]
+    return s.iloc[:, 0] if getattr(s, "ndim", 1) > 1 else s
+
+
+def read_sum(path):
+    """Read one HYPOINVERSE `.sum` (comma-separated, space-padded headers) into a tidy frame:
+    time, lat, lon, depth, num, gap, rms, erh, erz, qual.
+
+    Robust to the overflow rows PhaseNet+ can emit (`********` in a numeric field): every numeric
+    column is coerced (`errors="coerce"`, bad -> NaN), so one junk row survives as NaN (then dropped
+    by `apply_qc`) instead of crashing the whole year — the inline `catalog_summary` loader did a bare
+    `pd.to_timedelta(df['SEC'])` and raised on PhaseNet+ 2018. `qual` keeps the QASR string (1st char
+    is the A/B/C/D quality)."""
+    df = pd.read_csv(path, sep=",")
+    df.columns = df.columns.str.strip()
+    datecol = [c for c in df.columns if c.startswith("DATE")][0]
+    sec = pd.to_numeric(_col(df, "SEC"), errors="coerce")            # coerce overflow / str -> NaN
+    out = pd.DataFrame()
+    out["time"] = (pd.to_datetime(df[datecol], format="%Y/%m/%d %H:%M", errors="coerce")
+                   + pd.to_timedelta(sec, unit="s"))
+    for src, dst in _SUM_COLMAP:
+        s = _col(df, src)
+        out[dst] = s.astype(str).str.strip() if dst == "qual" else pd.to_numeric(s, errors="coerce")
+    return out
+
+
+def apply_qc(df, qc=QC):
+    """Filter a catalog by the legacy quality criterion (`QC`): erh<5, erz<5, gap<270, num>5 (strict
+    `<`; num>5 == >= 6 picks). NaN rows (overflow / unlocated errors) fail every comparison and drop
+    out, which is what we want. Returns a re-indexed copy."""
+    m = ((df["erh"] < qc["erh"]) & (df["erz"] < qc["erz"])
+         & (df["gap"] < qc["gap"]) & (df["num"] > qc["num"]))
+    return df[m].reset_index(drop=True)
+
+
+def load_catalog(sum_dir, years=range(2010, 2025), prefix="UF", filtered=True, qc=QC):
+    """Merge all `{prefix}{year}.sum` under `sum_dir` into one catalog (adds a `year` column),
+    optionally applying the QC filter (`apply_qc`). Config-free: the caller resolves `sum_dir`
+    (e.g. `config.velmodel_dir(model, velmodel)`). Reads the unfiltered `.sum` and filters in-pandas
+    — no precomputed `_filtered.sum` needed, and every model is filtered identically. Returns a
+    DataFrame (empty if no files found)."""
+    frames = []
+    for y in years:
+        p = os.path.join(sum_dir, f"{prefix}{y}.sum")
+        if os.path.exists(p):
+            d = read_sum(p)
+            d["year"] = int(y)
+            frames.append(d)
+    if not frames:
+        return pd.DataFrame()
+    cat = pd.concat(frames, ignore_index=True)
+    return apply_qc(cat, qc) if filtered else cat
+
+
 # --------------------------------------------------------- coordinate transform
 def to_cartesian_km(df, epsg=UTM52N):
     """Add local Cartesian km columns (x_km=E, y_km=N, z_km=depth) via pyproj.

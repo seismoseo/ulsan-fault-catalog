@@ -643,6 +643,32 @@ def ensure_sta(model):
     return sta
 
 
+def ensure_crh(model, velmodel):
+    """Ensure models/<model>/HypoInv/<velmodel>/ holds the crustal-model files
+    `<velmodel>_p.crh` / `<velmodel>_s.crh`. The HYPOINVERSE control reads them at the RELATIVE
+    path '<velmodel>/<velmodel>_p.crh' (cwd = models/<model>/HypoInv), so they must sit beside the
+    located outputs. For `stead` the <velmodel> dir is a symlink to the shared KS_KG/HypoInv/<velmodel>
+    (which contains the .crh); for a model with a REAL <velmodel> output dir (original / phasenet_plus)
+    the .crh are picker-independent and must be copied in — otherwise hyp1.40 prints
+    '*** ERROR - CRUST FILE DOES NOT EXIST' and silently locates every event with its built-in DEFAULT
+    velocity model (→ wrong depths pinned at the ZTR trial, multi-second RMS, diffuse epicenters).
+    Idempotent (copies only missing files). Returns the velmodel dir."""
+    import shutil
+    vmdir = config.velmodel_dir(model, velmodel)
+    os.makedirs(vmdir, exist_ok=True)
+    shared = os.path.join(config.ROOT, "HypoInv", velmodel)
+    for ph in ("p", "s"):
+        name = f"{velmodel}_{ph}.crh"
+        dst = os.path.join(vmdir, name)
+        src = os.path.join(shared, name)
+        if not os.path.exists(dst):
+            if not os.path.exists(src):
+                raise FileNotFoundError(f"shared crustal model missing: {src}")
+            shutil.copy2(src, dst)
+            print(f"[crh] copied {os.path.relpath(dst, config.MODELS)} <- {src}")
+    return vmdir
+
+
 def run_hypoinverse_year(model, year, velmodel=None, force=False):
     """Run hyp1.40 for one year/velocity-model; outputs land in models/<model>/HypoInv/<velmodel>/."""
     import shutil
@@ -660,6 +686,7 @@ def run_hypoinverse_year(model, year, velmodel=None, force=False):
     if shutil.which("hyp1.40") is None:
         raise RuntimeError("hyp1.40 not found on PATH")
     os.makedirs(config.velmodel_dir(model, velmodel), exist_ok=True)
+    ensure_crh(model, velmodel)               # control reads <velmodel>/<velmodel>_{p,s}.crh (must exist)
 
     control = HYP_TEMPLATE.replace("__REGION__", region).replace("__MODEL__", velmodel)
     print(f"[hypoinverse] {model} {year} velmodel={velmodel} (cwd={os.path.relpath(hd, config.MODELS)})")
@@ -681,5 +708,17 @@ def run_hypoinverse_year(model, year, velmodel=None, force=False):
     if n_ev and n < max(5, 0.02 * n_ev):
         print(f"[hypoinverse] !! WARNING: only {n} located of ~{n_ev} associated events for "
               f"{model} {year} — likely a station-file/PHS mismatch (check STA/{region}_hyp.sta).")
+    # Sanity: a healthy local-network run has a sub-0.2 s median RMS. A median RMS of seconds means the
+    # travel-time fit is broken — almost always a WRONG/MISSING crustal model (events still 'locate' on
+    # HYPOINVERSE's default model, with depths pinned at the ZTR trial). ensure_crh prevents the common
+    # missing-.crh case; this catches any residual model/units problem instead of shipping a bad catalog.
+    try:
+        import pandas as _pd
+        _rms = _pd.to_numeric(_pd.read_csv(sumf, sep=",").iloc[:, 11], errors="coerce").median()
+        if _pd.notna(_rms) and _rms > 1.0:
+            print(f"[hypoinverse] !! WARNING: median RMS {_rms:.2f} s for {model} {year} is far too high "
+                  f"— check the crustal model ({velmodel}/{velmodel}_*.crh) and station/phase units.")
+    except Exception:                          # noqa: BLE001 — never let the sanity check break the run
+        pass
     print(f"[hypoinverse] {n} located events -> {os.path.relpath(sumf, config.MODELS)}")
     return sumf

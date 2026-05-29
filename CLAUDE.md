@@ -152,6 +152,17 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
   `core.ensure_sta(model)` (called by `run_hypoinverse_year`) auto-creates the symlink, and a low-located-
   count WARNING now flags such a mismatch instead of silently shipping a 1-event catalog. The symlink is an
   untracked filesystem artifact (like `original`'s).
+- **Each model's `HypoInv/<velmodel>/` MUST contain the crustal model `<velmodel>_{p,s}.crh`.** The HYP
+  control reads them at the relative path `<velmodel>/<velmodel>_p.crh` (cwd = `models/<model>/HypoInv`).
+  For `stead` the `<velmodel>` dir is a symlink to the shared `KS_KG/HypoInv/<velmodel>` (which has the
+  `.crh`); for a model with a REAL output dir (`original`/`phasenet_plus`) the picker-independent `.crh`
+  must be copied in. **phasenet_plus was set up without them**, so hyp1.40 printed `*** ERROR - CRUST FILE
+  DOES NOT EXIST` and **silently located every event on its built-in DEFAULT velocity model** → depths
+  pinned at the `ZTR` trial (~10 km), multi-second RMS, diffuse epicenters (the picks/association/`.phs`
+  were all correct — only the location step was broken). Fixed: `core.ensure_crh(model, velmodel)` (called
+  by `run_hypoinverse_year`) copies the shared `.crh` in, and a **median-RMS > 1 s WARNING** now flags a
+  wrong/missing crustal model instead of shipping a bad catalog. *(This invalidated the first
+  phasenet_plus catalog; re-run after the fix.)*
 - **YSB is fragmented in 2010** (~142 days stored as tens of thousands of ~5 s miniSEED records —
   real continuous data, but obspy `merge()` is ~O(n²) ⇒ ~100 s/day). It is processed **losslessly**
   (`config.MAX_SEGMENTS` only logs a warning; `HARD_MAX_SEGMENTS` is the sole skip for a corrupt

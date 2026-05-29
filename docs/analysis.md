@@ -10,12 +10,28 @@ exploratory and **gitignored** (like all `KS_KG/HypoInv/*.ipynb` and `*.csv`):
 | `03_blast_decluster_hdbscan.ipynb` | 3D HDBSCAN clustering + hour-of-day quarry-blast discrimination → declustered catalog |
 | `04_subregion_seismicity.ipynb`    | East-of-fault ("Ulsan Fault zone") subcatalog + long-term spatiotemporal seismicity |
 | `05_error_ellipses.ipynb`          | 95% location-error ellipses parsed from the HYPOINVERSE `.prt` covariance |
+| `catalog_model_comparison.ipynb`   | stead vs phasenet_plus catalog consistency (counts, maps, depth, time, per-event quality) |
 
 All three are **PARAMS-driven** (edit the first cell, re-run) and `model`-parameterized
 (`stead`/`original`/`phasenet_plus`). They `import uf_cluster as uf` (the module sits beside them in
 `KS_KG/HypoInv/`).
 
 ## `uf_cluster.py` API
+
+**Catalog loading + QC** (the model-agnostic source of truth; used by `catalog_summary` and the
+comparison notebook)
+- `read_sum(path)` → tidy frame (time, lat, lon, depth, num, gap, rms, erh, erz, qual) from one
+  HYPOINVERSE `.sum`. **Robust**: every numeric field is `pd.to_numeric(errors="coerce")`, so a PhaseNet+
+  overflow row (`********` in e.g. `SEC`/`ERH`) becomes NaN instead of crashing the whole year (the old
+  inline loader did a bare `pd.to_timedelta(df['SEC'])` and raised on PhaseNet+ 2018).
+- `QC = dict(erh=5.0, erz=5.0, gap=270.0, num=5)` + `apply_qc(df, qc=QC)` → the **confirmed legacy filter**
+  `(erh<5) & (erz<5) & (gap<270) & (num>5)` (strict `<`; `num>5` ≡ ≥6 picks) that produced stead's
+  `UF{year}_filtered.sum`. NaN rows fail every gate and drop out.
+- `load_catalog(sum_dir, years=range(2010,2025), prefix="UF", filtered=True)` → merge all `UF{y}.sum`
+  under `sum_dir` (+ `year` column), optionally QC-filtered. **Config-free** (caller passes `sum_dir =
+  config.velmodel_dir(model, velmodel)`); filters in-pandas from the raw `.sum`, so **no precomputed
+  `_filtered.sum` is needed** and every picker model is filtered identically (apples-to-apples).
+  (`_filtered.sum` is now legacy/optional; the per-year `03.Draw_*` notebooks that wrote it are superseded.)
 
 **Coordinates / clustering**
 - `to_cartesian_km(df, epsg="EPSG:32652")` → `(df+[x_km,y_km,z_km], transformer)` (Korea ≈ UTM 52N).
@@ -124,6 +140,26 @@ on disk are from slightly different runs (~0.4 s / ~1 km apart) — left unmatch
 
 > `.prt` files are large and **gitignored** (`KS_KG/HypoInv/**/*.prt`); `05` needs them locally at
 > `KS_KG/HypoInv/<velmodel>/UF<year>.prt`.
+
+## 4 — Picker-model comparison: stead vs phasenet_plus (`catalog_model_comparison`)
+
+Loads each model's catalog via `uf.load_catalog` (same robust parse + QC) and compares counts, epicenter
+maps, depth, time, and per-event quality (`num`/`gap`/`erh`/`erz`, QASR), to check the phasenet_plus run is
+consistent with the stead reference.
+
+**Caught a critical bug first.** The initial phasenet_plus HYPOINVERSE run had **no crustal model**: the
+`kim2011_{p,s}.crh` files were missing from `models/phasenet_plus/HypoInv/kim2011/`, so hyp1.40 printed
+`*** ERROR - CRUST FILE DOES NOT EXIST` and **silently located every event on its built-in default velocity
+model** → depths pinned at the `ZTR` trial (~10 km), median **RMS ≈ 3.5 s** (vs stead's 0.08 s), diffuse
+epicenters. Detection, picks, association and the `.phs` were all correct — only the location step was
+broken. Diagnosis trail: pick times for a shared event matched stead to ~0.05 s; the `.phs` cards matched;
+but the `.arc` residuals were multi-second → wrong travel-time predictions → wrong velocity model. Fixed by
+`core.ensure_crh(model, velmodel)` (copies the shared `.crh` into the model's velmodel dir, mirroring
+`ensure_sta` for the station file) + a **median-RMS > 1 s** warning in `run_hypoinverse_year`; all 15 years
+were then re-located. **Post-fix:** filtered median RMS ≈ **0.08 s for both** models; phasenet_plus yields
+**~26k filtered vs stead ~17k** (more sensitive picker → more high-quality events) with the same spatial/
+depth/temporal structure. The unfiltered phasenet_plus `.sum` still carries the expected marginal-
+association tail (few-pick, one-sided), removed by QC.
 
 ## Reproducing
 
