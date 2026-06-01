@@ -136,23 +136,74 @@ def remove_response_to_disp(stream, inventory, *,
     return out
 
 
-def wood_anderson_amp_mm(stream_disp) -> pd.DataFrame:
+def wood_anderson_amp_mm(stream_disp, *,
+                         noise_pre_pad=1.0,
+                         noise_fallback_s=20.0,
+                         signal_min_after_p=0.5) -> pd.DataFrame:
     """Simulate the standard Wood-Anderson seismograph from a displacement stream
-    (output of `remove_response_to_disp`) and return peak amplitude in millimetres.
+    (output of `remove_response_to_disp`) and return peak amplitude in mm
+    **together with a pre-event noise RMS and the resulting SNR**.
 
-    Returns one row per trace: ``network, station, channel, peak_mm, peak_time``."""
+    Windowing:
+      * **noise window** : from trace start to ``(P_pick − noise_pre_pad) s``,
+        falling back to the first ``noise_fallback_s`` seconds of the trace if
+        no P pick header (`SAC.a`) is set.
+      * **signal window**: from ``(P_pick + signal_min_after_p) s`` to the end
+        of the trace. The peak Wood-Anderson amplitude is the max of |WA| inside
+        this window — restricting the search to post-P avoids picking pre-event
+        noise spikes as the "peak" (the v1.0.0 behaviour, which inflated small-
+        event MLs and biased the b-value upward).
+
+    Returns one row per trace with:
+        network, station, channel, peak_mm, peak_time, noise_mm, snr.
+
+    `snr` is the dimensionless ratio ``peak_mm / noise_mm`` (uses the noise RMS
+    converted to mm in the same WA-simulated trace). Use ``snr_threshold`` in
+    the higher-level `per_station_ml` to drop sub-threshold rows before
+    aggregation."""
     rows = []
     for tr in stream_disp:
         wa = tr.copy().simulate(paz_simulate=WOOD_ANDERSON_PAZ)
-        # paz_simulate gives output in metres; convert to mm.
-        a = np.abs(wa.data)
-        if not len(a):
+        data_mm = np.asarray(wa.data, dtype=float) * 1000.0          # m → mm
+        if not len(data_mm):
             continue
-        i = int(np.argmax(a))
+        sr = float(wa.stats.sampling_rate)
+        # Locate the P pick (origin-relative seconds in SAC.a). Convert to a
+        # sample index inside the trace by adding the offset between trace
+        # starttime and reference time. SAC `o` is the reference offset; when
+        # the export wrote picks relative to origin while leaving o=0, the
+        # picks happen to BE relative to starttime (which is what `tr.times()`
+        # is also relative to), so we can use a directly as seconds-from-start.
+        sac = getattr(tr.stats, "sac", {}) or {}
+        p_rel = None
+        if "a" in sac and float(sac["a"]) > -1e4:                     # SAC -12345 sentinel
+            p_rel = float(sac["a"])
+        # Noise window (sample indices) — pre-P, with a small pad
+        if p_rel is not None and p_rel > noise_pre_pad + 0.5:
+            i_noise_end = int((p_rel - noise_pre_pad) * sr)
+        else:
+            i_noise_end = int(noise_fallback_s * sr)
+        i_noise_end = max(min(i_noise_end, len(data_mm)), 4)
+        noise_window = data_mm[:i_noise_end]
+        noise_mm = float(np.sqrt(np.mean(noise_window ** 2))) if len(noise_window) else np.nan
+        # Signal window — post-P only when we have a pick, else from end-of-noise
+        if p_rel is not None:
+            i_sig_start = max(int((p_rel + signal_min_after_p) * sr), i_noise_end)
+        else:
+            i_sig_start = i_noise_end
+        if i_sig_start >= len(data_mm) - 1:
+            continue
+        signal_window = data_mm[i_sig_start:]
+        i_local = int(np.argmax(np.abs(signal_window)))
+        peak_mm = float(np.abs(signal_window[i_local]))
+        peak_idx = i_sig_start + i_local
+        snr = peak_mm / noise_mm if noise_mm and noise_mm > 0 else np.nan
         rows.append(dict(network=tr.stats.network, station=tr.stats.station,
                          channel=tr.stats.channel,
-                         peak_mm=float(a[i]) * 1000.0,
-                         peak_time=wa.stats.starttime + i * wa.stats.delta))
+                         peak_mm=peak_mm,
+                         peak_time=wa.stats.starttime + peak_idx * wa.stats.delta,
+                         noise_mm=noise_mm,
+                         snr=snr))
     return pd.DataFrame(rows)
 
 
@@ -223,13 +274,23 @@ def ml_heo2024(amp_mm, distance_km, component=None):
 
 # --- per-station ML aggregator ---------------------------------------------
 def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
-                   pre_filt=(0.001, 0.005, 50, 100), water_level=60.0) -> pd.DataFrame:
+                   pre_filt=(0.001, 0.005, 50, 100), water_level=60.0,
+                   snr_threshold=3.0) -> pd.DataFrame:
     """For one event directory (per the export tree), compute ML at every station-channel.
 
     Reads all `*.sac` files in `event_dir` (expected layout: one per station-channel,
     written by the prior export notebook). Distance comes from the SAC `dist` header
-    (km, populated at export). Returns a per-trace DataFrame:
-        network, station, channel, dist_km, peak_mm, peak_time, ML.
+    (km, populated at export).
+
+    SNR filtering: each trace's peak Wood-Anderson amplitude is divided by the
+    pre-P-pick RMS noise on the same trace (post-deconvolution); rows with
+    ``snr < snr_threshold`` get ``ML = NaN`` and are dropped from the event-level
+    aggregate (`aggregate_ml`). Default ``snr_threshold = 3.0`` follows Sheen et
+    al. 2018 / Heo et al. 2024 convention. Set to 0 to keep all stations
+    (legacy v1.0.0 behaviour — which inflates ML for noise-dominated traces).
+
+    Returns one row per station-channel:
+        network, station, channel, dist_km, peak_mm, noise_mm, snr, peak_time, ML.
 
     Tip: the calling notebook then aggregates with `df.groupby('station').ML.median()`
     to get one ML per station, and `df.ML.median()` for the event-level ML."""
@@ -252,22 +313,39 @@ def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
         return pd.DataFrame()
     amps["dist_km"] = [dist_for.get((r.network, r.station, r.channel), np.nan)
                        for r in amps.itertuples()]
-    # Use only the channel orientation code (last character) for attenuation_fn
-    amps["ML"] = [attenuation_fn(r.peak_mm, r.dist_km, r.channel[-1])
-                  if r.peak_mm > 0 and np.isfinite(r.dist_km) else np.nan
-                  for r in amps.itertuples()]
-    return amps[["network", "station", "channel", "dist_km", "peak_mm", "peak_time", "ML"]]
+    # Use only the channel orientation code (last character) for attenuation_fn.
+    # Skip ML when SNR is below the threshold (returns NaN; aggregate_ml drops NaNs).
+    def _ml_one(r):
+        if r.peak_mm <= 0 or not np.isfinite(r.dist_km):
+            return np.nan
+        if snr_threshold > 0 and (not np.isfinite(r.snr) or r.snr < snr_threshold):
+            return np.nan
+        return attenuation_fn(r.peak_mm, r.dist_km, r.channel[-1])
+    amps["ML"] = [_ml_one(r) for r in amps.itertuples()]
+    return amps[["network", "station", "channel", "dist_km",
+                 "peak_mm", "noise_mm", "snr", "peak_time", "ML"]]
 
 
 def aggregate_ml(per_station_df) -> dict:
-    """Aggregate per-station MLs into a single event ML. Drops NaNs, takes the median
-    across all available station-channels. Returns a dict with ``ml_median``,
-    ``ml_mean``, ``ml_std``, ``n_used``."""
-    if not len(per_station_df) or per_station_df["ML"].notna().sum() == 0:
-        return dict(ml_median=np.nan, ml_mean=np.nan, ml_std=np.nan, n_used=0)
+    """Aggregate per-station MLs into a single event ML. Drops NaNs (SNR-filtered
+    rows from `per_station_ml`), takes the median across all surviving station-
+    channels. Returns ``ml_median``, ``ml_mean``, ``ml_std``, ``n_used``,
+    plus ``n_total`` (rows before SNR filtering) and ``snr_median`` so callers
+    can see how many stations were dropped vs how many made it into the median."""
+    if not len(per_station_df):
+        return dict(ml_median=np.nan, ml_mean=np.nan, ml_std=np.nan,
+                    n_used=0, n_total=0, snr_median=np.nan)
+    n_total = int(len(per_station_df))
+    snr_med = float(per_station_df["snr"].dropna().median()) \
+              if "snr" in per_station_df.columns and per_station_df["snr"].notna().any() \
+              else float("nan")
     s = per_station_df["ML"].dropna()
+    if not len(s):
+        return dict(ml_median=np.nan, ml_mean=np.nan, ml_std=np.nan,
+                    n_used=0, n_total=n_total, snr_median=snr_med)
     return dict(ml_median=float(s.median()), ml_mean=float(s.mean()),
-                ml_std=float(s.std()), n_used=int(len(s)))
+                ml_std=float(s.std()), n_used=int(len(s)),
+                n_total=n_total, snr_median=snr_med)
 
 
 # --- bulk-catalog ML computation ------------------------------------------
@@ -291,6 +369,7 @@ def _event_dir_for(time_str, event_roots) -> str | None:
 
 def export_ml_catalog(catalog_df, event_roots, inventory, *,
                       attenuation_fn=None, restrict_to_z=False,
+                      snr_threshold=3.0,
                       workers=1, skip_existing=True, out_path=None,
                       progress=True) -> pd.DataFrame:
     """Compute event-level ML for every row of ``catalog_df`` and return the catalog
@@ -348,7 +427,8 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
 
     out = catalog_df.copy()
     for col, default in (("magnitude", np.nan), ("magnitude_std", np.nan),
-                         ("n_used", 0), ("mag_status", "")):
+                         ("n_used", 0), ("n_total", 0),
+                         ("snr_median", np.nan), ("mag_status", "")):
         if col not in out.columns:
             out[col] = default
 
@@ -375,29 +455,37 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
     def _compute_one(i):
         ev_dir = _event_dir_for(out.at[i, "time"], event_roots)
         if ev_dir is None:
-            return i, np.nan, np.nan, 0, "no_dir"
+            return i, np.nan, np.nan, 0, 0, np.nan, "no_dir"
         try:
-            per_sta = per_station_ml(ev_dir, inventory, attenuation_fn=attenuation_fn)
+            per_sta = per_station_ml(ev_dir, inventory,
+                                     attenuation_fn=attenuation_fn,
+                                     snr_threshold=snr_threshold)
             if restrict_to_z and len(per_sta):
                 per_sta = per_sta[per_sta["channel"].str.endswith("Z")]
             agg = aggregate_ml(per_sta)
             if agg["n_used"] == 0:
-                return i, np.nan, np.nan, 0, "no_picks"
-            return i, agg["ml_median"], agg["ml_std"], agg["n_used"], "ok"
+                status = "no_picks" if agg["n_total"] == 0 else "low_snr"
+                return (i, np.nan, np.nan, 0, agg["n_total"], agg["snr_median"], status)
+            return (i, agg["ml_median"], agg["ml_std"], agg["n_used"],
+                    agg["n_total"], agg["snr_median"], "ok")
         except Exception as exc:                          # noqa: BLE001
-            return i, np.nan, np.nan, 0, f"error:{type(exc).__name__}"
+            return i, np.nan, np.nan, 0, 0, np.nan, f"error:{type(exc).__name__}"
 
     def _flush():
         if out_path:
             out.to_csv(out_path, index=False)
 
+    def _apply(idx, ml, std, n, n_tot, snr_med, st):
+        out.at[idx, "magnitude"]     = ml
+        out.at[idx, "magnitude_std"] = std
+        out.at[idx, "n_used"]        = n
+        out.at[idx, "n_total"]       = n_tot
+        out.at[idx, "snr_median"]    = snr_med
+        out.at[idx, "mag_status"]    = st
+
     if workers <= 1:
         for i in todo_iter:
-            _, ml, std, n, st = _compute_one(i)
-            out.at[i, "magnitude"]     = ml
-            out.at[i, "magnitude_std"] = std
-            out.at[i, "n_used"]        = n
-            out.at[i, "mag_status"]    = st
+            _apply(*_compute_one(i))
             if (i + 1) % 200 == 0:
                 _flush()
     else:
@@ -405,11 +493,7 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
             futs = {ex.submit(_compute_one, i): i for i in todo_idx}
             done = 0
             for fut in as_completed(futs):
-                idx, ml, std, n, st = fut.result()
-                out.at[idx, "magnitude"]     = ml
-                out.at[idx, "magnitude_std"] = std
-                out.at[idx, "n_used"]        = n
-                out.at[idx, "mag_status"]    = st
+                _apply(*fut.result())
                 done += 1
                 if progress and hasattr(todo_iter, "update"):
                     todo_iter.update(1)
