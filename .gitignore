@@ -59,3 +59,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .virtual_documents/
+
+# ---- local_magnitudes: master StationXML copied from external source (142 MB) ----
+KS_KG/local_magnitudes/responses/master/
+KS_KG/local_magnitudes/__pycache__/
