@@ -268,3 +268,154 @@ def aggregate_ml(per_station_df) -> dict:
     s = per_station_df["ML"].dropna()
     return dict(ml_median=float(s.median()), ml_mean=float(s.mean()),
                 ml_std=float(s.std()), n_used=int(len(s)))
+
+
+# --- bulk-catalog ML computation ------------------------------------------
+def _event_dir_for(time_str, event_roots) -> str | None:
+    """Locate the event SAC directory matching ``time_str`` (the catalog ``time`` column,
+    'YYYY-MM-DD HH:MM:SS.ms'). Tries each root in ``event_roots`` in order; returns the
+    first existing directory or None. The export convention names directories as
+    YYYYMMDDHHMMSS (no separators, no sub-second precision)."""
+    import re
+    # 2010-01-10 00:14:59.580 → 20100110001459
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})", str(time_str))
+    if not m:
+        return None
+    stem = "".join(m.groups())
+    for root in event_roots:
+        d = os.path.join(root, stem)
+        if os.path.isdir(d):
+            return d
+    return None
+
+
+def export_ml_catalog(catalog_df, event_roots, inventory, *,
+                      attenuation_fn=None, restrict_to_z=False,
+                      workers=1, skip_existing=True, out_path=None,
+                      progress=True) -> pd.DataFrame:
+    """Compute event-level ML for every row of ``catalog_df`` and return the catalog
+    with four new columns:
+
+      * ``magnitude``       — median ML across station-channels (SeismoStats convention).
+      * ``magnitude_std``   — scatter (std) of the per-station MLs.
+      * ``n_used``          — number of station-channels that contributed.
+      * ``mag_status``      — ``"ok"`` | ``"no_dir"`` | ``"no_picks"`` | ``"error:<msg>"``.
+
+    Why ``magnitude`` (not ``ml``)?  So the augmented CSV loads directly into
+    ``seismostats.Catalog`` whose magnitude-aware methods (``estimate_b``,
+    ``estimate_mc_maxc``, ``plot_fmd``, …) expect that column name.
+
+    Parameters
+    ----------
+    catalog_df : pd.DataFrame
+        The HypoInverse catalog. Must have a ``time`` column (string or UTCDateTime-
+        formattable). Other columns are passed through.
+    event_roots : Sequence[str]
+        Ordered list of root directories that hold per-event SAC trees, e.g.
+        ``("event_waveforms_blastclean", "event_waveforms_ulsanfault")``. The first
+        root that contains a matching ``YYYYMMDDHHMMSS/`` dir wins.
+    inventory : obspy.Inventory
+        Merged inventory from ``load_combined_inventory()``.
+    attenuation_fn : callable, default ``ml_heo2024``
+        Distance-attenuation function ``(amp_mm, dist_km, component) -> ML``. The
+        notebook defaults to ``ml_heo2024`` (Southeastern Korea, GHBSN-calibrated).
+    restrict_to_z : bool, default False
+        If True, drop non-vertical channels before aggregating — matches Heo et al.
+        (2024) methodology. Default False keeps all 3 components (Sheen 2018 style).
+    workers : int, default 1
+        ThreadPool worker count for the per-event loop. obspy I/O + numpy releases
+        the GIL so threads parallelise well; processes would re-load the inventory
+        per worker (50+ MB) and hurt total memory. Set to ``os.cpu_count() // 2``
+        for bulk runs.
+    skip_existing : bool, default True
+        If ``out_path`` exists and already has a ``magnitude`` column, restart from
+        the first NaN row. Makes interrupted runs resumable.
+    out_path : str | None
+        If set, the augmented DataFrame is written here after EVERY chunk of 200
+        events so a Ctrl-C / SIGKILL leaves a partial-but-valid CSV behind.
+    progress : bool, default True
+        Show a tqdm bar.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of ``catalog_df`` with the 4 magnitude columns appended.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    if attenuation_fn is None:
+        attenuation_fn = ml_heo2024
+
+    out = catalog_df.copy()
+    for col, default in (("magnitude", np.nan), ("magnitude_std", np.nan),
+                         ("n_used", 0), ("mag_status", "")):
+        if col not in out.columns:
+            out[col] = default
+
+    # Resume from a partial file if asked.
+    if skip_existing and out_path and os.path.exists(out_path):
+        prev = pd.read_csv(out_path)
+        if "magnitude" in prev.columns and len(prev) == len(out):
+            out["magnitude"]     = prev["magnitude"].to_numpy()
+            out["magnitude_std"] = prev["magnitude_std"].to_numpy() if "magnitude_std" in prev else np.nan
+            out["n_used"]        = prev["n_used"].to_numpy()        if "n_used"        in prev else 0
+            out["mag_status"]    = prev["mag_status"].fillna("").astype(str).to_numpy() \
+                                      if "mag_status" in prev else ""
+
+    todo_idx = [i for i in out.index if not str(out.at[i, "mag_status"])]
+    if progress:
+        try:
+            from tqdm.auto import tqdm
+            todo_iter = tqdm(todo_idx, desc="events", unit="evt")
+        except ImportError:
+            todo_iter = todo_idx
+    else:
+        todo_iter = todo_idx
+
+    def _compute_one(i):
+        ev_dir = _event_dir_for(out.at[i, "time"], event_roots)
+        if ev_dir is None:
+            return i, np.nan, np.nan, 0, "no_dir"
+        try:
+            per_sta = per_station_ml(ev_dir, inventory, attenuation_fn=attenuation_fn)
+            if restrict_to_z and len(per_sta):
+                per_sta = per_sta[per_sta["channel"].str.endswith("Z")]
+            agg = aggregate_ml(per_sta)
+            if agg["n_used"] == 0:
+                return i, np.nan, np.nan, 0, "no_picks"
+            return i, agg["ml_median"], agg["ml_std"], agg["n_used"], "ok"
+        except Exception as exc:                          # noqa: BLE001
+            return i, np.nan, np.nan, 0, f"error:{type(exc).__name__}"
+
+    def _flush():
+        if out_path:
+            out.to_csv(out_path, index=False)
+
+    if workers <= 1:
+        for i in todo_iter:
+            _, ml, std, n, st = _compute_one(i)
+            out.at[i, "magnitude"]     = ml
+            out.at[i, "magnitude_std"] = std
+            out.at[i, "n_used"]        = n
+            out.at[i, "mag_status"]    = st
+            if (i + 1) % 200 == 0:
+                _flush()
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {ex.submit(_compute_one, i): i for i in todo_idx}
+            done = 0
+            for fut in as_completed(futs):
+                idx, ml, std, n, st = fut.result()
+                out.at[idx, "magnitude"]     = ml
+                out.at[idx, "magnitude_std"] = std
+                out.at[idx, "n_used"]        = n
+                out.at[idx, "mag_status"]    = st
+                done += 1
+                if progress and hasattr(todo_iter, "update"):
+                    todo_iter.update(1)
+                if done % 200 == 0:
+                    _flush()
+    _flush()
+    if hasattr(todo_iter, "close"):
+        todo_iter.close()
+    return out
