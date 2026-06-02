@@ -98,18 +98,25 @@ def report_coverage(stations_needed, inventory) -> pd.DataFrame:
 
 # --- response removal + Wood-Anderson sim ----------------------------------
 def remove_response_to_disp(stream, inventory, *,
-                            pre_filt=(0.001, 0.005, 50, 100),
+                            pre_filt=(1.0, 2.0, 20.0, 22.0),
                             water_level=60.0,
                             taper_percent=0.05) -> obspy.Stream:
-    """Detrend(demean) → cosine taper → ``remove_response(output='DISP', water_level=…)``
-    → detrend(demean) → taper. Returns a NEW stream (original untouched). Skips traces
-    whose ``(network, station, channel)`` is not in the inventory (with a single
-    `warnings.warn` per missing key — same warning is not repeated for the 3 components
-    of the same station).
+    """Detrend(demean + linear) → cosine taper → ``remove_response(output='DISP',
+    water_level=…)`` (which applies `pre_filt` as a cosine-taper bandpass on the
+    way to deconvolution) → detrend(demean) → taper. Returns a NEW stream
+    (original untouched). Skips traces whose ``(network, station, channel)`` is
+    not in the inventory (single warning per missing station).
 
-    `pre_filt` is the cosine-tapered bandpass that brackets the response deconvolution;
-    `water_level` (dB) stabilises the deconvolution near response zeros. Defaults match
-    the user's prior workflow and Sheen et al. 2018 conventions."""
+    Preprocessing matches **Heo et al. (2024) §4.2** exactly:
+      * demean + detrend(linear) before response removal,
+      * cosine-tapered bandpass at **2–22 Hz** (flat 2–20 Hz, cosine ramps
+        1→2 Hz and 20→22 Hz) — Heo specifies "bandpass filter at 2–20 Hz",
+      * water_level=60 dB to stabilise the deconvolution,
+      * the WA convolution is the next step (in `wood_anderson_amp_mm`).
+
+    The legacy default was `pre_filt=(0.001, 0.005, 50, 100)` (0.005–50 Hz
+    cosine), too broad for ML on micro-earthquakes — included long-period
+    noise that gets amplified by the deconvolution at the response zeros."""
     out = obspy.Stream()
     warned = set()
     for tr in stream:
@@ -123,7 +130,7 @@ def remove_response_to_disp(stream, inventory, *,
                               f"channels of this station", RuntimeWarning)
                 warned.add(short)
             continue
-        work = tr.copy().detrend("demean").taper(taper_percent)
+        work = tr.copy().detrend("demean").detrend("linear").taper(taper_percent)
         try:
             work.remove_response(inventory=inventory, output="DISP",
                                  pre_filt=list(pre_filt), water_level=water_level,
@@ -274,8 +281,8 @@ def ml_heo2024(amp_mm, distance_km, component=None):
 
 # --- per-station ML aggregator ---------------------------------------------
 def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
-                   pre_filt=(0.001, 0.005, 50, 100), water_level=60.0,
-                   snr_threshold=3.0) -> pd.DataFrame:
+                   pre_filt=(1.0, 2.0, 20.0, 22.0), water_level=60.0,
+                   snr_threshold=3.0, z_only=None) -> pd.DataFrame:
     """For one event directory (per the export tree), compute ML at every station-channel.
 
     Reads all `*.sac` files in `event_dir` (expected layout: one per station-channel,
@@ -294,6 +301,10 @@ def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
 
     Tip: the calling notebook then aggregates with `df.groupby('station').ML.median()`
     to get one ML per station, and `df.ML.median()` for the event-level ML."""
+    # Heo 2024 calibrated on vertical-component peaks only; honour that automatically
+    # whenever the attenuation_fn is `ml_heo2024` (user can pass z_only=False to opt out).
+    if z_only is None:
+        z_only = (attenuation_fn is ml_heo2024)
     sacs = sorted(glob.glob(os.path.join(event_dir, "*.sac")))
     if not sacs:
         return pd.DataFrame()
@@ -301,6 +312,10 @@ def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
     dist_for = {}
     for f in sacs:
         tr = obspy.read(f)[0]
+        # Honour z_only EARLY — skip non-vertical traces before response removal so we
+        # don't waste deconvolution work on traces we'll throw away.
+        if z_only and not tr.stats.channel.endswith("Z"):
+            continue
         st += tr
         sac = tr.stats.sac
         if "dist" in sac:
@@ -368,7 +383,7 @@ def _event_dir_for(time_str, event_roots) -> str | None:
 
 
 def export_ml_catalog(catalog_df, event_roots, inventory, *,
-                      attenuation_fn=None, restrict_to_z=False,
+                      attenuation_fn=None, restrict_to_z=None,
                       snr_threshold=3.0,
                       workers=1, skip_existing=True, out_path=None,
                       progress=True) -> pd.DataFrame:
@@ -398,9 +413,12 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
     attenuation_fn : callable, default ``ml_heo2024``
         Distance-attenuation function ``(amp_mm, dist_km, component) -> ML``. The
         notebook defaults to ``ml_heo2024`` (Southeastern Korea, GHBSN-calibrated).
-    restrict_to_z : bool, default False
-        If True, drop non-vertical channels before aggregating — matches Heo et al.
-        (2024) methodology. Default False keeps all 3 components (Sheen 2018 style).
+    restrict_to_z : bool | None, default None (auto)
+        If True, drop non-vertical channels before aggregating — matches Heo et
+        al. (2024) methodology. Default ``None`` auto-resolves: **True when
+        attenuation_fn is ml_heo2024** (Heo calibrated on Z-only), False for
+        Sheen 2018 (calibrated on all 3 components). Pass an explicit bool to
+        override the auto-resolution.
     workers : int, default 1
         ThreadPool worker count for the per-event loop. obspy I/O + numpy releases
         the GIL so threads parallelise well; processes would re-load the inventory
@@ -424,6 +442,9 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
 
     if attenuation_fn is None:
         attenuation_fn = ml_heo2024
+    # Auto-resolve Z-only based on the attenuation formula (Heo 2024 → Z-only).
+    if restrict_to_z is None:
+        restrict_to_z = (attenuation_fn is ml_heo2024)
 
     out = catalog_df.copy()
     for col, default in (("magnitude", np.nan), ("magnitude_std", np.nan),
@@ -459,9 +480,8 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
         try:
             per_sta = per_station_ml(ev_dir, inventory,
                                      attenuation_fn=attenuation_fn,
-                                     snr_threshold=snr_threshold)
-            if restrict_to_z and len(per_sta):
-                per_sta = per_sta[per_sta["channel"].str.endswith("Z")]
+                                     snr_threshold=snr_threshold,
+                                     z_only=restrict_to_z)
             agg = aggregate_ml(per_sta)
             if agg["n_used"] == 0:
                 status = "no_picks" if agg["n_total"] == 0 else "low_snr"
