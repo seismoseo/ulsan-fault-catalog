@@ -874,6 +874,49 @@ def spacetime_region(meta, pad=0.03):
             float(m["lat"].min()) - pad, float(m["lat"].max()) + pad]
 
 
+_COAST_GMT_CACHE: dict = {}
+
+
+def coast_segments_gmt(reg, res="f"):
+    """Coastline polylines for `reg` [W,E,S,N] dumped from GMT (`gmt coast -M`) — no cartopy needed
+    (GMT/GSHHG ships with PyGMT). Returns a list of (n,2) [lon,lat] arrays; cached per (reg,res), so
+    the shared fixed extent costs ONE `gmt` call for all families. [] on any failure (maps still
+    render without a shoreline)."""
+    import subprocess
+    key = (round(reg[0], 3), round(reg[1], 3), round(reg[2], 3), round(reg[3], 3), res)
+    if key in _COAST_GMT_CACHE:
+        return _COAST_GMT_CACHE[key]
+    segs, seg = [], []
+    try:
+        out = subprocess.run(
+            ["gmt", "coast", f"-R{reg[0]}/{reg[1]}/{reg[2]}/{reg[3]}", f"-D{res}", "-M", "-W"],
+            capture_output=True, text=True, timeout=60)
+        for ln in out.stdout.splitlines():
+            if ln.startswith(">"):
+                if len(seg) >= 2:
+                    segs.append(np.asarray(seg, dtype=float))
+                seg = []
+            else:
+                p = ln.split()
+                if len(p) >= 2:
+                    try:
+                        seg.append([float(p[0]), float(p[1])])      # lon, lat
+                    except ValueError:
+                        pass
+        if len(seg) >= 2:
+            segs.append(np.asarray(seg, dtype=float))
+    except Exception:                                       # noqa: BLE001
+        pass
+    _COAST_GMT_CACHE[key] = segs
+    return segs
+
+
+def draw_coast(ax, reg, res="f", color="#3a6ea5", lw=0.6, zorder=0.5):
+    """Draw the GMT shoreline (`coast_segments_gmt`) on a lon/lat matplotlib Axes."""
+    for s in coast_segments_gmt(reg, res):
+        ax.plot(s[:, 0], s[:, 1], color=color, lw=lw, zorder=zorder)
+
+
 def cluster_spacetime_fig(cid, X, labels, kept, meta, reg, colors=None, win=DEFAULT_WIN, sr=SR,
                           station=STATION, comp=COMP, wf_root=WF_ROOT, sp=None,
                           faults=ufc.FAULT_TRACE, summary_csv=CLUSTER_SUMMARY,
@@ -884,10 +927,10 @@ def cluster_spacetime_fig(cid, X, labels, kept, meta, reg, colors=None, win=DEFA
     **cumulative-count vs year** step curve (right bottom). Together: where the family is and how it
     accumulates through time — a tight pocket filling up across years is the quarry-blast signature.
 
-    The map is drawn in **matplotlib** (coast/faults via `uf_cluster.coast_mpl`/`plot_faults_mpl`) so
-    rendering ~100 of these is fast — PyGMT (used for the publication maps in notebook 04 §6) is too
-    slow per-call at this count. `reg` (use `spacetime_region(meta)`) is shared across families.
-    Returns the figure."""
+    The map is drawn in **matplotlib** (GMT shoreline via `draw_coast`, faults via
+    `uf_cluster.plot_faults_mpl`) so rendering ~100 of these is fast — PyGMT (used for the publication
+    maps in notebook 04 §6) is too slow per-call at this count. `reg` (use `spacetime_region(meta)`)
+    is shared across families, so the shoreline costs one `gmt` call total. Returns the figure."""
     import matplotlib.pyplot as plt
     from matplotlib.gridspec import GridSpec
     labels = np.asarray(labels)
@@ -923,8 +966,8 @@ def cluster_spacetime_fig(cid, X, labels, kept, meta, reg, colors=None, win=DEFA
     axg.set_xlim(win[0] - 0.9, win[1]); axg.set_ylim(n, -1); axg.set_yticks([])
     axg.set_xlabel("Time from P (s)")
     axg.set_title(f"{station} {comp} — cluster {int(cid)} (n={n}), chronological", color=col)
-    # ---- fixed-extent matplotlib epicentre map (fast; coast+faults from uf_cluster) ----------
-    ufc.coast_mpl(axm, reg); ufc.plot_faults_mpl(axm, faults, color="0.4", lw=0.5)
+    # ---- fixed-extent matplotlib epicentre map (fast; GMT shoreline + uf_cluster faults) -----
+    draw_coast(axm, reg); ufc.plot_faults_mpl(axm, faults, color="0.4", lw=0.5)
     axm.scatter(allj["lon"], allj["lat"], s=2, c="0.85", lw=0, zorder=1)            # context
     if len(flon):
         scm = axm.scatter(flon, flat, c=ftime, cmap=map_cmap, vmin=year_range[0],
