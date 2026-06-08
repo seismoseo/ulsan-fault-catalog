@@ -115,8 +115,8 @@ ax[2].set_yticks([]); fig.tight_layout()""")
 md("""## 2 · Inter-event similarity matrices (per band)
 
 Max-lag normalised cross-correlation; reordered by the Ward dendrogram so repeating families show as
-bright diagonal blocks. Bands differ: blasts are more emergent/low-frequency, quakes more
-impulsive/high-frequency.""")
+bright diagonal blocks, each **identified family (≥ `MIN_SIZE`) outlined in white**. Bands differ:
+blasts are more emergent/low-frequency, quakes more impulsive/high-frequency.""")
 code("""def band_cc(band):
     tag = f"{STATION}_{COMP}_w{WIN[0]}_{WIN[1]}_b{band[0]}-{band[1]}_lag{MAXLAG}_n{len(kept)}".replace(".", "p")
     f = os.path.join(CACHE, f"cc_{tag}.npy")
@@ -130,9 +130,10 @@ CC = {b: band_cc(b) for b in BANDS}
 CLUS = {b: wf.ward_clusters(CC[b], threshold=1 - CC_THRESHOLD, method=LINKAGE) for b in BANDS}
 fig, axes = plt.subplots(2, 2, figsize=(12, 11), dpi=110)
 for ax, b in zip(axes.ravel(), BANDS):
-    _, _, order = CLUS[b]
+    lab_b, _, order = CLUS[b]
     im = ax.imshow(CC[b][np.ix_(order, order)], cmap="magma", vmin=0, vmax=1,
                    aspect="equal", interpolation="nearest")
+    wf.outline_clusters(ax, lab_b, order, min_size=MIN_SIZE)   # white box per identified family
     iu = np.triu_indices(len(CC[b]), 1)
     ax.set(title=f"{b[0]}–{b[1]} Hz  (mean CC {CC[b][iu].mean():.2f})",
            xlabel="event (clustered)", ylabel="event (clustered)")
@@ -209,19 +210,17 @@ wf.plot_cluster_sections(Xhp, labels, kept, win=WIN, station=STATION, min_show=M
                          max_per_cluster=MAX_PER_CLUSTER, show_singletons=SHOW_SINGLETONS,
                          title=f"{STATION} {COMP} — 1 Hz HIGHPASS, "
                                f"clusters from {PRIMARY[0]}–{PRIMARY[1]} Hz");""")
-md("""**Every family as its own chronological gather — nothing omitted within families.** The gathers
-above group by family but **cap** what they show (`max_clusters`/`max_per_cluster`/`show_singletons` →
-at most a few hundred of the ~2.7k events). Stacking *all* 2.7k as one figure is a 100+-inch scroll,
-so instead each **family** (≥ `MIN_SIZE`) gets its **own small panel** with **all** its members drawn
-**chronologically** (oldest at top), 1 Hz-highpass, P-aligned at *t*=0 — so no family member is
-dropped. Each panel is titled `cl id: n, cc, year-span`; a tight same-shape stack that **recurs across
-many years** is the quarry-blast signature. (Singletons don't repeat — they're the non-blast
-background — so they're counted in the title, not panelled. For a literal single all-events stack incl.
-singletons, `wf.plot_all_chronological(...)` is available; best on a one-year `kept`.)""")
-code("""wf.plot_cluster_grid(Xhp, labels, kept, win=WIN, station=STATION, comp=COMP,
-                     min_show=MIN_SIZE, colors=COLORS, ncol=6,
-                     title=f"{STATION} {COMP} — each family chronological "
-                           f"(1 Hz highpass; clusters from {PRIMARY[0]}–{PRIMARY[1]} Hz)");""")
+md("""**Every family as its own full-size chronological gather — nothing omitted within families.**
+The gathers above group by family but **cap** what they show (`max_clusters`/`max_per_cluster`/
+`show_singletons` → at most a few hundred of the ~2.7k events). Here each **family** (≥ `MIN_SIZE`)
+is drawn as its **own separate, full-width figure** (not a cramped subplot) with **all** its members
+**chronologically** (oldest at top), 1 Hz-highpass, P-aligned at *t*=0 — **constant per-trace height**,
+so a panel's height grows with its member count and the UTC origin times stay legible. A tight
+same-shape stack that **recurs across many years** is the quarry-blast signature. (Singletons don't
+repeat — they're the non-blast background — so they're skipped; for a literal single all-events stack
+incl. singletons, `wf.plot_all_chronological(...)` is available, best on a one-year `kept`.)""")
+code("""wf.plot_clusters_individually(Xhp, labels, kept, win=WIN, station=STATION, comp=COMP,
+                              min_show=MIN_SIZE, colors=COLORS, order_by="size");""")
 md("""**Same gather, coloured by hour-of-day (KST).** Identical clusters/ordering (left labels keep
 the family colour), but each **trace is coloured by its origin hour** with the cyclic **HSV**
 colormap (the same one as `uf.hour_map` / the per-year hour maps). **Blast tell-tale:** a family

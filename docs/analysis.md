@@ -14,6 +14,7 @@ and `*.csv`):
 | `05_error_ellipses.ipynb`          | 95% location-error ellipses parsed from the HYPOINVERSE `.prt` covariance |
 | `catalog_model_comparison.ipynb`   | stead vs phasenet_plus catalog consistency (counts, maps, depth, time, per-event quality) |
 | `04_waveform_similarity_hdb_{HHZ,HHN,HHE}_phasenet_plus.ipynb` | Inter-event waveform-similarity screen for still-remaining quarry blasts at `KG.HDB` (one notebook per component; built by `build_wf_nb.py`) |
+| `05_cluster_spacetime_{HHZ,…}_phasenet_plus.ipynb` | Per-family space-time composites — chronological gather + fixed-extent year-coloured epicentre map + cumulative-N(t) curve (built by `build_seq_nb.py`) |
 
 All three are **PARAMS-driven** (edit the first cell, re-run) and `model`-parameterized
 (`stead`/`original`/`phasenet_plus`). They `import uf_cluster as uf` (the module sits beside them in
@@ -223,6 +224,7 @@ taskset -c 0-7 jupyter nbconvert --to notebook --execute --inplace 05_error_elli
 # waveform-similarity blast screen (build the per-component notebook, then execute):
 python build_wf_nb.py HHZ && jupyter nbconvert --to notebook --execute --inplace 04_waveform_similarity_hdb_HHZ_phasenet_plus.ipynb
 python cross_component_blast.py            # cross-component candidate-event intersection (warm caches)
+python build_seq_nb.py HHZ && jupyter nbconvert --to notebook --execute --inplace 05_cluster_spacetime_HHZ_phasenet_plus.ipynb  # per-family space-time
 ```
 Outputs (`catalog_*_declustered.csv`, `cluster_summary_*.csv`, `subcatalog_*`, `cluster3d_*.html`,
 `wf_similarity_cache/`) land in `KS_KG/HypoInv/` and are gitignored.

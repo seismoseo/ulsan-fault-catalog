@@ -100,6 +100,17 @@ def event_hours(events, kst=ufc.KST):
     return np.asarray(out, dtype=float)
 
 
+def event_decimal_years(events):
+    """Decimal year (e.g. 2018.42) of each event's origin time from the dir name — a continuous
+    time axis for colouring / cumulative curves. Aligned to `events`."""
+    out = []
+    for ev in events:
+        y = int(ev[:4])
+        y0 = UTCDateTime(f"{y}-01-01"); y1 = UTCDateTime(f"{y + 1}-01-01")
+        out.append(y + (origin_time(ev) - y0) / (y1 - y0))
+    return np.asarray(out, dtype=float)
+
+
 # --------------------------------------------------------------- P-time per event
 def pick_time(ev, station=STATION, phase="P", wf_root=WF_ROOT, comp=COMP):
     """Absolute P (or S) time for `station` at event `ev`, or None.
@@ -483,6 +494,26 @@ def plot_similarity(cc, order=None, ax=None, title="Waveform similarity (max-lag
     return ax.figure
 
 
+def outline_clusters(ax, labels, order, min_size=2, color="white", lw=0.8):
+    """Outline each identified cluster as a box on a dendrogram-ORDERED similarity matrix.
+
+    `labels` are the flat-cluster ids; `order` is the leaf order the matrix was reordered by
+    (`leaves_list(Z)`). A flat cluster (cut from the linkage) is a **contiguous run** in leaf order,
+    so each cluster ≥ `min_size` becomes one square drawn from its first to last reordered index.
+    Call right after `ax.imshow(CC[np.ix_(order, order)], …)`."""
+    import matplotlib.patches as mpatches
+    lab = np.asarray(labels)[np.asarray(order)]
+    n = len(lab); i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and lab[j + 1] == lab[i]:
+            j += 1
+        if j - i + 1 >= min_size:
+            ax.add_patch(mpatches.Rectangle((i - 0.5, i - 0.5), j - i + 1, j - i + 1,
+                                            fill=False, edgecolor=color, lw=lw, zorder=3))
+        i = j + 1
+
+
 def plot_dendrogram(Z, color_threshold=None, ax=None, title="Ward dendrogram (1 − CC)"):
     import matplotlib.pyplot as plt
     from scipy.cluster.hierarchy import dendrogram
@@ -551,7 +582,8 @@ def plot_cluster_sections(X, labels, kept, sr=SR, win=DEFAULT_WIN, station=STATI
                           sp=None, row_h=0.16, fig_w=9, colors=None, show_singletons=True,
                           singleton_color="0.55", max_singletons=None, title=None,
                           trace_values=None, value_cmap="hsv", value_range=None, value_label="",
-                          max_clusters=None, clusters=None, annotate_utc=True):
+                          max_clusters=None, clusters=None, annotate_utc=True,
+                          min_fig_h=3.0, head_in=0.0):
     """Record-section of EVERY trace (not stacked), P-aligned at t=0, GROUPED by cluster, with
     each cluster drawn in a DISTINCT colour.
 
@@ -618,7 +650,10 @@ def plot_cluster_sections(X, labels, kept, sr=SR, win=DEFAULT_WIN, station=STATI
         tv = np.asarray(trace_values, dtype=float)
         vr = value_range or (np.nanmin(tv), np.nanmax(tv))
         cmap = plt.get_cmap(value_cmap); norm = mpl.colors.Normalize(*vr)
-    fig, ax = plt.subplots(figsize=(fig_w, max(3.0, row_h * y)), dpi=120)
+    # height = row_h per trace + a fixed header (title/xlabel/ticks); `head_in` keeps the per-trace
+    # height CONSTANT across families of different sizes (else a small family hits `min_fig_h` and
+    # its traces get stretched). `min_fig_h` is just a floor against a degenerate tiny figure.
+    fig, ax = plt.subplots(figsize=(fig_w, max(min_fig_h, row_h * y + head_in)), dpi=120)
     ytrans = ax.get_yaxis_transform()                        # x in axes-fraction, y in data coords
     for i, yy, col in rows:
         w = X[i] / (np.max(np.abs(X[i])) + 1e-9) * 0.45      # per-trace display normalise
@@ -778,6 +813,182 @@ def plot_cluster_grid(X, labels, kept, sr=SR, win=DEFAULT_WIN, station=STATION, 
                  fontsize=10, y=0.998)
     fig.tight_layout()
     return fig
+
+
+def plot_clusters_individually(X, labels, kept, sr=SR, win=DEFAULT_WIN, station=STATION, comp=COMP,
+                               wf_root=WF_ROOT, min_show=4, colors=None, order_by="size",
+                               max_per_cluster=None, annotate_utc=True, row_h=0.16, fig_w=9,
+                               sp=None, show=True):
+    """Render **each family as its OWN full-size chronological gather** — one separate figure per
+    cluster, NOT a subplot grid. Every trace keeps the **same height** (`row_h`) regardless of family
+    size, so a panel's height grows with its member count and the UTC origin times stay legible —
+    matching the look of the per-event gathers.
+
+    Each figure is `plot_cluster_sections` restricted to one cluster (all members, chronological,
+    `colors`-coloured, P/S marks, UTC on the right). Families are taken in `order_by` ('size' or
+    'meancc') order; singletons are skipped. With `show=True` (default) each figure is displayed
+    inline and closed (no 'too many open figures' warning, low memory); with `show=False` the list
+    of `(cluster_id, fig)` is returned instead (for testing / saving). `sp` is computed once and
+    reused across panels."""
+    import matplotlib.pyplot as plt
+    labels = np.asarray(labels)
+    ids, counts = np.unique(labels, return_counts=True)
+    fams = ids[counts >= min_show]
+    if order_by == "meancc":
+        def _key(c):
+            idx = np.where(labels == c)[0]; st = _l2(X[idx].mean(0)); return -float((X[idx] @ st).mean())
+        fams = sorted(fams, key=_key)
+    else:
+        fams = list(fams[np.argsort(-counts[np.isin(ids, fams)])])
+    cols = colors or cluster_colors(list(fams))
+    if sp is None:
+        sp = s_minus_p(kept, station, wf_root)
+    try:
+        from IPython.display import display
+    except Exception:                                       # noqa: BLE001
+        display = None
+    out = []
+    for c in fams:
+        n = int(counts[ids == c][0])
+        f = plot_cluster_sections(X, labels, kept, sr=sr, win=win, station=station, comp=comp,
+                                  wf_root=wf_root, clusters=[int(c)], colors=cols,
+                                  show_singletons=False, max_per_cluster=max_per_cluster,
+                                  annotate_utc=annotate_utc, row_h=row_h, fig_w=fig_w, sp=sp,
+                                  min_fig_h=1.2, head_in=0.92,  # constant per-trace height across families
+                                  title=f"{station} {comp} — cluster {int(c)} (n={n}), chronological")
+        if show and display is not None:
+            display(f); plt.close(f)
+        else:
+            out.append((int(c), f))
+    return out
+
+
+def spacetime_region(meta, pad=0.03):
+    """Fixed map region [W, E, S, N] enclosing ALL joined events (+`pad`°) — the SAME extent for
+    every family's map so the per-cluster space-time panels are spatially comparable."""
+    m = meta[meta["joined"]] if "joined" in meta else meta.dropna(subset=["lat"])
+    if not len(m):
+        return [ufc.SUBREGION[0] - 0.1, ufc.SUBREGION[1] + 0.1,
+                ufc.SUBREGION[2] - 0.1, ufc.SUBREGION[3] + 0.1]
+    return [float(m["lon"].min()) - pad, float(m["lon"].max()) + pad,
+            float(m["lat"].min()) - pad, float(m["lat"].max()) + pad]
+
+
+def cluster_spacetime_fig(cid, X, labels, kept, meta, reg, colors=None, win=DEFAULT_WIN, sr=SR,
+                          station=STATION, comp=COMP, wf_root=WF_ROOT, sp=None,
+                          faults=ufc.FAULT_TRACE, summary_csv=CLUSTER_SUMMARY,
+                          year_range=(2010, 2025), row_h=0.16, map_cmap="viridis"):
+    """Composite **space-time** panel for ONE family: the chronological waveform gather (left, every
+    member, constant per-trace height, UTC origins) + a **fixed-extent** epicentre map (right top,
+    this family's events coloured by **origin year**, all other events faint grey context) + a
+    **cumulative-count vs year** step curve (right bottom). Together: where the family is and how it
+    accumulates through time — a tight pocket filling up across years is the quarry-blast signature.
+
+    The map is drawn in **matplotlib** (coast/faults via `uf_cluster.coast_mpl`/`plot_faults_mpl`) so
+    rendering ~100 of these is fast — PyGMT (used for the publication maps in notebook 04 §6) is too
+    slow per-call at this count. `reg` (use `spacetime_region(meta)`) is shared across families.
+    Returns the figure."""
+    import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
+    labels = np.asarray(labels)
+    idx = np.sort(np.where(labels == cid)[0])                # chronological (kept is time-sorted)
+    n = len(idx)
+    evs = [kept[i] for i in idx]
+    yrs = event_decimal_years(evs)
+    m = meta.reset_index(drop=True)
+    sub = m.iloc[idx]
+    jn = sub["joined"].values if "joined" in sub else np.isfinite(sub["lat"].values)
+    flon, flat, ftime = sub["lon"].values[jn], sub["lat"].values[jn], yrs[jn]
+    allj = m[m["joined"]] if "joined" in m else m.dropna(subset=["lat"])
+    col = (colors or cluster_colors([cid])).get(int(cid), "crimson")
+    if sp is None:
+        sp = s_minus_p(kept, station, wf_root)
+    # ---- composite figure --------------------------------------------------------------------
+    figh = max(3.2, row_h * (n + 1.6) + 0.92)
+    F = plt.figure(figsize=(13, figh), dpi=120)
+    gs = GridSpec(2, 2, width_ratios=[1.5, 1.0], height_ratios=[3, 1], figure=F,
+                  wspace=0.18, hspace=0.30)
+    axg = F.add_subplot(gs[:, 0]); axm = F.add_subplot(gs[0, 1]); axc = F.add_subplot(gs[1, 1])
+    t = np.arange(X.shape[1]) / sr + win[0]
+    ytr = axg.get_yaxis_transform()
+    for k, i in enumerate(idx):
+        w = X[i] / (np.max(np.abs(X[i])) + 1e-9) * 0.45
+        axg.plot(t, k - w, color=col, lw=0.45)
+        if np.isfinite(sp[i]) and win[0] <= sp[i] <= win[1]:
+            axg.plot([sp[i], sp[i]], [k - 0.45, k + 0.45], color="k", lw=0.6)
+        e = kept[i]
+        axg.text(1.005, k, f"{e[0:4]}-{e[4:6]}-{e[6:8]} {e[8:10]}:{e[10:12]}:{e[12:14]}",
+                 transform=ytr, fontsize=4.2, va="center", ha="left", color="0.3", clip_on=False)
+    axg.axvline(0, color="b", lw=0.9, ls="--")
+    axg.set_xlim(win[0] - 0.9, win[1]); axg.set_ylim(n, -1); axg.set_yticks([])
+    axg.set_xlabel("Time from P (s)")
+    axg.set_title(f"{station} {comp} — cluster {int(cid)} (n={n}), chronological", color=col)
+    # ---- fixed-extent matplotlib epicentre map (fast; coast+faults from uf_cluster) ----------
+    ufc.coast_mpl(axm, reg); ufc.plot_faults_mpl(axm, faults, color="0.4", lw=0.5)
+    axm.scatter(allj["lon"], allj["lat"], s=2, c="0.85", lw=0, zorder=1)            # context
+    if len(flon):
+        scm = axm.scatter(flon, flat, c=ftime, cmap=map_cmap, vmin=year_range[0],
+                          vmax=year_range[1], s=26, edgecolor="k", linewidth=0.3, zorder=3)
+        ufc._match_cbar(scm, axm, "Origin year")
+    if summary_csv and os.path.exists(summary_csv):
+        cs = pd.read_csv(summary_csv); q = cs[cs.get("is_blast", False) == True]
+        if len(q):
+            axm.scatter(q["lon_centroid"], q["lat_centroid"], marker="x", c="red", s=38,
+                        linewidth=1.4, zorder=2)
+    try:
+        tr = read(_sac_path(kept[0], station))[0]
+        axm.scatter([tr.stats.sac.stlo], [tr.stats.sac.stla], marker="s", c="yellow",
+                    edgecolor="k", s=55, zorder=4)
+    except Exception:                                       # noqa: BLE001
+        pass
+    axm.set_xlim(reg[0], reg[1]); axm.set_ylim(reg[2], reg[3])
+    axm.set_aspect(1.0 / np.cos(np.radians(0.5 * (reg[2] + reg[3]))))               # geographic
+    axm.tick_params(labelsize=6); axm.set_xlabel("lon", fontsize=7); axm.set_ylabel("lat", fontsize=7)
+    ys = np.sort(yrs)
+    axc.step(ys, np.arange(1, n + 1), where="post", color=col, lw=1.4)
+    axc.scatter(ys, np.arange(1, n + 1), s=8, color=col, zorder=3)
+    axc.set_xlim(*year_range); axc.set_ylim(0, n + 1)
+    axc.set_xlabel("Year"); axc.set_ylabel("cumulative N"); axc.grid(alpha=0.3)
+    axc.set_title("time-cumulative", fontsize=8)
+    F.subplots_adjust(right=0.84)
+    return F
+
+
+def plot_clusters_spacetime(X, labels, kept, meta, reg=None, sr=SR, win=DEFAULT_WIN, station=STATION,
+                            comp=COMP, wf_root=WF_ROOT, min_show=4, colors=None, order_by="size",
+                            sp=None, show=True, **kw):
+    """Render `cluster_spacetime_fig` for EVERY family (≥ `min_show`), one composite per cluster, in
+    `order_by` order. `reg` defaults to `spacetime_region(meta)` (fixed extent shared by all). With
+    `show=True` each figure is displayed inline and closed; else a list of `(cid, fig)` is returned.
+    `sp` is computed once and reused."""
+    import matplotlib.pyplot as plt
+    labels = np.asarray(labels)
+    ids, counts = np.unique(labels, return_counts=True)
+    fams = ids[counts >= min_show]
+    if order_by == "meancc":
+        def _key(c):
+            ix = np.where(labels == c)[0]; st = _l2(X[ix].mean(0)); return -float((X[ix] @ st).mean())
+        fams = sorted(fams, key=_key)
+    else:
+        fams = list(fams[np.argsort(-counts[np.isin(ids, fams)])])
+    cols = colors or cluster_colors(list(fams))
+    if reg is None:
+        reg = spacetime_region(meta)
+    if sp is None:
+        sp = s_minus_p(kept, station, wf_root)
+    try:
+        from IPython.display import display
+    except Exception:                                       # noqa: BLE001
+        display = None
+    out = []
+    for c in fams:
+        f = cluster_spacetime_fig(int(c), X, labels, kept, meta, reg, colors=cols, win=win, sr=sr,
+                                  station=station, comp=comp, wf_root=wf_root, sp=sp, **kw)
+        if show and display is not None:
+            display(f); plt.close(f)
+        else:
+            out.append((int(c), f))
+    return out
 
 
 def used_stations(events, sta_dir=STA_DIR, wf_root=WF_ROOT):

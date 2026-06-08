@@ -158,10 +158,18 @@ correlate too but separate by hour-of-day + location).
   are visually **distinct** (old all-`hsv` made a top-N subset collapse to one hue band); §7 blast
   figures use a dedicated `BLAST_COLORS = cluster_colors(blast_ids)` palette. The grouped
   `plot_cluster_sections` caps output (`max_clusters`/`max_per_cluster`/`show_singletons`) so it shows
-  only a few hundred of the ~2.7k events; to see them **all**: `plot_cluster_grid` = one compact panel
-  per family with **every member** stacked chronologically (singletons counted, not panelled —
-  ~2 MB/99-panel fig), or `plot_all_chronological` = a literal single all-events time stack (tall,
-  ~163 in for full catalog; best on a one-year `kept`).
+  only a few hundred of the ~2.7k events; to see them **all**: `plot_clusters_individually` = each
+  family as its **own full-size chronological gather** (separate figures, **constant per-trace height**
+  regardless of family size via `head_in`/`min_fig_h`, UTC origins legible) — the default §4 view;
+  `plot_cluster_grid` = the compact subplot-grid alternative; `plot_all_chronological` = a literal
+  single all-events time stack (tall, ~163 in for full catalog; best on a one-year `kept`).
+  Similarity matrices (§2) outline each identified family with a white box (`outline_clusters`).
+- **Per-cluster space-time notebook** `05_cluster_spacetime_{COMP}_phasenet_plus.ipynb` (built by
+  `build_seq_nb.py`): one composite per family — chronological gather (left) + **fixed-extent**
+  epicentre map coloured by origin year (right top) + cumulative-N(t) curve (right bottom)
+  (`cluster_spacetime_fig`/`plot_clusters_spacetime`, `spacetime_region` for the shared extent).
+  The inset map is **matplotlib** (`uf_cluster.coast_mpl`/`plot_faults_mpl`) — 99 PyGMT renders timed
+  out (~63 s in matplotlib vs >3000 s); PyGMT stays for the §6 publication maps.
 - **KG.HDB coverage**: of **2796** `event_waveforms_ulsanfault` dirs, **2770 have HHZ** (26 missing,
   0.93 %), **2773 have any KG.HDB component**, and only **23 (0.82 %) have no KG.HDB at all** — the
   events the screen cannot see at this station. ~99 % coverage is why KG.HDB is the common station.
