@@ -12,9 +12,20 @@ picker models become available.
 ## Pipeline
 
 ```
-Detection (PhaseNet, SeisBench)  ->  Association (PyOcto)  ->  Absolute location (HYPOINVERSE)  ->  Relative relocation (HypoDD, future)
-        picks CSV                       events + assignments        UF<year>.{sum,arc}                 (not yet implemented)
+Detection (PhaseNet)  ->  Association (PyOcto, strict)  ->  Pick augmentation  ->  Absolute location (HYPOINVERSE)  ->  Local magnitudes (ML)  ->  Relative relocation (HypoDD, future)
+   picks CSV               events + assignments              augmented assignments    UF<year>.{sum,arc}              Heo 2024 + Sheen 2018 ML       (not yet implemented)
 ```
+
+**Stages** (from `models/pipeline/run_pipeline.py`): `detection` → `association` → `augment` → `phs` → `locate`.
+
+**PyOcto assignment (after augmentation) is the source of truth for which (station, phase) tuples belong to each event.**
+The legacy time-window pick dump in `HypoInv/event_waveforms_*/*_picks.csv` was a recipe for
+mis-assignment when two events fall < 60 s apart at the same station (the earlier event's pick
+"won" by chronological earliest, leaking into the later event's SAC headers). The production
+SAC-header writer (`event_sac_export.export_event(..., pyocto_root=...)`, the audit notebook
+(`local_magnitudes/04.Catalog_quality_audit.ipynb`), and any downstream that reads `SAC.a`/`.t0`
+should consume `models/phasenet_plus/pyocto/pyocto_assignment_kim1983_{year}.csv`, NOT the
+time-window CSV.
 
 The automated implementation lives in **`KS_KG/models/pipeline/`** (shared module + thin CLIs).
 See `docs/how-to-run.md` for commands and `docs/pipeline.md` for stage details.
@@ -28,6 +39,9 @@ KS_KG/
   velocity_model/        kim1983.csv (PyOcto layered model)
   detection_location/    per-year notebooks 01/02/03 — the "stead" REFERENCE run
   picks/ pyocto/ HypoInv/ existing stead outputs (data mostly NOT in git)
+    HypoInv/uf_cluster.py              spatial/temporal blast decluster + map helpers
+    HypoInv/uf_waveform_similarity.py  WAVEFORM-similarity blast screening (KG.HDB; 2026-06-07)
+    HypoInv/04_waveform_similarity_hdb_phasenet_plus.ipynb   its controlled notebook
   models/                picker-model dimension (this project's working area)
     stead/               symlinks to the reference run (read-only view; not in git)
     original/            PhaseNet "original" run (copies of notebooks, switched)
@@ -82,6 +96,11 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
 (created before the model loads, so workers are lean) — not the old per-day pool that forked the
 23 GB CUDA parent 5,475×.
 
+**PyOcto association** is separately capped via `REGION_STRICT["n_threads"]=16` (default would
+use all available cores). To live-restrict a running pipeline, `taskset --pid --cpu-list 0-15`
+on every thread of the launcher process works for the in-flight years; the config change keeps
+subsequent years polite from the start.
+
 ## Environment
 
 - miniforge Python; `seisbench`, `pyocto`, `obspy`, `torch` (+ CUDA GPU). See `requirements.txt` / `environment.yml`.
@@ -99,7 +118,93 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
 - A git clean filter (`tools/nbstrip.py`, enabled once via `bash tools/setup-git-filters.sh`) strips
   notebook outputs **if** a notebook is ever intentionally added — kept as a safety net.
 
-## Status & next steps (2026-05-26)
+## Waveform-similarity blast screening (KS_KG/HypoInv, 2026-06-07)
+
+Second, **waveform-feature** pass to catch quarry blasts the spatial/temporal decluster
+(`uf_cluster.py`) missed. Premise: blasts from one pit repeat the same source→path, so at a
+fixed station they share near-identical waveforms; tectonic events don't (repeaters/aftershocks
+correlate too but separate by hour-of-day + location).
+
+- **Files** (beside `uf_cluster.py`): `KS_KG/HypoInv/uf_waveform_similarity.py` (module, same
+  style; reuses `uf_cluster` KST/Rayleigh/maps/`SUBREGION`) + controlled notebook
+  `KS_KG/HypoInv/04_waveform_similarity_hdb_phasenet_plus.ipynb` (PARAMS cell, run top-to-bottom).
+- **Data**: `KS_KG/HypoInv/event_waveforms_ulsanfault/` = 2797 dirs `YYYYMMDDHHMMSS/` with
+  `{ev}.{NET}.{STA}.{CHA}.sac` (100 Hz, 120 s; SAC `a`=P, `t0`=S, `o`=origin, `stla/stlo`) +
+  `{ev}_picks.csv`. **KG.HDB.HHZ** covers 2771/2797; ~284 have the trace but no HDB pick.
+  Join to `catalog_phasenet_plus_2010_2024_blastclean.csv` by `time`→dir name (2729 join) for
+  hypocentres; known quarry centroids from `cluster_summary_phasenet_plus_2010_2024.csv`.
+- **Method**: common station **KG.HDB / HHZ**; align on P — **two deterministic sources only**:
+  `pick` (`{ev}_picks.csv`) else `fallback` (`origin + median P-traveltime`). (The SAC-`a`-header
+  branch is defensive dead code: picks.csv + SAC a-marks come from the same PhaseNet run, so a P is
+  in both or neither — `header` source = **0 events** on this data, verified; not random.) **Picked
+  events keep P at t=0, only the ~284 fallbacks are xcorr-aligned to the picked stack**; bandpass
+  + **SHORT P-window `[P-0.5,+7.5]s` (NEVER the 120 s record)** + L2-norm; bands 1-10/2-8/4-12/
+  5-15 Hz; N×N **max-lag CC** similarity matrix (small `MAXLAG` since aligned) → **Ward** on
+  (1-CC) → clustered heatmap + dendrogram + per-cluster gathers + PyGMT map + **blast-likeness
+  evidence** (`mean_cc`, `spread_km`, `daytime_frac`, `rayleigh_p`, `peak_hour`).
+- **Read it**: tight (high `mean_cc`) + **daytime-concentrated** + compact + non-uniform hour =
+  blast candidate (`blast_like` flag); tight but **night/uniform** = tectonic repeater.
+- **Notebook views (per family, all colour-consistent + a station-context PyGMT map)**: 4-band
+  square similarity matrices; average-linkage dendrogram (cut at `CC_THRESHOLD`); per-event gathers
+  in **filtered / raw / 1 Hz-highpass / hour-of-day(HSV)** flavours; per-cluster **stacks**; and a
+  **per-event spectrogram gather** (`stft`, full-window, 0.5–40 Hz, contiguous strips, HSV hour tab
+  per event). `event_hours()` derives KST hour from the dir name (every event; no catalog needed).
+  §6 has both a `top=20` and a `top=None` (**all families**) subregion map; §7 adds
+  `plot_blast_hour_histograms` — a per-`blast_like`-family **hour-of-day histogram grid** (KST,
+  daytime shaded, `peak_hour`/`rayleigh_p` annotated). `plot_cluster_sections`: traces ordered
+  **chronologically within each family** (top=earliest→bottom=latest), each trace right-annotated with
+  its **event origin time in UTC** (`annotate_utc=True`, pinned just right of the axes). `cluster_colors`
+  now gives the first 20 (size-ranked) families the qualitative `tab20` palette so the plotted top-N
+  are visually **distinct** (old all-`hsv` made a top-N subset collapse to one hue band); §7 blast
+  figures use a dedicated `BLAST_COLORS = cluster_colors(blast_ids)` palette. The grouped
+  `plot_cluster_sections` caps output (`max_clusters`/`max_per_cluster`/`show_singletons`) so it shows
+  only a few hundred of the ~2.7k events; to see them **all**: `plot_cluster_grid` = one compact panel
+  per family with **every member** stacked chronologically (singletons counted, not panelled —
+  ~2 MB/99-panel fig), or `plot_all_chronological` = a literal single all-events time stack (tall,
+  ~163 in for full catalog; best on a one-year `kept`).
+- **KG.HDB coverage**: of **2796** `event_waveforms_ulsanfault` dirs, **2770 have HHZ** (26 missing,
+  0.93 %), **2773 have any KG.HDB component**, and only **23 (0.82 %) have no KG.HDB at all** — the
+  events the screen cannot see at this station. ~99 % coverage is why KG.HDB is the common station.
+- **Status — FULL PERIOD RUN DONE (2026-06-07), still exploratory / NO removal yet.** 2010→full:
+  `YEARS=None`, 2770 events → **2716 kept** (2446 pick + 270 xcorr-fallback aligned; 2651 join
+  blastclean). CC≥0.6 average linkage → **99 families ≥4** (+1159 singletons). Evidence flags
+  **7 `blast_like` families = 66 still-remaining quarry-blast candidate events** (tight `mean_cc`
+  0.69–0.80, **daytime_frac 0.6–1.0, peak 12–15 KST**, compact ≤3.7 km) — two pockets ~129.28°E
+  (W) and ~129.40–43°E (near KG.HDB). Timing: make_bands 118 s (cached), CC 2 s, ward 0 s. Caches
+  keyed by events-hash (`feat_…_n{N}_{md5}.npz`); gathers cap to top `MAX_CLUSTERS_PLOT` families.
+- **Three-component notebooks** (same analysis, `COMP` swap via `build_wf_nb.py {HHZ|HHN|HHE}`):
+  `04_waveform_similarity_hdb_{HHZ,HHN,HHE}_phasenet_plus.ipynb`. Horizontals carry the same
+  P(`a`)/S(`t0`) headers + npts/timing, so it's a clean parameter swap (alignment is from the
+  station pick, component-independent). **Per-component KG.HDB coverage HHZ 2770 / HHN 2772 / HHE
+  2771** — the differences are **4 events with incomplete component files on disk** (dropout):
+  `20100531170439` (HHE,HHN; no HHZ), `20131113192434` (HHN only), `20140104222332` (HHE,HHN; no
+  HHZ), `20140911190328` (HHZ only) → HHN = 2770+3−1, HHE = 2770+2−1. ~0.1 %, no material effect;
+  caches/notebooks are per-component (cache tag has comp + events-hash).
+- **Next (deferred):** confirm the 7 families by eye in the gathers/spectrograms → write a cleaned
+  catalog dropping their members (the removal step) + re-run ML/summaries. Run in the **`Seis`** env.
+
+## Status & next steps (2026-06-03)
+
+- **PhaseNet+ strict-PyOcto + augmentation full re-run in flight** (years 2010–2024). Years
+  complete through 2016 (16,166 events, **+1,453 picks augmented total**, 0 drop-on-tie
+  events — safeguards working). Year 2017 in flight. ETA: ~5–6 h to finish.
+- **After re-run**: rebuild `catalog_phasenet_plus_2010_2024.csv` + re-blast-clean (cat_dq) →
+  re-inject SAC headers if hypocenters shifted → re-run Heo + Sheen bulk-ML
+  (`local_magnitudes/02.Compute_ML_all_events.ipynb`) → re-execute Heo + Sheen summary
+  notebooks (`03/06`).
+- **Lab-meeting catalog (in summary notebooks)** uses the current strict-n_s=3 catalog (no
+  augmentation) — augmentation is a quality improvement that lands cleanly after the re-run.
+- **KMA comparison in notebooks**: per-event match (TIME_TOL_S=30, DIST_TOL_KM=10) added to
+  `04_subregion_seismicity_phasenet_plus.ipynb` (subregion) and
+  `catalog_summary_phasenet_plus.ipynb` (entire region, §5b + §7). Both use **`cat_dq`
+  (blast-removed)** for apples-to-apples KMA comparison — entire-region: 5,638 KMA / 14,896
+  PN+, 4,853 matched (86% of KMA), 785 KMA-only (mostly sub-1.5 ML detection floor + 16
+  events ≥ M3 to investigate).
+- **Hour-of-day plots in `04_subregion`**: per-year histograms + per-year spatial maps
+  colored by hour-of-day with matplotlib `hsv` cyclic colormap (matches the PyGMT
+  `uf.hour_map` cyclic). Also added the matching KMA per-year hour-of-day map.
+
+## Earlier status (2026-05-26)
 
 - **stead** catalog complete (2010–2024 located `kim2011/UF<year>.sum`). Summary in
   `KS_KG/HypoInv/catalog_summary.ipynb` (model-parameterized; writes `catalog_<model>_2010_2024.csv`;
@@ -137,6 +242,125 @@ back to CPU). Preprocessing uses **one reused `forkserver` `ProcessPoolExecutor`
 - **#1 gap**: HYPOINVERSE `.sum` `MAG` column is empty → no magnitudes ⇒ no FMD/Mc/b-value yet. Top TODO:
   compute **Md** (coda duration via HYPOINVERSE) or **ML** (Wood–Anderson amplitudes + station corrections).
 - Later: 3-picker comparison once re-runs finish; **HypoDD** relative relocation.
+
+## Local magnitudes — Heo 2024 + Sheen 2018 (added 2026-06-02)
+
+`KS_KG/local_magnitudes/ml_pipeline.py` deconvolves each event's response, simulates Wood-Anderson
+(paz_wa sensitivity 2080, Uhrhammer & Collins 1990), measures peak amplitude post-P with SNR ≥ 3
+filtering, and converts to ML via two attenuation laws:
+
+- **Heo 2024** (GHBSN micro-event calibration, 2–20 Hz bandpass via `pre_filt=(1.0, 2.0, 20.0, 22.0)`,
+  Z-component only, R=17 km reference): `ml_pipeline.ml_heo2024`.
+- **Sheen 2018** (S. Korea broader-network calibration, **0.5–10 Hz** bandpass via
+  `pre_filt=(0.3, 0.5, 10.0, 12.0)`, all 3 components with separate Z vs N/E coefficients,
+  R=100 km reference): `ml_pipeline.ml_sheen2018`.
+
+**Headline result (15,762 blast-clean events 2010–2024)**:
+
+| Scale | Mc_MAXC / Mc_KS | _b_ (MAXC) | _b_ (KS) | 2016-09 step | Gyeongju M5.8 |
+|---|---|---|---|---|---|
+| Heo 2024 raw | 0.90 / 1.4 | 1.15 ± 0.02 | — | **+0.296 ML** | 5.3 (Δ = −0.5) |
+| Sheen 2018 raw | 1.50 / 1.9 | 1.51 ± 0.03 | **0.79 ± 0.03** | **+0.000 ML** | **5.7 (Δ = −0.1)** |
+
+**Sheen 2018 is the production ML scale**: time-stable across the 2016-09 KG-network densification
+(median ML 1.30 pre- and post-, +0.000 ML step) and recovers KMA's Gyeongju M5.8 mainshock to within
+0.1 ML without any station corrections. Heo 2024's +0.296 ML step is the close-station inflation
+that Sheen's 100-km reference distance + broader bandpass naturally avoids. Sheen's higher Mc (1.50
+vs Heo's 0.90) reflects that the 0.5–10 Hz bandpass loses sub-M1 detection relative to Heo's
+2–20 Hz micro-tuned passband.
+
+The notebook chain:
+- `02.Compute_ML_all_events.ipynb` — bulk ML pass (per-station + event-level CSVs)
+- `03.Magnitude_summary.ipynb` — Heo 2024 + per-station S-term corrections (§12)
+- `04.Catalog_quality_audit.ipynb` — **uses PyOcto assignments + HypoInverse arc residuals**
+  (NOT the time-window pick CSV — see Gotchas below)
+- `05.Magnitude_summary_corrected.ipynb` — Heo + corrections branch (deprecated in favour of Sheen)
+- `06.Magnitude_summary_sheen.ipynb` — **the production Sheen 2018 summary** (FMD with both MAXC + KS
+  Mc, sliding-window Mc overlay on magnitude-vs-time, Gyeongju benchmarks vs KMA, n_used stratification,
+  shallow/deep _b_-value split, PyGMT map, Heo-vs-Sheen cross-check)
+
+**Per-station correction caveat**: the Heo S-term correction (`ml_pipeline.estimate_station_corrections`,
+`apply_station_corrections`) is calibrated against the network consensus, which itself drifts when
+the network composition changes. Pre-2017 events get over-corrected (+0.2 ML lift) because the
+S_j is dominated by post-2017 KS+KG-mixed residuals. **Don't use Heo+corrections as the
+production scale**; use Sheen 2018 raw instead, which is intrinsically time-invariant.
+
+## Catalog quality audit + SAC-export refactor (2026-06-02)
+
+The audit (`local_magnitudes/04.Catalog_quality_audit.ipynb`) and the production SAC-export
+(`HypoInv/event_sac_export.py` + `06.Export_event_waveforms_from_continuous.ipynb`) both used
+to read the per-event `*_picks.csv` time-window dump. That CSV contains every PhaseNet+ pick
+within ±30 s of origin — including the picks PyOcto associated to the NEIGHBOURING event for a
+close-in pair. The 2015-11-13 11:04:24 / 11:04:33 pair was the smoking gun: both events' SAC
+headers carried event A's BBK P pick because `earliest_per_station_phase` took the chronologically
+earliest within the window. Both files are now PyOcto-driven:
+
+- **`event_sac_export.py`** v2: `export_event(..., pyocto_root="...models/phasenet_plus/pyocto")`
+  routes through `associate_picks_from_pyocto(event_idx)` → real (station, phase) sets PyOcto
+  assigned to that event. Legacy `associate_picks` retained as fallback only with deprecation
+  warning. Re-run with `skip_existing=False` to overwrite the buggy SAC headers in place
+  (no extra disk).
+- **`04.Catalog_quality_audit.ipynb` §2** v2: Jaccard now operates on the **PyOcto-assigned set**
+  (the 2015-11-13 pair scores 0.39 → correctly classified `ok`, not `duplicate`).
+  Mislocation is replaced by **HypoInverse arc residuals** (parsed from
+  `models/phasenet_plus/HypoInv/kim2011/UF{year}.arc`): flagged if `max(|residual|) > 1.0 s`
+  (10.2 % of catalog). Wide gap + low qual events get a separate `poorly_constrained` flag
+  (27 % of catalog; that's "loose location" not "wrong location").
+
+Confirmed by spot-check:
+- 2015-11-13 11:04:24 / 11:04:33: both **ok** (max |residual| = 0.10 s)
+- 2016-09-12 11:32:54 (M5.4 mainshock): **ok** (max |residual| = 0.42 s)
+- 2017-11-15 06:09:49: **mislocated** (max |residual| = 4.86 s; picks do not fit a single source)
+
+## PyOcto strict + post-PyOcto pick augmentation (2026-06-03)
+
+The "parking lot" PyOcto tightening is now committed as **`config.REGION_STRICT`** and is
+opt-in via `association.py --strict`. The strict set rejects the 2017-11-15-style chimera
+associations (HypoInverse `max|residual|` up to 4.86 s) by demanding more genuine multi-
+station P+S coverage, a tighter residual cap, and a finer octree.
+
+```python
+REGION_STRICT = dict(
+    n_picks=6, n_p_picks=3, n_s_picks=3, n_p_and_s_picks=2,   # genuine coverage
+    pick_match_tolerance=1.0,                                  # primary residual cap
+    min_node_size=2.0,        # finer initial octree — fixes wrong-basin convergences
+    min_node_size_location=0.5, refinement_iterations=8,       # finer refinement
+    min_interevent_time=2.0,                                   # allow real doublets
+    n_threads=16,                                              # polite on shared 64-core box
+)
+```
+
+`min_node_size=2.0` is the load-bearing knob — it fixes the **2013-03-22 13:40:04** case
+where PyOcto's default 10 km octree landed at a phantom 36.66°N hypocenter 110 km north
+of the true location.
+
+**Why a separate augmentation stage was needed.** PyOcto's streaming associator freezes
+candidates at the `n_picks` threshold and does NOT re-scan picks after refinement. Once
+PyOcto has 6 close-station picks, it stops looking — so FARTHER stations that fit the
+refined hypocenter get orphaned. The tweak alone is insufficient; the augmentation stage
+uses PyOcto's now-correct hypocenter to scan back through the daily picks and recover the
+orphans (with strict safeguards so it never steals picks from a neighbour event).
+
+**Augmentation module: `models/pipeline/pick_augmentation.py`**. For each PyOcto event, the
+direct-ray travel time to every station within `radius_km=100 km` is computed from
+`kim1983` (`velocity_at_depth`/`predict_arrival_offset`); any daily pick within
+`tolerance_s=1.0 s` of the predicted arrival, on a station not already in the PyOcto set
+for that event, is a candidate. `apply_safeguards` enforces: (1) phase-strict matching, (2)
+best-match-wins across competing events, (3) drop-on-tie when two candidates are within
+`tie_threshold_s=0.2 s` of each other. The output overwrites
+`pyocto_assignment_kim1983_<year>.csv` so the downstream PHS/HypoInverse stages consume the
+augmented set unchanged.
+
+`run_pipeline.py` runs `augment` between `association` and `phs`. Validated on 2013-03-22
+13:40:04: 10 picks / DMIN=42.8 / ERZ=3.9 → 14 picks / DMIN=2.1 / ERZ=0.5.
+
+## HypoInverse QC (in `KS_KG/HypoInv/uf_cluster.py`)
+
+`QC = dict(erh=5.0, erz=5.0, gap=270.0, num=5, rms=1.0)` — the `rms<1.0` cap was added in
+the strict-PyOcto branch (chimera events had arc-residual RMS multi-second). Don't add a
+per-event `max|residual|` filter on top of this — single-station pick outliers are OK
+when the overall RMS is good; the remaining picks still carry the hypocenter (see
+`feedback_ulsan_single_pick_outliers`).
 
 ## Gotchas
 

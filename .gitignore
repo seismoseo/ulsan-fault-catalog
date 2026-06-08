@@ -38,6 +38,15 @@ KS_KG/HypoInv/**/*.sum
 KS_KG/HypoInv/event_waveforms/
 KS_KG/HypoInv/filtered_waveforms/
 
+# ---- Waveform-similarity blast screen: per-event SAC sets, CC/feature caches, figures, logs
+#      (regenerable / large: event_waveforms_ulsanfault ~12 GB, event_waveforms_blastclean ~57 GB,
+#       wf_similarity_cache ~0.4 GB). Tracked code = uf_waveform_similarity.py + build_wf_nb.py +
+#       cross_component_blast.py; notebooks/CSVs are covered by the HypoInv *.ipynb / *.csv rules. ----
+KS_KG/HypoInv/event_waveforms_*/
+KS_KG/HypoInv/wf_similarity_cache*/
+KS_KG/HypoInv/wf_similarity_*figs/
+KS_KG/HypoInv/logs/
+
 # ---- Pre-existing exploratory notebooks/scripts + generated copies ----
 # (kept on the workstation, deliberately NOT versioned — the repo tracks the
 #  new automated pipeline + docs + small reference metadata only)

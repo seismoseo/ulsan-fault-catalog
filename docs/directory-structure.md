@@ -12,6 +12,8 @@
 │   ├── detection_location/<year>/   01/02/03 notebooks — "stead" REFERENCE run (NOT in git)
 │   ├── picks/  pyocto/            stead pick & association outputs (data NOT in git)
 │   ├── HypoInv/                   HYPOINVERSE control + outputs
+│   │   ├── uf_cluster.py uf_waveform_similarity.py   tracked analysis modules (blast decluster + waveform screen)
+│   │   ├── build_wf_nb.py cross_component_blast.py   waveform-screen notebook builder + cross-component intersect
 │   │   ├── UF<year>.sh            original run scripts (NOT in git)
 │   │   ├── STA/                   *.sta station files (tracked); hypoinverse/ helper (NOT in git)
 │   │   ├── kim1983/ kim2011/      *.crh models (tracked); *.sum/.prt/.arc outputs (NOT in git)

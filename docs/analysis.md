@@ -2,8 +2,10 @@
 
 After HYPOINVERSE produces the located catalog (`KS_KG/HypoInv/catalog_<model>_2010_2024.csv`,
 written by `catalog_summary.ipynb`), a set of analyses operate on that catalog. The shared,
-**tracked** logic lives in `KS_KG/HypoInv/uf_cluster.py`; the notebooks that drive it are
-exploratory and **gitignored** (like all `KS_KG/HypoInv/*.ipynb` and `*.csv`):
+**tracked** logic lives in `KS_KG/HypoInv/uf_cluster.py` (spatial/temporal blast decluster + map
+helpers) and `KS_KG/HypoInv/uf_waveform_similarity.py` (a second, waveform-feature blast screen);
+the notebooks that drive them are exploratory and **gitignored** (like all `KS_KG/HypoInv/*.ipynb`
+and `*.csv`):
 
 | Notebook | Purpose |
 |---|---|
@@ -11,6 +13,7 @@ exploratory and **gitignored** (like all `KS_KG/HypoInv/*.ipynb` and `*.csv`):
 | `04_subregion_seismicity.ipynb`    | East-of-fault ("Ulsan Fault zone") subcatalog + long-term spatiotemporal seismicity |
 | `05_error_ellipses.ipynb`          | 95% location-error ellipses parsed from the HYPOINVERSE `.prt` covariance |
 | `catalog_model_comparison.ipynb`   | stead vs phasenet_plus catalog consistency (counts, maps, depth, time, per-event quality) |
+| `04_waveform_similarity_hdb_{HHZ,HHN,HHE}_phasenet_plus.ipynb` | Inter-event waveform-similarity screen for still-remaining quarry blasts at `KG.HDB` (one notebook per component; built by `build_wf_nb.py`) |
 
 All three are **PARAMS-driven** (edit the first cell, re-run) and `model`-parameterized
 (`stead`/`original`/`phasenet_plus`). They `import uf_cluster as uf` (the module sits beside them in
@@ -172,6 +175,43 @@ picker under its own settings + preprocessing**, not a like-for-like sensitivity
 would harmonise preprocessing and pick a matched operating point (equal false-alarm rate, or count-matched),
 then re-associate/locate — a parameter study, not run here.
 
+## 5 — Waveform-similarity blast screening (`04_waveform_similarity_hdb_*`)
+
+A **second, waveform-feature** pass that catches quarry blasts the spatial/temporal decluster
+(§1) misses. Premise: blasts from one pit repeat the same source→path, so at a fixed common station
+(`KG.HDB`, ~99 % coverage of the working set) they produce **near-identical waveforms**; tectonic
+events do not (genuine repeaters/aftershocks correlate too, but separate out by hour-of-day and
+location in the evidence table). It operates on `event_waveforms_ulsanfault/` (per-event SAC, P/S
+picks) — **not** the located catalog — so it is an independent line of evidence. Exploratory only:
+it surfaces candidate blast families; **it does not remove events**.
+
+**Pipeline** (`uf_waveform_similarity.py`, same KST/Rayleigh/map helpers as `uf_cluster.py`):
+
+1. **Align on P** — two deterministic sources only: a station `pick` (`{ev}_picks.csv`) else a
+   synthetic `fallback` (`origin + median P-traveltime`), the fallbacks xcorr-refined to the picked
+   stack; picked events keep P at *t*=0.
+2. **Window + filter** — a **short P-aligned window `[P−0.5, +7.5] s`** (never the raw 120 s) +
+   L2-normalise; several bands (1–10 / 2–8 / 4–12 / 5–15 Hz; PRIMARY 1–10).
+3. **Similarity** — N×N **max-lag normalised cross-correlation** per band (small `MAXLAG`, alignment
+   already refined).
+4. **Cluster** — `linkage(method='average')` on `1−CC`, cut at a **correlation threshold**
+   (`fcluster(Z, 1−CC_THRESHOLD, 'distance')`) → data-driven family count; events that never reach
+   `CC_THRESHOLD` stay singletons (the non-repeating background).
+5. **Evidence + figures** — `cluster_evidence` (intra-cluster `mean_cc`, `spread_km`, `daytime_frac`,
+   `rayleigh_p`, `peak_hour`); clustered heatmaps, dendrogram, per-event/per-family **waveform
+   gathers** (`plot_cluster_sections` / `plot_cluster_grid`) and **spectrogram gathers**, PyGMT
+   cluster + hour-of-day maps, and per-family hour histograms.
+
+**Reading it.** Tight (high `mean_cc`) **and** daytime-concentrated (`daytime_frac` high,
+`rayleigh_p` small) **and** spatially compact (`spread_km`) **and** non-uniform hour = the
+**`blast_like`** flag (still-remaining quarry blast); tight but night/uniform = tectonic repeater.
+
+**Full-period result (HHZ, CC≥0.6 average linkage, 2716 of 2770 events):** 99 families ≥4 (+1159
+singletons); **7 `blast_like` families = 66 candidate events** (tight `mean_cc` 0.69–0.80, daytime,
+compact ≤3.7 km), in two pockets ~129.28°E and ~129.40–43°E. The analysis is replicated per
+component (`build_wf_nb.py {HHZ|HHN|HHE}`); `cross_component_blast.py` intersects the candidate
+**events** across components — **20 events flag on all three** (the robust set), 51 on ≥2.
+
 ## Reproducing
 
 ```bash
@@ -180,6 +220,9 @@ cd KS_KG/HypoInv
 taskset -c 0-7 jupyter nbconvert --to notebook --execute --inplace 03_blast_decluster_hdbscan.ipynb
 taskset -c 0-7 jupyter nbconvert --to notebook --execute --inplace 04_subregion_seismicity.ipynb   # needs 03's declustered CSV
 taskset -c 0-7 jupyter nbconvert --to notebook --execute --inplace 05_error_ellipses.ipynb          # needs local .prt
+# waveform-similarity blast screen (build the per-component notebook, then execute):
+python build_wf_nb.py HHZ && jupyter nbconvert --to notebook --execute --inplace 04_waveform_similarity_hdb_HHZ_phasenet_plus.ipynb
+python cross_component_blast.py            # cross-component candidate-event intersection (warm caches)
 ```
-Outputs (`catalog_*_declustered.csv`, `cluster_summary_*.csv`, `subcatalog_*`, `cluster3d_*.html`) land
-in `KS_KG/HypoInv/` and are gitignored.
+Outputs (`catalog_*_declustered.csv`, `cluster_summary_*.csv`, `subcatalog_*`, `cluster3d_*.html`,
+`wf_similarity_cache/`) land in `KS_KG/HypoInv/` and are gitignored.
