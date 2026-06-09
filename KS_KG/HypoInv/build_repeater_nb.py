@@ -24,6 +24,11 @@ BAND_TAG = f"{PRIMARY_BAND[0]}-{PRIMARY_BAND[1]}Hz"
 # bands to build features/CC for: primary + standard reference bands (dedup, primary first)
 BANDS_LIST = list(dict.fromkeys([PRIMARY_BAND, (1, 10), (2, 8), (4, 12), (5, 15)]))
 
+# optional CC-link threshold for repeater grouping (3rd arg; default 0.90). Lower = looser grouping
+# (bigger families). e.g. 0.8 for the broadband 1-25 Hz band, where high-frequency coda decorrelates
+# faster so genuine repeaters score a bit lower than in the narrow 1-10 Hz band.
+CC_REPEAT_ARG = float(sys.argv[3]) if len(sys.argv) > 3 else 0.90
+
 nb = nbf.v4.new_notebook()
 C = []
 def md(s): C.append(nbf.v4.new_markdown_cell(s))
@@ -59,7 +64,7 @@ WIN        = (-0.5, 7.5)        # s relative to P — short phase window
 BANDS      = {BANDS_LIST}   # Hz
 PRIMARY    = {PRIMARY_BAND}            # band for families / table / map
 MAXLAG     = 0.2               # s, CC lag search
-CC_REPEAT  = 0.90             # families merge while average CC >= this (repeaters are very similar)
+CC_REPEAT  = {CC_REPEAT_ARG}             # families merge while average (UPGMA) CC >= this
 LINKAGE    = "average"        # 'average' (UPGMA, conventional for CC distance); 'single' chains more
 MIN_FAMILY = 2                # min members to call it a repeating family (a doublet counts)
 CACHE      = "wf_similarity_cache"
@@ -83,9 +88,20 @@ print(f"events with {STATION}.{COMP}: {len(kept)} | joined to catalog: {int(meta
 
 md("""## 2 · Positive similarity matrix + repeater families
 
-Max-lag normalised cross-correlation (cached `cc_*.npy`, shared with the blast screen), then
-hierarchical clustering on `1 − CC`: families merge while their mean CC ≥ `CC_REPEAT`. Singletons (no
-similar sibling) stay unclustered.""")
+**How families are linked.** We build the N×N max-lag normalised cross-correlation matrix (cached
+`cc_*.npy`), turn it into a **distance** `D = 1 − CC` (identical waveforms → 0), and run
+**agglomerative hierarchical clustering** (`scipy.linkage`, `method=LINKAGE` = **`average`**, i.e.
+UPGMA). Every event starts as its own cluster; at each step the two clusters with the smallest
+**average** inter-member distance are merged, building a tree (dendrogram, §3). We then **cut** that
+tree at cophenetic height `1 − CC_REPEAT` (`fcluster(..., criterion="distance")`): two events land in
+the same **family** iff they join below that height — so with `average` linkage a family is a group
+whose *mean* pairwise CC stays ≥ `CC_REPEAT`.
+
+- **`average` (UPGMA)** is the conventional choice for correlation distance: robust to one weak pair,
+  unlike **single** linkage (one strong pair chains distant events together) or **complete** (every
+  pair must clear the bar). Switch via `LINKAGE`.
+- Lower `CC_REPEAT` = a **higher cut** = looser grouping = bigger/fewer families (more events linked).
+- Events with no sufficiently-similar sibling stay as singletons (dropped at `MIN_FAMILY`).""")
 code("""def band_cc(band):
     tag = f"{STATION}_{COMP}_w{WIN[0]}_{WIN[1]}_b{band[0]}-{band[1]}_lag{MAXLAG}_n{len(kept)}".replace(".", "p")
     f = os.path.join(CACHE, f"cc_{tag}.npy")
