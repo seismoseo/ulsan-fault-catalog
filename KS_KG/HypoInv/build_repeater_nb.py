@@ -130,7 +130,21 @@ code("""try:
 except Exception as e:
     print("PyGMT map skipped:", type(e).__name__, e)""")
 
-md(f"""## 8 · How to read this
+md("""## 8 · Enlarged UF-subregion map — families linked by lines
+
+Close-up on the Ulsan-fault subregion with each family's events **linked by lines** to their centroid:
+a **tight coloured star** = a genuinely co-located repeating family; a **long spoke** flags a member
+with a location outlier (or a spurious cross-correlation between distant events) — cross-check those
+against `spread_km` in the §4 table. Faint grey = events in no family; KG.HDB = yellow square; quarry
+centroids = red ✗; fault traces + subregion box drawn. Pass `link="time"` for the time-ordered path.""")
+code("""try:
+    fig_uf = wf.map_cluster_links(meta, labels, rep, link="centroid",
+                                  title=f"KG.HDB {COMP} repeater families (CC>={CC_REPEAT}) — UF subregion")
+    fig_uf.show()
+except Exception as e:
+    print("PyGMT subregion map skipped:", type(e).__name__, e)""")
+
+md(f"""## 9 · How to read this
 
 - **Repeating-earthquake family** = a tight (`mean_cc` ≥ {{CC_REPEAT}}), spatially compact
   (`spread_km` small) cluster that recurs over time. Read `recur_med_days` + the §6 timeline for the

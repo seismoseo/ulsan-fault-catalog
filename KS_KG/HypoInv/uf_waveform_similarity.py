@@ -781,6 +781,56 @@ def plot_repeater_sequences(meta, labels, table, top=15, colors=None, title=None
     return fig
 
 
+def map_cluster_links(meta, labels, table, top=None, reg=None, subregion=ufc.SUBREGION,
+                      fault_trace=ufc.FAULT_TRACE, station=STATION, summary_csv=CLUSTER_SUMMARY,
+                      pad=0.02, link="centroid", colors=None, title="Repeater families — UF subregion"):
+    """PyGMT **close-up on the UF subregion** with each family's events **linked by lines**, so a
+    co-located repeating family reads as a tight coloured star (or time-path). `link='centroid'` draws
+    a spoke from the family centroid to every member; `link='time'` draws the time-ordered path.
+    Non-family events sit behind as faint grey context; KG.HDB is a yellow square; quarry centroids
+    (cluster_summary `is_blast`) are red ✗; fault traces + the subregion box are drawn. `top` keeps
+    only the largest `top` families (default: every family in `table`). Returns the PyGMT Figure."""
+    import pygmt as pmt
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels; m = m[m["joined"]]
+    cids = (table["cluster"].head(top) if top else table["cluster"]).tolist()
+    cols = colors or cluster_colors(cids)
+    if reg is None:
+        reg = [subregion[0] - pad, subregion[1] + pad, subregion[2] - pad, subregion[3] + pad]
+    fig = pmt.Figure()
+    pmt.config(FORMAT_GEO_MAP="ddd.xx", MAP_FRAME_TYPE="plain")
+    fig.basemap(region=reg, projection="M16c", frame=["af", f"+t{title}"])
+    fig.coast(land="white", water="lightblue", shorelines=True)
+    ufc.plot_faults(fig, fault_trace)
+    bg = m[~m["fam"].isin(cids)]
+    if len(bg):
+        fig.plot(x=bg["lon"], y=bg["lat"], style="c0.06c", fill="gray85")
+    for cid in cids:
+        g = m[m["fam"] == cid]
+        if len(g) < 2:
+            continue
+        col = _gmt_rgb(cols.get(int(cid), "steelblue"))
+        if link == "time":
+            gg = g.assign(_t=pd.to_datetime(g["time"])).sort_values("_t")
+            fig.plot(x=gg["lon"], y=gg["lat"], pen=f"0.6p,{col}")
+        else:                                                # centroid star
+            clo, cla = g["lon"].mean(), g["lat"].mean()
+            for lo, la in zip(g["lon"], g["lat"]):
+                fig.plot(x=[clo, lo], y=[cla, la], pen=f"0.6p,{col}")
+        fig.plot(x=g["lon"], y=g["lat"], style="c0.11c", fill=col, pen="0.2p,black")
+    if summary_csv and os.path.exists(summary_csv):
+        cs = pd.read_csv(summary_csv); q = cs[cs.get("is_blast", False) == True]
+        if len(q):
+            fig.plot(x=q["lon_centroid"], y=q["lat_centroid"], style="x0.4c", pen="1.5p,red")
+    try:
+        tr = read(_sac_path(list(meta["event"])[0], station))[0]
+        fig.plot(x=[tr.stats.sac.stlo], y=[tr.stats.sac.stla], style="s0.42c", fill="yellow", pen="1p,black")
+    except Exception:                                       # noqa: BLE001
+        pass
+    bl, ba = ufc._subregion_box(subregion)
+    fig.plot(x=bl, y=ba, pen="1.2p,blue")
+    return fig
+
+
 def s_minus_p(kept, station=STATION, wf_root=WF_ROOT):
     """S-P seconds per event (NaN if the station's S or P pick is missing) — for the gather's
     S annotation. P is at t=0 in the aligned window, so S plots at this value."""
