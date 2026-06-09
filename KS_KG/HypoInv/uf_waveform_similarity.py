@@ -402,6 +402,52 @@ def similarity_matrix(X, maxlag=DEFAULT_MAXLAG, sr=SR):
     return best.astype(np.float32)
 
 
+def signed_similarity(X, maxlag=DEFAULT_MAXLAG, sr=SR, return_lags=False):
+    """Signed max-lag cross-correlation — like `similarity_matrix` but KEEPS the sign, to expose
+    anti-correlated ("anti-repeater") pairs that the max-|CC| similarity throws away.
+
+    For each integer lag in [-L, L] (L = maxlag*sr) build the renormalised overlap dot-product
+    matrix and track BOTH extrema over lags. Returns a dict of N x N float32 matrices:
+
+      cc_pos : MAX over lags  — **identical to `similarity_matrix(X)`** (the positive half).
+      cc_neg : MIN over lags  — the most-negative correlation (the anti-correlation signal).
+      cc_ext : signed extreme — cc_neg where |cc_neg| > |cc_pos| else cc_pos.
+      cc_lag0: signed CC at lag 0 (X @ X.T) — correlation at the EXACT P datum, no lag freedom.
+
+    The crux: within +/-maxlag a half-cycle shift can FAKE cc_neg ~ -1 for an otherwise positively
+    correlated pair, so cc_neg is only meaningful READ WITH cc_pos. A true anti-repeater has
+    `cc_neg <= -0.85 AND cc_pos` not also high (you cannot make anti-phase signals positively
+    correlate within +/-maxlag); `cc_lag0 <= -0.85` is the cleanest evidence (anti-correlated at the
+    same datum used for repeaters). Diagonals: cc_pos/cc_ext/cc_lag0 -> 1; cc_neg -> 1 (self has no
+    anti-twin). Symmetric. `return_lags=True` adds int lag_pos/lag_neg (signed sample lag). Same cost
+    as `similarity_matrix` (one extra running extremum)."""
+    n, m = X.shape
+    L = int(round(maxlag * sr))
+    c0 = (X @ X.T).astype(np.float32)                    # lag 0 (signed)
+    pos = c0.copy(); neg = c0.copy()
+    if return_lags:
+        lag_pos = np.zeros((n, n), dtype=np.int16)
+        lag_neg = np.zeros((n, n), dtype=np.int16)
+    for lag in range(1, L + 1):
+        A = _row_l2(X[:, lag:]); B = _row_l2(X[:, :m - lag])
+        c = A @ B.T
+        for Mat, sgn in ((c, +1), (c.T, -1)):            # +lag (row leads) and symmetric -lag
+            if return_lags:
+                gp = Mat > pos; pos = np.where(gp, Mat, pos); lag_pos = np.where(gp, sgn * lag, lag_pos)
+                gn = Mat < neg; neg = np.where(gn, Mat, neg); lag_neg = np.where(gn, sgn * lag, lag_neg)
+            else:
+                pos = np.maximum(pos, Mat); neg = np.minimum(neg, Mat)
+    cc_ext = np.where(np.abs(neg) > np.abs(pos), neg, pos)
+    for M in (pos, cc_ext, c0):
+        np.fill_diagonal(M, 1.0)
+    np.fill_diagonal(neg, 1.0)                            # self has no anti-twin
+    out = dict(cc_pos=pos.astype(np.float32), cc_neg=neg.astype(np.float32),
+               cc_ext=cc_ext.astype(np.float32), cc_lag0=c0.astype(np.float32))
+    if return_lags:
+        out["lag_pos"] = lag_pos.astype(np.int16); out["lag_neg"] = lag_neg.astype(np.int16)
+    return out
+
+
 # --------------------------------------------------------------- clustering
 def ward_clusters(cc, threshold=None, n_clusters=None, method="ward"):
     """Hierarchical clustering on distance = 1 - CC.
@@ -550,6 +596,37 @@ def plot_cluster_gathers(X, labels, evidence, sr=SR, win=DEFAULT_WIN, max_cluste
     for ax in axes.ravel()[len(cids):]:
         ax.axis("off")
     fig.suptitle("Cluster waveform gathers (grey = members, red = stack)", fontsize=10)
+    fig.tight_layout()
+    return fig
+
+
+def plot_antipair_gathers(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, ncol=3, title=None):
+    """Overlay gallery for candidate ANTI-correlated pairs. Each panel shows, on the P-aligned
+    `band` window: event *i* (black), event *j* un-flipped (faint grey), and event *j* **flipped**
+    (`-X[j]`, red). A true polarity reversal makes the red curve coincide with the black one. The
+    title carries the three diagnostics so the half-cycle degeneracy is visible at a glance:
+    `lag0` (signed CC at the P datum), `neg` (most-negative over lags), `pos` (most-positive over
+    lags — if this is ALSO high, the pair is an ordinary repeater offset by ~half a period, not a
+    reversal). `pairs` = list of dicts with at least i, j (+ optional cc_lag0/cc_neg/cc_pos)."""
+    import matplotlib.pyplot as plt
+    X = res["bands"][tuple(band)]; kept = res["kept"]
+    t = np.arange(X.shape[1]) / sr + win[0]
+    npr = len(pairs); ncol = min(ncol, npr) or 1; nrow = int(np.ceil(npr / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(3.7 * ncol, 2.4 * nrow), dpi=130, squeeze=False)
+    for ax, p in zip(axes.ravel(), pairs):
+        i, j = p["i"], p["j"]
+        ax.plot(t, _l2(X[j]), color="0.75", lw=0.5)                       # j (un-flipped)
+        ax.plot(t, _l2(X[i]), color="k", lw=0.9)                          # i
+        ax.plot(t, -_l2(X[j]), color="crimson", lw=0.9)                   # j flipped
+        ax.axvline(0, color="b", lw=0.5, ls="--")                        # P datum
+        lab = "lag0={:.2f} neg={:.2f} pos={:.2f}".format(
+            p.get("cc_lag0", np.nan), p.get("cc_neg", np.nan), p.get("cc_pos", np.nan))
+        ax.set_title("{}\n× {}\n{}".format(kept[i], kept[j], lab), fontsize=6.5)
+        ax.set_xlabel("Time from P (s)", fontsize=7); ax.set_yticks([]); ax.tick_params(labelsize=6)
+    for ax in axes.ravel()[npr:]:
+        ax.axis("off")
+    fig.suptitle(title or "Anti-pair overlays ({}-{} Hz): black = event i, red = event j FLIPPED "
+                 "(coincide ⇒ true reversal)".format(band[0], band[1]), fontsize=9)
     fig.tight_layout()
     return fig
 
@@ -1215,6 +1292,50 @@ def map_clusters(meta, labels, evidence, reg=None, title="Waveform clusters",
         fig.plot(x=[tr.stats.sac.stlo], y=[tr.stats.sac.stla], style="s0.45c",
                  fill="yellow", pen="1.2p,black")
     except Exception:                                   # noqa: BLE001
+        pass
+    if subregion is not None:
+        bl, ba = ufc._subregion_box(subregion)
+        fig.plot(x=bl, y=ba, pen="1.5p,blue")
+    return fig
+
+
+def map_antipairs(meta, pairs, value="cc_neg", station=STATION, reg=None,
+                  subregion=ufc.SUBREGION, fault_trace=ufc.FAULT_TRACE, pad=0.08,
+                  title="Anti-correlated pairs"):
+    """PyGMT map of candidate anti-pairs: each pair = two joined epicentres connected by a straight
+    segment, so **co-located** pairs (short segment — a possible same-patch reversal) vs **distant**
+    pairs (long segment — coincidental) are obvious by eye. Endpoints are red circles; the common
+    `station` is a yellow square; the Ulsan-fault trace + `subregion` box are drawn for context.
+    `pairs` = list of dicts with i, j (indices into `meta`) and the `value` key for reference. Pairs
+    with an unjoined endpoint (no hypocentre) are skipped. Returns the PyGMT Figure."""
+    import pygmt as pmt
+    m = meta.copy().reset_index(drop=True)
+    segs, lons, lats = [], [], []
+    for p in pairs:
+        ri, rj = m.iloc[p["i"]], m.iloc[p["j"]]
+        if not (ri["joined"] and rj["joined"]):
+            continue
+        segs.append((ri["lon"], ri["lat"], rj["lon"], rj["lat"]))
+        lons += [ri["lon"], rj["lon"]]; lats += [ri["lat"], rj["lat"]]
+    fig = pmt.Figure()
+    if reg is None:
+        reg = ([min(lons) - pad, max(lons) + pad, min(lats) - pad, max(lats) + pad] if lons else
+               [subregion[0] - 0.1, subregion[1] + 0.1, subregion[2] - 0.1, subregion[3] + 0.1])
+    pmt.config(FORMAT_GEO_MAP="ddd.xx", MAP_FRAME_TYPE="plain")
+    fig.basemap(region=reg, projection="M14c", frame=["af", f"+t{title}"])
+    fig.coast(land="white", water="lightblue", shorelines=True)
+    ufc.plot_faults(fig, fault_trace)
+    for lo1, la1, lo2, la2 in segs:
+        fig.plot(x=[lo1, lo2], y=[la1, la2], pen="1p,gray40")
+    if segs:
+        ex = np.array(segs)
+        fig.plot(x=np.r_[ex[:, 0], ex[:, 2]], y=np.r_[ex[:, 1], ex[:, 3]],
+                 style="c0.16c", fill="red", pen="0.3p,black")
+    try:
+        tr = read(_sac_path(list(meta["event"])[0], station))[0]
+        fig.plot(x=[tr.stats.sac.stlo], y=[tr.stats.sac.stla], style="s0.45c",
+                 fill="yellow", pen="1.2p,black")
+    except Exception:                                       # noqa: BLE001
         pass
     if subregion is not None:
         bl, ba = ufc._subregion_box(subregion)
