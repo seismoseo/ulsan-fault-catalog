@@ -179,6 +179,16 @@ curve lands on the black one, the pair is a true reversal. Watch the titles: a h
 `lag0`/`neg` is the half-cycle signature (the un-flipped grey would *also* match at a shifted lag).""")
 code("""wf.plot_antipair_gathers(res, PAIRS[:TOPN], band=PRIMARY, win=WIN);""")
 
+md("""### 5b · Full-width detail — one wide row per pair
+
+The grid above squeezes the whole window into a narrow panel; here each pair gets a **full-width row**
+so individual wiggles are legible, plus a **zoom on the P→S window** (`zoom=(-0.3, 3.0)`) for the
+finest detail. Black = event *i*, red = event *j* **flipped**. If the red lands exactly on the black
+the pair is a true reversal; a visible ~half-cycle slip between them is the timing artefact.""")
+code("""wf.plot_antipair_detail(res, PAIRS[:TOPN], band=PRIMARY, win=WIN);
+wf.plot_antipair_detail(res, PAIRS[:min(8, TOPN)], band=PRIMARY, win=WIN, zoom=(-0.3, 3.0),
+                        title="Anti-pair detail — zoom P→S");""")
+
 md("""## 6 · Where are the candidates? + distance / time separation
 
 `map_antipairs` joins each candidate's two epicentres with a segment (short = co-located, a possible

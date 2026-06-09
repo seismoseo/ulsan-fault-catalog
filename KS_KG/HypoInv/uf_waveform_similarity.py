@@ -631,6 +631,40 @@ def plot_antipair_gathers(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, nco
     return fig
 
 
+def plot_antipair_detail(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, zoom=None,
+                         width=14.0, row_h=1.8, title=None):
+    """**One full-width row per pair** so the wiggle match is legible (the grid `plot_antipair_gathers`
+    squeezes the whole window into a narrow panel). Each row overlays, on the P-aligned `band`:
+    event *i* (black), event *j* **flipped** (`-X[j]`, red), event *j* un-flipped (faint grey).
+    `zoom=(t0, t1)` restricts the time axis for fine detail (e.g. `zoom=(-0.3, 3.0)` around P→S).
+    `pairs` = list of dicts with i, j (+ optional cc_lag0/cc_neg/cc_pos). Returns the fig."""
+    import matplotlib.pyplot as plt
+    X = res["bands"][tuple(band)]; kept = res["kept"]
+    t = np.arange(X.shape[1]) / sr + win[0]
+    n = len(pairs)
+    fig, axes = plt.subplots(n, 1, figsize=(width, row_h * n), dpi=130, squeeze=False)
+    for k, (ax, p) in enumerate(zip(axes.ravel(), pairs)):
+        i, j = p["i"], p["j"]
+        ax.plot(t, _l2(X[j]), color="0.78", lw=0.6)                     # j (un-flipped)
+        ax.plot(t, _l2(X[i]), color="k", lw=1.0)                        # i
+        ax.plot(t, -_l2(X[j]), color="crimson", lw=1.0)                 # j flipped
+        ax.axvline(0, color="b", lw=0.6, ls="--")                      # P datum
+        if zoom is not None:
+            ax.set_xlim(*zoom)
+        ax.margins(x=0)
+        lab = "lag0={:.2f}  neg={:.2f}  pos={:.2f}".format(
+            p.get("cc_lag0", np.nan), p.get("cc_neg", np.nan), p.get("cc_pos", np.nan))
+        ax.set_title("{} × {}    {}".format(kept[i], kept[j], lab), fontsize=8, loc="left")
+        ax.set_yticks([]); ax.tick_params(labelsize=7)
+        if k < n - 1:
+            ax.set_xticklabels([])
+    axes.ravel()[-1].set_xlabel("Time from P (s)", fontsize=9)
+    fig.suptitle(title or "Anti-pair detail ({}-{} Hz): black = event i, red = event j FLIPPED".format(
+        band[0], band[1]), fontsize=10)
+    fig.tight_layout()
+    return fig
+
+
 def s_minus_p(kept, station=STATION, wf_root=WF_ROOT):
     """S-P seconds per event (NaN if the station's S or P pick is missing) — for the gather's
     S annotation. P is at t=0 in the aligned window, so S plots at this value."""
