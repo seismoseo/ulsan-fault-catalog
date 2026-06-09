@@ -29,12 +29,36 @@ BANDS_LIST = list(dict.fromkeys([PRIMARY_BAND, (1, 10), (2, 8), (4, 12), (5, 15)
 # faster so genuine repeaters score a bit lower than in the narrow 1-10 Hz band.
 CC_REPEAT_ARG = float(sys.argv[3]) if len(sys.argv) > 3 else 0.90
 
+# optional linkage method (4th arg; default 'average' = UPGMA). 'single' = nearest-neighbour
+# (friends-of-friends chaining). Separate notebooks are emitted per method (filename-tagged).
+LINKAGE_ARG = sys.argv[4] if len(sys.argv) > 4 else "average"
+assert LINKAGE_ARG in ("average", "single", "complete", "ward"), LINKAGE_ARG
+IS_DEFAULT_LINKAGE = LINKAGE_ARG == "average"
+LINKAGE_TAG = "" if IS_DEFAULT_LINKAGE else f"_{LINKAGE_ARG}"
+# how to describe the chosen linkage in the §2 markdown
+LINKAGE_DESC = {
+    "average": ("**`average`** (UPGMA): two clusters merge on the **mean** pairwise distance between "
+                "their members, so a family is a group whose **mean** pairwise CC stays ≥ `CC_REPEAT`. "
+                "Robust to one weak pair; the conventional choice for correlation distance."),
+    "single": ("**`single`** (nearest-neighbour): two clusters merge on their **closest** pair, so a "
+               "family is a **connected component** — events chain together through a *path* of "
+               "pairwise links each with CC ≥ `CC_REPEAT` (friends-of-friends), even if the two ends "
+               "are themselves dissimilar. This captures **elongated / gradually-evolving** families "
+               "a mean-linkage cut would split, but one strong *coincidental* pair can **bridge** two "
+               "distinct sources into a single chained family — so cross-check families against the "
+               "§3 heatmap (chained families show an off-diagonal ladder rather than a solid block) "
+               "and the §8 map (a chained family may sprawl spatially)."),
+    "complete": ("**`complete`** (farthest-neighbour): **every** pair in a family must have CC ≥ "
+                 "`CC_REPEAT` — the strictest grouping."),
+    "ward": "**`ward`** (minimum-variance; note 1−CC is not strictly Euclidean, so interpret with care).",
+}[LINKAGE_ARG]
+
 nb = nbf.v4.new_notebook()
 C = []
 def md(s): C.append(nbf.v4.new_markdown_cell(s))
 def code(s): C.append(nbf.v4.new_code_cell(s))
 
-md(f"""# Repeating earthquakes at `KG.HDB` ({NB_COMP}, {BAND_TAG}) — waveform-similarity families
+md(f"""# Repeating earthquakes at `KG.HDB` ({NB_COMP}, {BAND_TAG}, {LINKAGE_ARG} linkage) — waveform-similarity families
 
 **Idea.** Events that rupture the **same fault patch** produce near-identical waveforms at a fixed
 station. Clustering on the **positive** max-lag cross-correlation (CC ≥ `CC_REPEAT`) groups these
@@ -64,8 +88,8 @@ WIN        = (-0.5, 7.5)        # s relative to P — short phase window
 BANDS      = {BANDS_LIST}   # Hz
 PRIMARY    = {PRIMARY_BAND}            # band for families / table / map
 MAXLAG     = 0.2               # s, CC lag search
-CC_REPEAT  = {CC_REPEAT_ARG}             # families merge while average (UPGMA) CC >= this
-LINKAGE    = "average"        # 'average' (UPGMA, conventional for CC distance); 'single' chains more
+CC_REPEAT  = {CC_REPEAT_ARG}             # CC-link threshold: cut the linkage tree at 1 - CC_REPEAT
+LINKAGE    = "{LINKAGE_ARG}"        # 'average' (UPGMA); 'single' = friends-of-friends chaining
 MIN_FAMILY = 2                # min members to call it a repeating family (a doublet counts)
 CACHE      = "wf_similarity_cache"
 """
@@ -86,22 +110,21 @@ kept, info = res["kept"], res["info"]
 meta = wf.load_event_meta(kept)          # hypocentre + KST hour (NO magnitude — preliminary)
 print(f"events with {STATION}.{COMP}: {len(kept)} | joined to catalog: {int(meta['joined'].sum())}")""")
 
-md("""## 2 · Positive similarity matrix + repeater families
+md(f"""## 2 · Positive similarity matrix + repeater families
 
 **How families are linked.** We build the N×N max-lag normalised cross-correlation matrix (cached
 `cc_*.npy`), turn it into a **distance** `D = 1 − CC` (identical waveforms → 0), and run
-**agglomerative hierarchical clustering** (`scipy.linkage`, `method=LINKAGE` = **`average`**, i.e.
-UPGMA). Every event starts as its own cluster; at each step the two clusters with the smallest
-**average** inter-member distance are merged, building a tree (dendrogram, §3). We then **cut** that
-tree at cophenetic height `1 − CC_REPEAT` (`fcluster(..., criterion="distance")`): two events land in
-the same **family** iff they join below that height — so with `average` linkage a family is a group
-whose *mean* pairwise CC stays ≥ `CC_REPEAT`.
+**agglomerative hierarchical clustering** (`scipy.linkage`, `method="{LINKAGE_ARG}"`). Every event
+starts as its own cluster; clusters merge bottom-up into a tree (dendrogram, §3), which we then
+**cut** at cophenetic height `1 − CC_REPEAT` (`fcluster(..., criterion="distance")`): two events land
+in the same **family** iff they join below that height.
 
-- **`average` (UPGMA)** is the conventional choice for correlation distance: robust to one weak pair,
-  unlike **single** linkage (one strong pair chains distant events together) or **complete** (every
-  pair must clear the bar). Switch via `LINKAGE`.
+**This notebook uses {LINKAGE_DESC}**
+
 - Lower `CC_REPEAT` = a **higher cut** = looser grouping = bigger/fewer families (more events linked).
-- Events with no sufficiently-similar sibling stay as singletons (dropped at `MIN_FAMILY`).""")
+- Events with no sufficiently-similar sibling stay as singletons (dropped at `MIN_FAMILY`).
+- Compare against the `average`-linkage notebook (same band/CC) to see which families are robust to
+  the linkage choice vs which are linkage artifacts.""")
 code("""def band_cc(band):
     tag = f"{STATION}_{COMP}_w{WIN[0]}_{WIN[1]}_b{band[0]}-{band[1]}_lag{MAXLAG}_n{len(kept)}".replace(".", "p")
     f = os.path.join(CACHE, f"cc_{tag}.npy")
@@ -260,6 +283,6 @@ md(f"""## 9 · How to read this
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
 _suffix = "" if IS_DEFAULT_BAND else f"_{BAND_TAG}"
-out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/07_repeaters_KGHDB_{NB_COMP}{_suffix}_phasenet_plus.ipynb"
+out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/07_repeaters_KGHDB_{NB_COMP}{_suffix}{LINKAGE_TAG}_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")
