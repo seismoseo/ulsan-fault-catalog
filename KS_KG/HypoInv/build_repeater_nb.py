@@ -122,6 +122,14 @@ code("""wf.plot_family_gathers(res, labels, rep, band=PRIMARY, win=WIN, top=8, w
 wf.plot_family_gathers(res, labels, rep, band=PRIMARY, win=WIN, top=8, width=15, zoom=(-0.3, 3.0),
                        title="Repeater family gathers — zoom P→S");""")
 
+md("""### 5c · Per-cluster record sections — every event, time-ordered (ALL families)
+
+For **every** family a separate full-width figure: all member waveforms stacked **top = oldest →
+bottom = newest** (UTC timestamps on the right), P-aligned at t=0. A genuine repeater shows the same
+wiggle repeating straight down the column over time. This renders one plot **per cluster** for all
+families in the table — set `top=N` to limit, or `zoom=(-0.3, 3.0)` for the P→S detail.""")
+code("""_ = wf.plot_family_sections(res, labels, rep, band=PRIMARY, win=WIN);""")
+
 md("""## 6 · Recurrence timeline + interval distribution
 
 Top families as time-lanes (a marker at each member's origin time), and the pooled distribution of

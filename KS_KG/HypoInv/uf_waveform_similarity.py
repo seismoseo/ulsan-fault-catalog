@@ -639,6 +639,56 @@ def plot_family_gathers(res, labels, table, band=REF_BAND, sr=SR, win=DEFAULT_WI
     return fig
 
 
+def plot_family_sections(res, labels, table, band=REF_BAND, sr=SR, win=DEFAULT_WIN, top=None,
+                         fig_w=14.0, row_h=0.32, amp=0.6, max_per=80, zoom=None, colors=None,
+                         annotate_utc=True):
+    """For EVERY family in `table` (or the largest `top`), a **separate full-width record-section
+    figure**: all member traces stacked **top→bottom in time order** (oldest on top, newest at the
+    bottom), P-aligned at t=0 (blue dashed), each trace timestamped in UTC on the right. One figure
+    per cluster (not subplots). Returns a list of (cluster_id, fig).
+
+    `res["kept"]` is in origin-time order (list_events returns sorted event-dir names), so the within-
+    family index order IS time order. `zoom=(t0,t1)` restricts the axis; `max_per` caps very large
+    families; `amp` scales the wiggle height; `colors` keeps the family colour consistent."""
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({"figure.max_open_warning": 0})      # many families -> many open figures
+    X = res["bands"][tuple(band)]; kept = res["kept"]
+    t = np.arange(X.shape[1]) / sr + win[0]
+    labels = np.asarray(labels)
+    cids = (table["cluster"].head(top) if top else table["cluster"]).tolist()
+    cols = colors or cluster_colors(cids)
+    xr = zoom[1] if zoom is not None else t[-1]
+    figs = []
+    for cid in cids:
+        idx = np.where(labels == cid)[0]                     # ascending index == time order
+        if max_per:
+            idx = idx[:max_per]
+        m = len(idx)
+        if m == 0:
+            continue
+        col = cols.get(int(cid), "steelblue")
+        fig, ax = plt.subplots(figsize=(fig_w, max(1.8, row_h * m)), dpi=130)
+        for r, i in enumerate(idx):
+            y = m - 1 - r                                    # r=0 (oldest) on top
+            ax.plot(t, y + amp * _l2(X[i]), color=col, lw=0.6)
+            if annotate_utc:
+                e = kept[i]
+                lab = f"{e[0:4]}-{e[4:6]}-{e[6:8]} {e[8:10]}:{e[10:12]}:{e[12:14]}"
+                ax.text(xr, y, "  " + lab, fontsize=6, va="center", ha="left",
+                        color="0.35", clip_on=False)
+        ax.axvline(0, color="b", lw=0.7, ls="--")            # P
+        ax.set_xlim(t[0] if zoom is None else zoom[0], xr)
+        ax.set_ylim(-1, m); ax.set_yticks([])
+        row = table[table["cluster"] == cid].iloc[0]
+        ax.set_title("family {} — n={}, mean_cc={}, spread={} km   (top = oldest → bottom = newest)".format(
+            cid, int(row["n"]), row.get("mean_cc", "?"), row.get("spread_km", "?")),
+            fontsize=9, color=col, loc="left")
+        ax.set_xlabel("Time from P (s)")
+        fig.subplots_adjust(right=0.80)
+        figs.append((int(cid), fig))
+    return figs
+
+
 def plot_antipair_gathers(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, ncol=3, title=None):
     """Overlay gallery for candidate ANTI-correlated pairs. Each panel shows, on the P-aligned
     `band` window: event *i* (black), event *j* un-flipped (faint grey), and event *j* **flipped**
