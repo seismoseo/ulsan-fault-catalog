@@ -702,6 +702,85 @@ def plot_antipair_compare(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, zoo
     return fig
 
 
+# --------------------------------------------------------------- repeating earthquakes
+def repeater_table(meta, labels, cc, min_size=2, day=(6, 17)):
+    """Per repeating-earthquake FAMILY (a waveform cluster with >= `min_size` members) — the classic
+    repeater diagnostics, **magnitude-free** (the catalog ML is preliminary). Columns:
+
+      cluster, n (repeat count), mean_cc (intra-family off-diagonal CC; ~1 = tight repeater),
+      lat_c, lon_c, depth_med, spread_km (epicentral compactness — repeaters are co-located),
+      t_first, t_last, span_days, recur_med_days (median inter-event interval, sorted by time),
+      daytime_frac / rayleigh_p (06-17 KST fraction + hour-of-day uniformity — a tight, daytime,
+      hour-clustered family is a residual quarry blast; a uniform-hour family is tectonic).
+
+    Sorted by `n` (most-repeating first). Reuses `ufc.rayleigh_test` and the 111 km/deg convention."""
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels
+    rows = []
+    for cid, g in m.groupby("fam"):
+        if len(g) < min_size:
+            continue
+        idx = g.index.values
+        iu = np.triu_indices(len(idx), k=1)
+        mean_cc = float(cc[np.ix_(idx, idx)][iu].mean()) if len(iu[0]) else np.nan
+        rec = dict(cluster=int(cid), n=int(len(g)), mean_cc=round(mean_cc, 3))
+        gj = g[g["joined"]].copy()
+        if len(gj):
+            gj["t"] = pd.to_datetime(gj["time"]); gj = gj.sort_values("t")
+            latc, lonc = gj["lat"].mean(), gj["lon"].mean()
+            spread = float(np.median(np.hypot((gj["lat"] - latc) * 111.0,
+                                              (gj["lon"] - lonc) * 111.0 * np.cos(np.radians(latc)))))
+            dt = gj["t"].diff().dropna().dt.total_seconds() / 86400.0
+            rt = ufc.rayleigh_test(gj["hour"].values)
+            rec.update(lat_c=round(latc, 4), lon_c=round(lonc, 4),
+                       depth_med=round(float(gj["depth"].median()), 2), spread_km=round(spread, 2),
+                       t_first=gj["t"].min().strftime("%Y-%m-%d"), t_last=gj["t"].max().strftime("%Y-%m-%d"),
+                       span_days=round(float((gj["t"].max() - gj["t"].min()).total_seconds() / 86400.0), 1),
+                       recur_med_days=round(float(dt.median()), 1) if len(dt) else np.nan,
+                       daytime_frac=round(float(gj["hour"].between(day[0], day[1]).mean()), 2),
+                       rayleigh_p=round(rt["p"], 4), n_joined=int(len(gj)))
+        rows.append(rec)
+    cols = ["cluster", "n", "mean_cc", "lat_c", "lon_c", "depth_med", "spread_km", "t_first",
+            "t_last", "span_days", "recur_med_days", "daytime_frac", "rayleigh_p", "n_joined"]
+    df = pd.DataFrame(rows)
+    df = df.reindex(columns=[c for c in cols if c in df.columns])
+    return df.sort_values("n", ascending=False).reset_index(drop=True)
+
+
+def plot_repeater_sequences(meta, labels, table, top=15, colors=None, title=None):
+    """Classic repeater view: the TOP `top` families (by repeat count) as **recurrence time-lanes**
+    (one row each; a marker at every member origin time, coloured by family) + the pooled
+    **recurrence-interval histogram**. Magnitude-free (markers are uniform). Returns the fig."""
+    import matplotlib.pyplot as plt
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels
+    cids = table["cluster"].head(top).tolist()
+    cols = colors or cluster_colors(cids)
+    fig, (axL, axH) = plt.subplots(1, 2, figsize=(14, max(3.0, 0.42 * len(cids))), dpi=130,
+                                   gridspec_kw={"width_ratios": [3, 1]})
+    all_dt = []
+    for r, cid in enumerate(cids):
+        g = m[(m["fam"] == cid) & (m["joined"])].copy()
+        if not len(g):
+            continue
+        t = pd.to_datetime(g["time"]).sort_values()
+        axL.plot(t, [r] * len(t), "-", color="0.8", lw=0.6, zorder=1)
+        axL.scatter(t, [r] * len(t), s=26, color=cols.get(int(cid), "steelblue"),
+                    edgecolor="k", lw=0.3, zorder=3)
+        all_dt += list(t.diff().dropna().dt.total_seconds() / 86400.0)
+    axL.set_yticks(range(len(cids)))
+    axL.set_yticklabels([f"fam {c} (n={int(table.loc[table.cluster == c, 'n'].iloc[0])})"
+                         for c in cids], fontsize=7)
+    axL.invert_yaxis()
+    axL.set(xlabel="time", title=f"Top {len(cids)} repeater families — recurrence timeline")
+    if all_dt:
+        all_dt = np.clip(np.array(all_dt), 1e-3, None)
+        axH.hist(np.log10(all_dt), bins=30, color="seagreen")
+        axH.set(xlabel="log$_{10}$ recurrence interval (days)", ylabel="event pairs",
+                title="Recurrence intervals")
+    fig.suptitle(title or "Repeating-earthquake families at the common station", fontsize=11)
+    fig.tight_layout()
+    return fig
+
+
 def s_minus_p(kept, station=STATION, wf_root=WF_ROOT):
     """S-P seconds per event (NaN if the station's S or P pick is missing) — for the gather's
     S annotation. P is at t=0 in the aligned window, so S plots at this value."""
