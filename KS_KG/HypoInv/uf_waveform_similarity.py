@@ -665,6 +665,43 @@ def plot_antipair_detail(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, zoom
     return fig
 
 
+def plot_antipair_compare(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, zoom=None,
+                          width=14.0, row_h=1.8, title=None):
+    """**Two overlays per pair, side by side**, at the SAME P-aligned (lag-0) datum, so you can see
+    directly whether a pair is an anti-repeater or an ordinary repeater:
+
+      LEFT  — event i (black) vs event j **as-is** (blue): they overlay for a *repeater*, mirror for
+              an *anti-repeater*. (At lag 0 the as-is correlation is `cc_lag0`.)
+      RIGHT — event i (black) vs event j **flipped** (`-X[j]`, red): they overlay for an *anti-repeater*.
+
+    Caveat baked into the title: `pos` is the best POSITIVE correlation over *all* lags — if it is high,
+    the as-is traces also match after a small (≈ half-period) shift, i.e. a half-cycle-offset repeater
+    rather than a true reversal; a genuine anti-repeater has a clean flipped match AND a *low* `pos`.
+    `zoom=(t0,t1)` for detail; `pairs` = dicts with i, j (+ optional cc_lag0/cc_neg/cc_pos)."""
+    import matplotlib.pyplot as plt
+    X = res["bands"][tuple(band)]; kept = res["kept"]
+    t = np.arange(X.shape[1]) / sr + win[0]
+    n = len(pairs)
+    fig, axes = plt.subplots(n, 2, figsize=(width, row_h * n), dpi=130, squeeze=False, sharex=True)
+    for r, p in enumerate(pairs):
+        i, j = p["i"], p["j"]; a0, a1 = axes[r]
+        a0.plot(t, _l2(X[i]), color="k", lw=1.0); a0.plot(t, _l2(X[j]), color="royalblue", lw=1.0)
+        a1.plot(t, _l2(X[i]), color="k", lw=1.0); a1.plot(t, -_l2(X[j]), color="crimson", lw=1.0)
+        for a in (a0, a1):
+            a.axvline(0, color="b", lw=0.5, ls="--"); a.set_yticks([]); a.tick_params(labelsize=7); a.margins(x=0)
+            if zoom is not None:
+                a.set_xlim(*zoom)
+        a0.set_title("{} × {}   as-is (blue)   lag0={:.2f}".format(
+            kept[i], kept[j], p.get("cc_lag0", np.nan)), fontsize=7, loc="left")
+        a1.set_title("flipped (red)   neg={:.2f}   pos={:.2f}".format(
+            p.get("cc_neg", np.nan), p.get("cc_pos", np.nan)), fontsize=7, loc="left")
+    axes[-1, 0].set_xlabel("Time from P (s)", fontsize=9); axes[-1, 1].set_xlabel("Time from P (s)", fontsize=9)
+    fig.suptitle(title or "Each pair — LEFT: event j as-is (blue) · RIGHT: event j flipped (red) · "
+                 "black = event i   [{}-{} Hz]".format(band[0], band[1]), fontsize=10)
+    fig.tight_layout()
+    return fig
+
+
 def s_minus_p(kept, station=STATION, wf_root=WF_ROOT):
     """S-P seconds per event (NaN if the station's S or P pick is missing) — for the gather's
     S annotation. P is at t=0 in the aligned window, so S plots at this value."""

@@ -189,6 +189,23 @@ code("""wf.plot_antipair_detail(res, PAIRS[:TOPN], band=PRIMARY, win=WIN);
 wf.plot_antipair_detail(res, PAIRS[:min(8, TOPN)], band=PRIMARY, win=WIN, zoom=(-0.3, 3.0),
                         title="Anti-pair detail — zoom P→S");""")
 
+md("""### 5c · Two overlays per pair — repeater vs anti-repeater (at the P datum)
+
+For each pair, **left** overlays event *j* **as-is** (blue) on event *i* (black); **right** overlays
+event *j* **flipped** (red). At the P-aligned datum an anti-repeater reads as **mirror on the left,
+match on the right**. Watch `pos` in the titles: if it is high the as-is traces *also* match after a
+~half-period shift (a half-cycle-offset repeater), so a clean anti-repeater is **match-when-flipped
+AND low `pos`**.""")
+code("""wf.plot_antipair_compare(res, PAIRS[:min(8, TOPN)], band=PRIMARY, win=WIN, zoom=(-0.3, 3.0));""")
+
+md("""> **Caveat — KG.HDB horizontal sensor rotation.** The cross-component `confirmed` flag (§4) requires
+> the flip on N and E as well, but **HDB's horizontal sensor orientation has changed over time**, so for
+> pairs with a long inter-event time the N/E waveforms are not directly comparable until a
+> **time-dependent orientation correction** is applied. The **vertical (HHZ) is immune to horizontal
+> rotation** and is therefore the trustworthy basis for anti-repeater identification here — treat the
+> N/E columns (and `confirmed`) as *provisional*, and combine Z/N/E only **after** the rotation
+> correction. The present working criterion is a clean **as-is-mirror / flipped-match on HHZ**.""")
+
 md("""## 6 · Where are the candidates? + distance / time separation
 
 `map_antipairs` joins each candidate's two epicentres with a segment (short = co-located, a possible
