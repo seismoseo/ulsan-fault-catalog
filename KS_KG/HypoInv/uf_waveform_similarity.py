@@ -1742,6 +1742,63 @@ def map_clusters(meta, labels, evidence, reg=None, title="Waveform clusters",
     return fig
 
 
+def map_catalog_subregion(df, color_by="depth", station=STATION, reg=None,
+                          subregion=ufc.SUBREGION, fault_trace=ufc.FAULT_TRACE,
+                          summary_csv=CLUSTER_SUMMARY, pad=0.03, depth_range=None,
+                          size="0.20c", title=None, show_quarries=True, day=(6, 17)):
+    """PyGMT close-up of a catalog DataFrame over the UF subregion, every event coloured by either
+    its **depth** (`color_by="depth"`, sequential cpt) or its **hour-of-day in KST**
+    (`color_by="hour"`, cyclic cpt — matches `uf_cluster.hour_map`). `df` needs `lon`/`lat` plus
+    either `depth` (depth mode) or `hour` (hour mode; falls back to deriving it from `time`+KST).
+
+    Draws fault traces, the KG.HDB station (yellow square), known quarry centroids (red ✗, from the
+    cluster-summary `is_blast` rows) and the subregion box, so a catalog reads against the fault and
+    the quarries. Returns the PyGMT Figure (depth/hour share this scaffold for a fair side-by-side)."""
+    import pygmt as pmt
+    d = df.dropna(subset=["lon", "lat"]).copy()
+    if reg is None:
+        reg = [subregion[0] - pad, subregion[1] + pad, subregion[2] - pad, subregion[3] + pad]
+    fig = pmt.Figure()
+    pmt.config(FORMAT_GEO_MAP="ddd.xx", MAP_FRAME_TYPE="plain")
+    fig.basemap(region=reg, projection="M14c", frame=["af", f"+t{title or ''}"])
+    fig.coast(land="white", water="lightblue", shorelines=True)
+    ufc.plot_faults(fig, fault_trace)
+    if color_by == "hour":
+        if "hour" in d:
+            hrs = d["hour"].to_numpy(dtype=float)
+        else:                                              # derive KST hour-of-day from origin time
+            t = pd.to_datetime(d["time"], utc=True) + pd.to_timedelta(getattr(ufc, "KST", 9), unit="h")
+            hrs = t.dt.hour + t.dt.minute / 60.0
+        pmt.makecpt(cmap="cyclic", series=[0, 24, 1], continuous=True)
+        fig.plot(x=d["lon"], y=d["lat"], fill=hrs, cmap=True, style=f"c{size}", pen="0.3p,black")
+        fig.colorbar(frame=["a6", "x+lHour of day (KST)"])
+    else:                                                  # depth (km), sequential
+        z = d["depth"].to_numpy(dtype=float)
+        if depth_range is None:
+            depth_range = [float(np.nanmin(z)), float(np.nanmax(z))]
+        pmt.makecpt(cmap="viridis", series=[depth_range[0], depth_range[1]], reverse=True)
+        fig.plot(x=d["lon"], y=d["lat"], fill=z, cmap=True, style=f"c{size}", pen="0.3p,black")
+        fig.colorbar(frame=["af", "x+lDepth (km)"])
+    if show_quarries and summary_csv and os.path.exists(summary_csv):
+        cs = pd.read_csv(summary_csv)
+        q = cs[cs.get("is_blast", False) == True]
+        if len(q):
+            fig.plot(x=q["lon_centroid"], y=q["lat_centroid"], style="x0.45c", pen="2p,red")
+    try:                                                   # KG.HDB station marker
+        from glob import glob as _glob
+        any_ev = df["event"].iloc[0] if "event" in df and len(df) else None
+        if any_ev:
+            tr = read(_sac_path(str(any_ev), station))[0]
+            fig.plot(x=[tr.stats.sac.stlo], y=[tr.stats.sac.stla], style="s0.45c",
+                     fill="yellow", pen="1.2p,black")
+    except Exception:                                      # noqa: BLE001
+        pass
+    if subregion is not None:
+        bl, ba = ufc._subregion_box(subregion)
+        fig.plot(x=bl, y=ba, pen="1.5p,blue")
+    return fig
+
+
 def map_antipairs(meta, pairs, value="cc_neg", station=STATION, reg=None,
                   subregion=ufc.SUBREGION, fault_trace=ufc.FAULT_TRACE, pad=0.08,
                   title="Anti-correlated pairs"):
