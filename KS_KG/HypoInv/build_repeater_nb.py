@@ -101,7 +101,22 @@ md("""## 4 · Repeating-earthquake family table
 
 One row per family: repeat count `n`, intra-family `mean_cc`, centroid + `spread_km` (repeaters are
 co-located), first/last time, `span_days`, **median recurrence interval**, and `daytime_frac` /
-`rayleigh_p` (tectonic vs residual blast). Sorted by repeat count.""")
+`rayleigh_p` (tectonic vs residual blast). Sorted by repeat count.
+
+**`spread_km`** = the **median epicentral distance of the members from the family centroid** (km).
+The centroid is the mean lat/lon of the *located* members; each member's distance uses the flat
+111 km/deg approximation with a cos(lat) factor on longitude. So it measures how tightly the family
+is co-located — a true repeating source is a few hundred metres or less; a large `spread_km` means the
+waveform-similar events are *not* spatially clustered (often a hint the similarity is path/site, i.e.
+a residual blast family, or that catalog location scatter dominates).
+
+**Why some families show `NaN` for `recur_med_days`.** The recurrence interval is the median gap
+between **consecutively-located** members. Only events that *joined the catalog* (`joined=True`, i.e.
+the waveform event matched a blastclean hypocentre by origin time) carry a time/location; a family
+needs **≥ 2 joined members** to have even one interval. So a family whose waveform cluster has ≥2
+members but ≤1 of them is catalog-located gets `NaN` (you'll see `n_joined ≤ 1` on those rows). It is
+a *catalog-join* gap, not a clustering failure — the waveforms still correlate; they just lack the two
+located origin times needed to define an interval.""")
 code("""rep = wf.repeater_table(meta, labels, CC, min_size=MIN_FAMILY)
 print(f"{len(rep)} families; {int(rep['n'].sum())} events; "
       f"largest family n={int(rep['n'].max()) if len(rep) else 0}")
@@ -150,8 +165,18 @@ _ = wf.plot_family_sections(res, labels, rep, win=WIN, X=Xhp, sp=SP, label="1 Hz
 md("""## 6 · Recurrence timeline + interval distribution
 
 Top families as time-lanes (a marker at each member's origin time), and the pooled distribution of
-inter-event (recurrence) intervals. Magnitude-free.""")
+inter-event (recurrence) intervals. The **2016 Gyeongju mainshock** (ML 5.8, 2016-09-12 11:32 UTC)
+is marked by the red dashed line so you can see which families activate around the sequence.
+Magnitude-free.""")
 code("""wf.plot_repeater_sequences(meta, labels, rep, top=15);""")
+
+md("""### 6b · Every family as a separate recurrence plot
+
+The overview above only shows the top 15. Here is **one separate figure per family** (all of them,
+largest first): the members as a marker rake on calendar time with a **cumulative-count staircase**
+(activity rate — bursts vs steady recurrence), the **2016 Gyeongju mainshock** marked in red when in
+range, and `n` / `span` / median recurrence / `spread_km` in each title. Set `top=N` to cap the count.""")
+code("""_ = wf.plot_family_recurrence(meta, labels, rep);   # top=None -> ALL families, one figure each""")
 
 md("""## 7 · Map of repeating-earthquake families
 

@@ -51,6 +51,12 @@ DEFAULT_MAXLAG = 0.2                              # s; CC lag search (small: ali
 REFINE_MAXSHIFT = 2.0                             # s; alignment-refine search half-width
 HELVETICA = "/home/msseo/Downloads/Helvetica/helvetica.ttf"
 
+# 2016 Gyeongju sequence (UTC) — ML 5.1 foreshock then ML 5.8 mainshock, ~50 min apart, at
+# 35.77 N / 129.19 E (just NW of the UF subregion). Catalog `time` is UTC-aware, so these mark
+# the timeline directly. See annual_location_density_plots.py for the epicentral framing.
+GYEONGJU_FORESHOCK = pd.Timestamp("2016-09-12 10:44:32", tz="UTC")   # ML 5.1
+GYEONGJU_MAINSHOCK = pd.Timestamp("2016-09-12 11:32:54", tz="UTC")   # ML 5.8
+
 
 # --------------------------------------------------------------- plotting font
 def use_helvetica():
@@ -883,13 +889,34 @@ def repeater_table(meta, labels, cc, min_size=2, day=(6, 17)):
     return df.sort_values("n", ascending=False).reset_index(drop=True)
 
 
-def plot_repeater_sequences(meta, labels, table, top=15, colors=None, title=None):
-    """Classic repeater view: the TOP `top` families (by repeat count) as **recurrence time-lanes**
-    (one row each; a marker at every member origin time, coloured by family) + the pooled
-    **recurrence-interval histogram**. Magnitude-free (markers are uniform). Returns the fig."""
+def _mark_gyeongju(ax, label=True, lw=1.0):
+    """Overlay the 2016 Gyeongju sequence on a datetime x-axis: a red dashed vertical line at the
+    ML 5.8 mainshock (the foreshock is ~50 min earlier — indistinguishable at multi-year scale).
+    Skips silently if the axis time-span doesn't bracket Sept 2016."""
+    try:
+        x0, x1 = ax.get_xlim()
+        import matplotlib.dates as mdates
+        gm = mdates.date2num(GYEONGJU_MAINSHOCK.to_pydatetime())
+        if not (x0 <= gm <= x1):
+            return
+        ax.axvline(GYEONGJU_MAINSHOCK.to_pydatetime(), color="red", ls="--", lw=lw, zorder=2, alpha=0.8)
+        if label:
+            ax.annotate("2016 Gyeongju\n(M5.8)", xy=(GYEONGJU_MAINSHOCK.to_pydatetime(), 1.0),
+                        xycoords=("data", "axes fraction"), xytext=(2, -2), textcoords="offset points",
+                        ha="left", va="top", fontsize=6.5, color="red")
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
+def plot_repeater_sequences(meta, labels, table, top=15, colors=None, title=None,
+                            mark_gyeongju=True):
+    """Classic repeater view: the TOP `top` families (by repeat count; `top=None` = ALL) as
+    **recurrence time-lanes** (one row each; a marker at every member origin time, coloured by
+    family) + the pooled **recurrence-interval histogram**. The 2016 Gyeongju mainshock is marked
+    by a red dashed line when `mark_gyeongju`. Magnitude-free (markers are uniform). Returns the fig."""
     import matplotlib.pyplot as plt
     m = meta.copy().reset_index(drop=True); m["fam"] = labels
-    cids = table["cluster"].head(top).tolist()
+    cids = (table["cluster"].head(top) if top else table["cluster"]).tolist()
     cols = colors or cluster_colors(cids)
     fig, (axL, axH) = plt.subplots(1, 2, figsize=(14, max(3.0, 0.42 * len(cids))), dpi=130,
                                    gridspec_kw={"width_ratios": [3, 1]})
@@ -905,9 +932,11 @@ def plot_repeater_sequences(meta, labels, table, top=15, colors=None, title=None
         all_dt += list(t.diff().dropna().dt.total_seconds() / 86400.0)
     axL.set_yticks(range(len(cids)))
     axL.set_yticklabels([f"fam {c} (n={int(table.loc[table.cluster == c, 'n'].iloc[0])})"
-                         for c in cids], fontsize=7)
+                         for c in cids], fontsize=max(4, min(7, int(420 / max(len(cids), 1)))))
     axL.invert_yaxis()
     axL.set(xlabel="time", title=f"Top {len(cids)} repeater families — recurrence timeline")
+    if mark_gyeongju:
+        _mark_gyeongju(axL)
     if all_dt:
         all_dt = np.clip(np.array(all_dt), 1e-3, None)
         axH.hist(np.log10(all_dt), bins=30, color="seagreen")
@@ -916,6 +945,55 @@ def plot_repeater_sequences(meta, labels, table, top=15, colors=None, title=None
     fig.suptitle(title or "Repeating-earthquake families at the common station", fontsize=11)
     fig.tight_layout()
     return fig
+
+
+def plot_family_recurrence(meta, labels, table, top=None, colors=None, mark_gyeongju=True,
+                           fig_w=12.0, row_h=2.0):
+    """ONE separate figure PER family (all families by default; `top` keeps the largest `top`) —
+    the per-family recurrence detail that the stacked `plot_repeater_sequences` overview can't show.
+
+    Each figure: member origin times as a marker rake on a datetime axis (P-aligned datum is
+    irrelevant here — this is calendar time), with a **cumulative-count staircase** on a twin axis
+    so the family's activity rate (bursts vs steady recurrence) reads directly. The 2016 Gyeongju
+    mainshock is marked (red dashed) when in range. Title carries n / span / median recurrence /
+    spread (from `table`). Magnitude-free. Returns a list of (cluster_id, fig)."""
+    import matplotlib.pyplot as plt
+    plt.rcParams["figure.max_open_warning"] = 0
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels
+    cids = (table["cluster"].head(top) if top else table["cluster"]).tolist()
+    cols = colors or cluster_colors(cids)
+    info = table.set_index("cluster")
+    out = []
+    for cid in cids:
+        g = m[(m["fam"] == cid) & (m["joined"])].copy()
+        fig, ax = plt.subplots(figsize=(fig_w, row_h), dpi=130)
+        col = cols.get(int(cid), "steelblue")
+        if len(g):
+            t = pd.to_datetime(g["time"]).sort_values().reset_index(drop=True)
+            ax.scatter(t, np.zeros(len(t)), s=40, color=col, edgecolor="k", lw=0.4, zorder=3, clip_on=False)
+            ax.set_yticks([]); ax.set_ylim(-1, 1)
+            ax2 = ax.twinx()
+            ax2.step(t, np.arange(1, len(t) + 1), where="post", color=col, lw=1.2, alpha=0.6)
+            ax2.set_ylabel("cumulative count", fontsize=7); ax2.tick_params(labelsize=6.5)
+            ax2.set_ylim(0, max(len(t), 1) * 1.1)
+        else:
+            ax.set_yticks([]); ax.set_ylim(-1, 1)
+        if mark_gyeongju:
+            _mark_gyeongju(ax)
+        r = info.loc[cid] if cid in info.index else {}
+        bits = [f"fam {int(cid)}", f"n={int(r.get('n', len(g)))}"]
+        if "span_days" in info.columns and pd.notna(r.get("span_days")):
+            bits.append(f"span={r['span_days']:.0f} d")
+        if "recur_med_days" in info.columns and pd.notna(r.get("recur_med_days")):
+            bits.append(f"recur≈{r['recur_med_days']:.0f} d")
+        if "spread_km" in info.columns and pd.notna(r.get("spread_km")):
+            bits.append(f"spread={r['spread_km']:.2f} km")
+        ax.set_title("   ".join(bits), fontsize=9, color=col, loc="left")
+        ax.set_xlabel("origin time (UTC)", fontsize=7); ax.tick_params(labelsize=6.5)
+        ax.margins(x=0.02)
+        fig.tight_layout()
+        out.append((int(cid), fig))
+    return out
 
 
 def map_cluster_links(meta, labels, table, top=None, reg=None, subregion=ufc.SUBREGION,
