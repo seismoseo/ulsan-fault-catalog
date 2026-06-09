@@ -336,11 +336,32 @@ def make_bands(events, station=STATION, comp=COMP, bands=None, win=DEFAULT_WIN,
     cache = os.path.join(cache_dir, f"feat_{tag}.npz")
     if os.path.exists(cache):
         z = np.load(cache, allow_pickle=True)
+        kept = list(z["kept"]); info = pd.DataFrame(z["info"].tolist()); shifts = z["shifts"]
+        have = {tuple(b): z[f"b{i}"] for i, b in enumerate(z["band_list"])}
+        want = [tuple(b) for b in bands]
+        missing = [b for b in want if b not in have]
+        if not missing:
+            if verbose:
+                print(f"[make_bands] loaded cache {cache}")
+            return dict(kept=kept, info=info, shifts=shifts, bands={b: have[b] for b in want})
+        # The cache key is events+window (NOT the band list), so a newly-requested band (e.g. 1-25 Hz
+        # added later) is absent. Build ONLY the missing bands on the SAME cached P-alignment (shifts)
+        # and re-cache the union — so existing bands are never rebuilt and the new band is reused next time.
         if verbose:
-            print(f"[make_bands] loaded cache {cache}")
-        return dict(kept=list(z["kept"]), info=pd.DataFrame(z["info"].tolist()),
-                    shifts=z["shifts"], bands={tuple(b): z[f"b{i}"]
-                                               for i, b in enumerate(z["band_list"])})
+            print(f"[make_bands] cache {cache} missing {missing}; building incrementally")
+        for b in missing:
+            Xb, kb, _ = build_features(events, station, comp, b, win, wf_root, sr, verbose=False)
+            if kb != kept:
+                idx = {e: i for i, e in enumerate(kb)}
+                Xb = np.asarray([Xb[idx[e]] for e in kept], dtype=np.float32)
+            have[b] = finalize(Xb, shifts, win, sr=sr)
+        all_bands = list(have.keys())
+        np.savez_compressed(cache, kept=np.array(kept), info=np.array(info.to_dict("records")),
+                            shifts=shifts, band_list=np.array(all_bands),
+                            **{f"b{i}": have[b] for i, b in enumerate(all_bands)})
+        if verbose:
+            print(f"[make_bands] updated cache -> {cache} (now {len(all_bands)} bands)")
+        return dict(kept=kept, info=info, shifts=shifts, bands={b: have[b] for b in want})
     # shared alignment from REF_BAND (only the unpicked fallbacks are moved onto the pick datum)
     Xp, kept, info = build_features(events, station, comp, REF_BAND, win, wf_root, sr, verbose=verbose)
     shifts = align_fallback(Xp, info, sr)
@@ -909,40 +930,46 @@ def _mark_gyeongju(ax, label=True, lw=1.0):
 
 
 def plot_repeater_sequences(meta, labels, table, top=15, colors=None, title=None,
-                            mark_gyeongju=True):
+                            mark_gyeongju=True, row_h=0.22, max_label_families=60):
     """Classic repeater view: the TOP `top` families (by repeat count; `top=None` = ALL) as
-    **recurrence time-lanes** (one row each; a marker at every member origin time, coloured by
-    family) + the pooled **recurrence-interval histogram**. The 2016 Gyeongju mainshock is marked
-    by a red dashed line when `mark_gyeongju`. Magnitude-free (markers are uniform). Returns the fig."""
+    **recurrence time-lanes** — one full-width row each, a marker at every member origin time,
+    coloured by family. The 2016 Gyeongju mainshock is marked by a red dashed line when
+    `mark_gyeongju`. Magnitude-free (markers are uniform).
+
+    Single full-width axis (the old recurrence-interval histogram is dropped — its log-count
+    y-axis exaggerated a handful of pairs). For many families the row height (`row_h`), marker
+    size and label density scale down automatically; when `len(cids) > max_label_families` the
+    per-row `fam N` labels are suppressed (use `plot_family_recurrence` to inspect individuals).
+    Returns the fig."""
     import matplotlib.pyplot as plt
     m = meta.copy().reset_index(drop=True); m["fam"] = labels
     cids = (table["cluster"].head(top) if top else table["cluster"]).tolist()
     cols = colors or cluster_colors(cids)
-    fig, (axL, axH) = plt.subplots(1, 2, figsize=(14, max(3.0, 0.42 * len(cids))), dpi=130,
-                                   gridspec_kw={"width_ratios": [3, 1]})
-    all_dt = []
+    n = len(cids)
+    s = 26 if n <= 30 else (14 if n <= 80 else 7)              # shrink markers as rows pile up
+    fig, axL = plt.subplots(figsize=(15, max(3.0, row_h * n)), dpi=130)
     for r, cid in enumerate(cids):
         g = m[(m["fam"] == cid) & (m["joined"])].copy()
         if not len(g):
             continue
         t = pd.to_datetime(g["time"]).sort_values()
-        axL.plot(t, [r] * len(t), "-", color="0.8", lw=0.6, zorder=1)
-        axL.scatter(t, [r] * len(t), s=26, color=cols.get(int(cid), "steelblue"),
-                    edgecolor="k", lw=0.3, zorder=3)
-        all_dt += list(t.diff().dropna().dt.total_seconds() / 86400.0)
-    axL.set_yticks(range(len(cids)))
-    axL.set_yticklabels([f"fam {c} (n={int(table.loc[table.cluster == c, 'n'].iloc[0])})"
-                         for c in cids], fontsize=max(4, min(7, int(420 / max(len(cids), 1)))))
+        axL.plot(t, [r] * len(t), "-", color="0.85", lw=0.5, zorder=1)
+        axL.scatter(t, [r] * len(t), s=s, color=cols.get(int(cid), "steelblue"),
+                    edgecolor="k", lw=0.25, zorder=3)
+    axL.set_ylim(-0.6, n - 0.4)
+    if n <= max_label_families:
+        axL.set_yticks(range(n))
+        axL.set_yticklabels([f"fam {c} (n={int(table.loc[table.cluster == c, 'n'].iloc[0])})"
+                             for c in cids], fontsize=max(4, min(7, int(420 / max(n, 1)))))
+    else:
+        axL.set_yticks([]); axL.set_ylabel(f"{n} families (largest at top) — labels omitted; "
+                                           f"see plot_family_recurrence", fontsize=8)
     axL.invert_yaxis()
-    axL.set(xlabel="time", title=f"Top {len(cids)} repeater families — recurrence timeline")
+    axL.set(xlabel="time", title=title or f"{n} repeater families — recurrence timeline "
+            f"(largest first)")
+    axL.margins(x=0.01)
     if mark_gyeongju:
         _mark_gyeongju(axL)
-    if all_dt:
-        all_dt = np.clip(np.array(all_dt), 1e-3, None)
-        axH.hist(np.log10(all_dt), bins=30, color="seagreen")
-        axH.set(xlabel="log$_{10}$ recurrence interval (days)", ylabel="event pairs",
-                title="Recurrence intervals")
-    fig.suptitle(title or "Repeating-earthquake families at the common station", fontsize=11)
     fig.tight_layout()
     return fig
 

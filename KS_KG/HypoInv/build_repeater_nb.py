@@ -1,5 +1,6 @@
 """Build the traditional repeating-earthquake notebook for KG.HDB, one per component.
-Usage: python build_repeater_nb.py [HHZ|HHN|HHE]   (default HHZ).
+Usage: python build_repeater_nb.py [HHZ|HHN|HHE] [LO-HI]   (default HHZ, 1-10 Hz).
+  e.g.  python build_repeater_nb.py HHZ 1-25   # stricter high-frequency band, separate notebook.
 
 Classic repeater analysis: events whose waveforms at a common station are near-identical
 (CC >= CC_REPEAT) repeat slip on the same fault patch. We cluster on the POSITIVE max-lag CC
@@ -13,12 +14,22 @@ import nbformat as nbf
 NB_COMP = sys.argv[1] if len(sys.argv) > 1 else "HHZ"
 assert NB_COMP in ("HHZ", "HHN", "HHE"), NB_COMP
 
+# optional analysis band "LO-HI" Hz (default 1-10). A stricter high-frequency band (e.g. 1-25)
+# demands the waveforms match into the high-frequency coda -> a tighter repeater criterion.
+BAND_ARG = sys.argv[2] if len(sys.argv) > 2 else "1-10"
+PRIMARY_BAND = tuple(int(x) for x in BAND_ARG.split("-"))
+assert len(PRIMARY_BAND) == 2 and PRIMARY_BAND[0] < PRIMARY_BAND[1], BAND_ARG
+IS_DEFAULT_BAND = PRIMARY_BAND == (1, 10)
+BAND_TAG = f"{PRIMARY_BAND[0]}-{PRIMARY_BAND[1]}Hz"
+# bands to build features/CC for: primary + standard reference bands (dedup, primary first)
+BANDS_LIST = list(dict.fromkeys([PRIMARY_BAND, (1, 10), (2, 8), (4, 12), (5, 15)]))
+
 nb = nbf.v4.new_notebook()
 C = []
 def md(s): C.append(nbf.v4.new_markdown_cell(s))
 def code(s): C.append(nbf.v4.new_code_cell(s))
 
-md(f"""# Repeating earthquakes at `KG.HDB` ({NB_COMP}) — waveform-similarity families
+md(f"""# Repeating earthquakes at `KG.HDB` ({NB_COMP}, {BAND_TAG}) — waveform-similarity families
 
 **Idea.** Events that rupture the **same fault patch** produce near-identical waveforms at a fixed
 station. Clustering on the **positive** max-lag cross-correlation (CC ≥ `CC_REPEAT`) groups these
@@ -45,8 +56,8 @@ code(f"""# --- parameters (edit + run top-to-bottom) ---------------------------
 STATION    = "KG.HDB"
 COMP       = "{NB_COMP}"          # HHZ vertical is the robust basis (rotation-immune)
 WIN        = (-0.5, 7.5)        # s relative to P — short phase window
-BANDS      = [(1, 10), (2, 8), (4, 12), (5, 15)]   # Hz
-PRIMARY    = (1, 10)            # band for families / table / map
+BANDS      = {BANDS_LIST}   # Hz
+PRIMARY    = {PRIMARY_BAND}            # band for families / table / map
 MAXLAG     = 0.2               # s, CC lag search
 CC_REPEAT  = 0.90             # families merge while average CC >= this (repeaters are very similar)
 LINKAGE    = "average"        # 'average' (UPGMA, conventional for CC distance); 'single' chains more
@@ -162,20 +173,21 @@ similarity without the band-pass shaping.""")
 code("""Xhp = wf.display_matrix(res, band=("highpass", 1.0), station=STATION, comp=COMP)   # 1 Hz HP, same alignment
 _ = wf.plot_family_sections(res, labels, rep, win=WIN, X=Xhp, sp=SP, label="1 Hz highpass");""")
 
-md("""## 6 · Recurrence timeline + interval distribution
+md("""## 6 · Recurrence timeline (all families)
 
-Top families as time-lanes (a marker at each member's origin time), and the pooled distribution of
-inter-event (recurrence) intervals. The **2016 Gyeongju mainshock** (ML 5.8, 2016-09-12 11:32 UTC)
-is marked by the red dashed line so you can see which families activate around the sequence.
-Magnitude-free.""")
-code("""wf.plot_repeater_sequences(meta, labels, rep, top=15);""")
+Every family as a full-width time-lane (a marker at each member's origin time, largest family at
+top). The **2016 Gyeongju mainshock** (ML 5.8, 2016-09-12 11:32 UTC) is the red dashed line, so you
+can see which families activate around the sequence. For many families the per-row labels are
+omitted — use §6b to inspect individuals. (The old recurrence-interval histogram is dropped: its
+log-count y-axis visually exaggerated a few pairs.) Magnitude-free.""")
+code("""wf.plot_repeater_sequences(meta, labels, rep, top=None);   # all families, single full-width axis""")
 
 md("""### 6b · Every family as a separate recurrence plot
 
-The overview above only shows the top 15. Here is **one separate figure per family** (all of them,
-largest first): the members as a marker rake on calendar time with a **cumulative-count staircase**
-(activity rate — bursts vs steady recurrence), the **2016 Gyeongju mainshock** marked in red when in
-range, and `n` / `span` / median recurrence / `spread_km` in each title. Set `top=N` to cap the count.""")
+One **separate figure per family** (all of them, largest first): the members as a marker rake on
+calendar time with a **cumulative-count staircase** (activity rate — bursts vs steady recurrence),
+the **2016 Gyeongju mainshock** marked in red when in range, and `n` / `span` / median recurrence /
+`spread_km` in each title. Set `top=N` to cap the count.""")
 code("""_ = wf.plot_family_recurrence(meta, labels, rep);   # top=None -> ALL families, one figure each""")
 
 md("""## 7 · Map of repeating-earthquake families
@@ -202,6 +214,19 @@ code("""try:
 except Exception as e:
     print("PyGMT subregion map skipped:", type(e).__name__, e)""")
 
+md("""### 8b · Subregion map — top 15 families only
+
+The same UF-subregion close-up but highlighting **only the 15 largest repeating families** (by repeat
+count); all other events sit behind as faint grey context. This declutters the map so the dominant
+repeater sites stand out. Edit `TOP_MAP` to show more/fewer.""")
+code("""TOP_MAP = 15
+try:
+    fig_top = wf.map_cluster_links(meta, labels, rep, top=TOP_MAP, link="centroid",
+                                   title=f"KG.HDB {COMP} — top {TOP_MAP} repeater families (UF subregion)")
+    fig_top.show()
+except Exception as e:
+    print("PyGMT top-families map skipped:", type(e).__name__, e)""")
+
 md(f"""## 9 · How to read this
 
 - **Repeating-earthquake family** = a tight (`mean_cc` ≥ {{CC_REPEAT}}), spatially compact
@@ -218,6 +243,7 @@ md(f"""## 9 · How to read this
 
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
-out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/07_repeaters_KGHDB_{NB_COMP}_phasenet_plus.ipynb"
+_suffix = "" if IS_DEFAULT_BAND else f"_{BAND_TAG}"
+out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/07_repeaters_KGHDB_{NB_COMP}{_suffix}_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")
