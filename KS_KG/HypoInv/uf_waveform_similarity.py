@@ -1745,7 +1745,8 @@ def map_clusters(meta, labels, evidence, reg=None, title="Waveform clusters",
 def map_catalog_subregion(df, color_by="depth", station=STATION, reg=None,
                           subregion=ufc.SUBREGION, fault_trace=ufc.FAULT_TRACE,
                           summary_csv=CLUSTER_SUMMARY, pad=0.03, depth_range=None,
-                          size="0.20c", title=None, show_quarries=True, day=(6, 17)):
+                          size="0.20c", title=None, show_quarries=True, day=(6, 17),
+                          draw_box=True):
     """PyGMT close-up of a catalog DataFrame over the UF subregion, every event coloured by either
     its **depth** (`color_by="depth"`, sequential cpt) or its **hour-of-day in KST**
     (`color_by="hour"`, cyclic cpt — matches `uf_cluster.hour_map`). `df` needs `lon`/`lat` plus
@@ -1793,7 +1794,7 @@ def map_catalog_subregion(df, color_by="depth", station=STATION, reg=None,
                      fill="yellow", pen="1.2p,black")
     except Exception:                                      # noqa: BLE001
         pass
-    if subregion is not None:
+    if draw_box and subregion is not None:
         bl, ba = ufc._subregion_box(subregion)
         fig.plot(x=bl, y=ba, pen="1.5p,blue")
     return fig

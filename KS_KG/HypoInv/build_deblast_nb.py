@@ -33,11 +33,11 @@ are **severely mislocated**, so depth and epicentral spread carry no information
 4. split the blastclean catalog into a **blast catalog** and a **de-blasted catalog**, and
 5. map both over the UF subregion, **coloured by hour-of-day (KST)**.
 
-> **Why `daytime_frac ≥ 0.9` (not 0.6).** The daytime window is ~11 h, so a *random* (natural) family
-> sits near 0.46 daytime; the old 0.6 cut admitted families that are ~40 % **night-time** — too many
-> for a quarry — and it caught **cl 1158** (0.60 daytime, a genuine repeating natural cluster). The
-> data show a clean gap: a handful of families are ≥95 % daytime, the rest ≤80 %. A 0.9 cut isolates
-> the clean blasts and drops cl 1158 *automatically*. `NATURAL_OVERRIDE` keeps it out explicitly too.
+> **Why `daytime_frac ≥ 0.7` (not 0.6).** The daytime window is ~11 h, so a *random* (natural) family
+> sits near 0.46 daytime; a quarry fires almost entirely in working hours. The old 0.6 cut admitted
+> families that are ~40 % **night-time** and caught **cl 1158** (0.60 daytime, a genuine repeating
+> natural cluster). A `0.7` cut keeps families that are ≥70 % daytime and drops cl 1158 *automatically*.
+> `NATURAL_OVERRIDE` keeps it out explicitly too. (Tighten toward 0.9 for only the cleanest blasts.)
 
 > **Rough / preliminary.** Only KG.HDB-recorded events are screened; magnitude is not used.""")
 
@@ -54,7 +54,7 @@ MIN_SIZE     = 4               # min cluster size to evaluate
 # blast_like = waveform-similar AND strongly daytime — the ONLY two measures (no location: blasts
 # are severely mislocated, so depth / epicentral spread are not trustworthy).
 BLAST_MEAN_CC = 0.6            # family tightness (events already cluster at CC_THRESHOLD)
-BLAST_DAYFRAC = 0.9            # >= 90% of origins in working hours (06-17 KST) — anthropogenic
+BLAST_DAYFRAC = 0.7            # >= 70% of origins in working hours (06-17 KST) — anthropogenic
 # clusters flagged daytime+similar that are actually natural earthquakes (manually vetted) — kept in
 # the de-blasted catalog. cl 1158 = deep repeating natural cluster (also excluded by the 0.9 cut).
 NATURAL_OVERRIDE = [1158]
@@ -116,20 +116,26 @@ print(f"wrote rough de-blasted catalog -> {DEBLAST_CSV}")""")
 
 md("""## 3 · Maps over the UF subregion — coloured by hour-of-day (KST)
 
-Both maps share the subregion frame, fault traces, KG.HDB (yellow square) and known quarry centroids
-(red ✗). **Colour = hour-of-day (KST)**, cyclic cpt. Origin *time* is reliable even though the
-locations are not — so hour-of-day is the meaningful axis here. A blast family reads as one **daytime**
-colour; the natural background spreads across all 24 h. (Depth / epicentral position are intentionally
-not shown — the blast events are severely mislocated.)""")
-code("""def _in_sub(d, s=ufc.SUBREGION):
+Maps are clipped to the **exact** UF subregion (no padding, no outline box). Each shows fault traces,
+KG.HDB (yellow square) and known quarry centroids (red ✗). **Colour = hour-of-day (KST)**, cyclic cpt.
+Origin *time* is reliable even though the locations are not — so hour-of-day is the meaningful axis.
+A blast family reads as one **daytime** colour; the natural background spreads across all 24 h. (Depth
+/ epicentral position are intentionally not shown — the blast events are severely mislocated.)""")
+code("""SUB = list(ufc.SUBREGION)   # exact subregion bounds [lonmin, lonmax, latmin, latmax]
+def _in_sub(d, s=ufc.SUBREGION):
     return d[d["lon"].between(s[0], s[1]) & d["lat"].between(s[2], s[3])]
-print(f"subregion events: de-blasted {len(_in_sub(deblast_cat))} | blast {len(_in_sub(blast_cat))}")""")
+mapkw = dict(color_by="hour", reg=SUB, draw_box=False)   # exact zoom, no blue box
+print(f"subregion events: original {len(_in_sub(cat))} | de-blasted {len(_in_sub(deblast_cat))} "
+      f"| blast {len(_in_sub(blast_cat))}")""")
 
-md("### 3a · De-blasted (natural) catalog — hour-of-day (KST)")
-code("""wf.map_catalog_subregion(deblast_cat, color_by="hour",
+md("### 3a · Original catalog (before de-blasting) — hour-of-day (KST)")
+code("""wf.map_catalog_subregion(cat, **mapkw,
+    title=f"Original catalog ({len(_in_sub(cat))} in subregion) — hour of day (KST)").show()""")
+md("### 3b · De-blasted (natural) catalog — hour-of-day (KST)")
+code("""wf.map_catalog_subregion(deblast_cat, **mapkw,
     title=f"De-blasted catalog ({len(_in_sub(deblast_cat))} in subregion) — hour of day (KST)").show()""")
-md("### 3b · Blast catalog — hour-of-day (KST)")
-code("""wf.map_catalog_subregion(blast_cat, color_by="hour", size="0.28c",
+md("### 3c · Blast catalog — hour-of-day (KST)")
+code("""wf.map_catalog_subregion(blast_cat, size="0.28c", **mapkw,
     title=f"Blast catalog ({len(_in_sub(blast_cat))} in subregion) — hour of day (KST)").show()""")
 
 md("""## 4 · How to read this
@@ -138,8 +144,10 @@ md("""## 4 · How to read this
   *positions* are unreliable (blasts are severely mislocated) — the **colour** (hour) is the signal.
 - **De-blasted (natural) catalog** should show origins across **all 24 h** (no daytime bias),
   including the reclassified repeating cluster 1158.
+- **Original vs de-blasted (3a vs 3b):** the daytime (blast) events removed in 3b are the working-hours
+  population that 3a carries; compare to see what the de-blasting takes out.
 - Classification is **location-free**: only waveform similarity (the family) + daytime fraction.
-  To tighten/loosen, edit `BLAST_DAYFRAC` (0.9 = ≥90 % daytime); add any other vetted natural family
+  To tighten/loosen, edit `BLAST_DAYFRAC` (0.7 = ≥70 % daytime); add any other vetted natural family
   to `NATURAL_OVERRIDE`.
 - `DEBLAST_CSV` is written for downstream use but is **rough/preliminary** (only KG.HDB-recorded
   events were screened).""")
