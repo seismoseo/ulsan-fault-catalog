@@ -122,13 +122,30 @@ code("""wf.plot_family_gathers(res, labels, rep, band=PRIMARY, win=WIN, top=8, w
 wf.plot_family_gathers(res, labels, rep, band=PRIMARY, win=WIN, top=8, width=15, zoom=(-0.3, 3.0),
                        title="Repeater family gathers — zoom P→S");""")
 
-md("""### 5c · Per-cluster record sections — every event, time-ordered (ALL families)
+md("""### 5c · Per-cluster record sections — every event, time-ordered, S marked (ALL families)
 
 For **every** family a separate full-width figure: all member waveforms stacked **top = oldest →
-bottom = newest** (UTC timestamps on the right), P-aligned at t=0. A genuine repeater shows the same
-wiggle repeating straight down the column over time. This renders one plot **per cluster** for all
-families in the table — set `top=N` to limit, or `zoom=(-0.3, 3.0)` for the P→S detail.""")
-code("""_ = wf.plot_family_sections(res, labels, rep, band=PRIMARY, win=WIN);""")
+bottom = newest** (UTC on the right), **P-aligned at t=0** (blue dashed) with the **S arrival as a
+short black bar** (PhaseNet+ pick). Traces are peak-normalised so the shape is clearly visible; a
+genuine repeater shows the same wiggle repeating straight down the column.
+
+**How the traces are aligned in time.** Each trace is cut on its **station P pick** (P → t=0); the few
+events with no pick get `origin + median P travel-time`, then are cross-correlated onto the picked
+stack (`align_fallback`). So registration is **pick-based**, *not* member-to-member cross-correlation
+— honest (it shows the real pick jitter, ~a few samples) but not forced to line up. The per-pair lag
+search in `similarity_matrix` absorbs that jitter when scoring CC. (A perfectly-aligned display would
+additionally CC each trace to the family stack — a refinement we can add.) Set `top=N` to limit, or
+`zoom=(-0.3, 3.0)` for the P→S detail.""")
+code("""SP = wf.s_minus_p(kept, station=STATION)            # S-P per event (slow once; reused in 5d)
+_ = wf.plot_family_sections(res, labels, rep, band=PRIMARY, win=WIN, sp=SP);""")
+
+md("""### 5d · Same sections — 1 Hz high-pass only
+
+The same per-family record sections but each trace is **only high-pass filtered at 1 Hz**
+(`display_matrix` with the identical P-alignment) — minimal processing / broadband shape, to judge
+similarity without the band-pass shaping.""")
+code("""Xhp = wf.display_matrix(res, band=("highpass", 1.0), station=STATION, comp=COMP)   # 1 Hz HP, same alignment
+_ = wf.plot_family_sections(res, labels, rep, win=WIN, X=Xhp, sp=SP, label="1 Hz highpass");""")
 
 md("""## 6 · Recurrence timeline + interval distribution
 

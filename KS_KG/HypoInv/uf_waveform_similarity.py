@@ -640,23 +640,40 @@ def plot_family_gathers(res, labels, table, band=REF_BAND, sr=SR, win=DEFAULT_WI
 
 
 def plot_family_sections(res, labels, table, band=REF_BAND, sr=SR, win=DEFAULT_WIN, top=None,
-                         fig_w=14.0, row_h=0.32, amp=0.6, max_per=80, zoom=None, colors=None,
-                         annotate_utc=True):
+                         X=None, sp=None, mark_s=True, norm="peak", fig_w=14.0, row_h=0.45,
+                         amp=0.45, max_per=80, zoom=None, colors=None, annotate_utc=True,
+                         station=STATION, wf_root=WF_ROOT, label=""):
     """For EVERY family in `table` (or the largest `top`), a **separate full-width record-section
     figure**: all member traces stacked **top→bottom in time order** (oldest on top, newest at the
-    bottom), P-aligned at t=0 (blue dashed), each trace timestamped in UTC on the right. One figure
-    per cluster (not subplots). Returns a list of (cluster_id, fig).
+    bottom), P-aligned at t=0 (blue dashed), the **S arrival a short black bar** (PhaseNet+ pick, via
+    `s_minus_p`), each trace timestamped in UTC on the right. One figure per cluster. Returns a list
+    of (cluster_id, fig).
 
-    `res["kept"]` is in origin-time order (list_events returns sorted event-dir names), so the within-
-    family index order IS time order. `zoom=(t0,t1)` restricts the axis; `max_per` caps very large
-    families; `amp` scales the wiggle height; `colors` keeps the family colour consistent."""
+    Alignment: each trace sits at its station **P pick** (P→t=0); the within-family order IS time
+    order because `res["kept"]` is sorted by origin time. Traces are **peak-normalised** (`norm="peak"`,
+    each trace scaled to unit max over the drawn window) so the shape is clearly visible regardless of
+    amplitude — set `norm="l2"` for energy-normalised. `amp` (row fraction) + `row_h` (inch/trace) set
+    the height; `X` overrides the waveform matrix (e.g. a `display_matrix(res, band=("highpass",1))`
+    view) while keeping the same alignment/labels; `sp` is the S-P array (computed once if None);
+    `zoom=(t0,t1)` restricts the axis; `max_per` caps huge families; `label` tags the title."""
     import matplotlib.pyplot as plt
     plt.rcParams.update({"figure.max_open_warning": 0})      # many families -> many open figures
-    X = res["bands"][tuple(band)]; kept = res["kept"]
-    t = np.arange(X.shape[1]) / sr + win[0]
+    Xm = res["bands"][tuple(band)] if X is None else X
+    kept = res["kept"]
+    t = np.arange(Xm.shape[1]) / sr + win[0]
     labels = np.asarray(labels)
+    if mark_s and sp is None:
+        sp = s_minus_p(kept, station, wf_root)
+    mask = ((t >= zoom[0]) & (t <= zoom[1])) if zoom is not None else slice(None)
+
+    def _disp(x):                                            # normalise the DRAWN window to unit height
+        seg = x[mask]
+        a = float(np.max(np.abs(seg))) if norm == "peak" else float(np.linalg.norm(x))
+        return x / a if a > 0 else x
+
     cids = (table["cluster"].head(top) if top else table["cluster"]).tolist()
     cols = colors or cluster_colors(cids)
+    x0 = zoom[0] if zoom is not None else t[0]
     xr = zoom[1] if zoom is not None else t[-1]
     figs = []
     for cid in cids:
@@ -670,19 +687,23 @@ def plot_family_sections(res, labels, table, band=REF_BAND, sr=SR, win=DEFAULT_W
         fig, ax = plt.subplots(figsize=(fig_w, max(1.8, row_h * m)), dpi=130)
         for r, i in enumerate(idx):
             y = m - 1 - r                                    # r=0 (oldest) on top
-            ax.plot(t, y + amp * _l2(X[i]), color=col, lw=0.6)
+            ax.plot(t, y + amp * _disp(Xm[i]), color=col, lw=0.7)
+            if mark_s and np.isfinite(sp[i]) and x0 <= sp[i] <= xr:
+                ax.plot([sp[i], sp[i]], [y - 0.42, y + 0.42], color="k", lw=0.9)   # S
             if annotate_utc:
                 e = kept[i]
                 lab = f"{e[0:4]}-{e[4:6]}-{e[6:8]} {e[8:10]}:{e[10:12]}:{e[12:14]}"
                 ax.text(xr, y, "  " + lab, fontsize=6, va="center", ha="left",
                         color="0.35", clip_on=False)
-        ax.axvline(0, color="b", lw=0.7, ls="--")            # P
-        ax.set_xlim(t[0] if zoom is None else zoom[0], xr)
-        ax.set_ylim(-1, m); ax.set_yticks([])
+        ax.axvline(0, color="b", lw=0.8, ls="--")            # P
+        ax.set_xlim(x0, xr); ax.set_ylim(-1, m); ax.set_yticks([])
         row = table[table["cluster"] == cid].iloc[0]
-        ax.set_title("family {} — n={}, mean_cc={}, spread={} km   (top = oldest → bottom = newest)".format(
-            cid, int(row["n"]), row.get("mean_cc", "?"), row.get("spread_km", "?")),
-            fontsize=9, color=col, loc="left")
+        ttl = "family {} — n={}, mean_cc={}, spread={} km".format(
+            cid, int(row["n"]), row.get("mean_cc", "?"), row.get("spread_km", "?"))
+        if label:
+            ttl += "  [{}]".format(label)
+        ax.set_title(ttl + "   (top=oldest → bottom=newest; blue=P, black bar=S)",
+                     fontsize=9, color=col, loc="left")
         ax.set_xlabel("Time from P (s)")
         fig.subplots_adjust(right=0.80)
         figs.append((int(cid), fig))
