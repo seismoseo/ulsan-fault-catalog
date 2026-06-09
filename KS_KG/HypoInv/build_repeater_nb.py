@@ -111,8 +111,16 @@ md("""## 5 · Family waveform gathers
 
 Overlaid aligned traces (grey) + the family stack (bold) for the top families — near-identical
 repeating waveforms are visually obvious.""")
-code("""evid = rep.rename(columns={"n": "n", "mean_cc": "mean_cc"})  # plot_cluster_gathers reads cluster/n/mean_cc
-wf.plot_cluster_gathers(res["bands"][PRIMARY], labels, evid, win=WIN, max_clusters=8, max_traces=40);""")
+code("""wf.plot_cluster_gathers(res["bands"][PRIMARY], labels, rep, win=WIN, max_clusters=8, max_traces=40);""")
+
+md("""### 5b · Full-width family gathers (more visible, long axis)
+
+One **full-width row per family** (largest first): member traces (grey) + the family **stack** (bold),
+plus a **P→S zoom**. The long axis + tall rows make the repeating waveform shape legible (the grid
+above is compact). Tune `top`, `width`, `row_h`, `zoom`.""")
+code("""wf.plot_family_gathers(res, labels, rep, band=PRIMARY, win=WIN, top=8, width=15, row_h=1.9);
+wf.plot_family_gathers(res, labels, rep, band=PRIMARY, win=WIN, top=8, width=15, zoom=(-0.3, 3.0),
+                       title="Repeater family gathers — zoom P→S");""")
 
 md("""## 6 · Recurrence timeline + interval distribution
 

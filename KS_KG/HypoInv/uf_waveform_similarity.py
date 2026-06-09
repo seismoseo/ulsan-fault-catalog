@@ -600,6 +600,45 @@ def plot_cluster_gathers(X, labels, evidence, sr=SR, win=DEFAULT_WIN, max_cluste
     return fig
 
 
+def plot_family_gathers(res, labels, table, band=REF_BAND, sr=SR, win=DEFAULT_WIN, top=8,
+                        max_traces=80, zoom=None, width=15.0, row_h=1.9, colors=None, title=None):
+    """**One full-width row per family** (largest `top` by count) so the waveforms are clearly
+    visible — the readable, long-axis companion to the compact grid `plot_cluster_gathers`. Each
+    row overlays the member traces (grey) + the family **stack** (bold, coloured) and is titled with
+    n / mean_cc / spread / recurrence. `zoom=(t0,t1)` focuses the time axis (e.g. P→S);
+    `width`/`row_h` set the size. Returns the fig."""
+    import matplotlib.pyplot as plt
+    X = res["bands"][tuple(band)]
+    t = np.arange(X.shape[1]) / sr + win[0]
+    labels = np.asarray(labels)
+    cids = table["cluster"].head(top).tolist()
+    cols = colors or cluster_colors(cids)
+    n = len(cids)
+    fig, axes = plt.subplots(n, 1, figsize=(width, row_h * n), dpi=130, squeeze=False)
+    for k, (ax, cid) in enumerate(zip(axes.ravel(), cids)):
+        idx = np.where(labels == cid)[0]
+        col = cols.get(int(cid), "crimson")
+        for i in idx[:max_traces]:
+            ax.plot(t, _l2(X[i]), color="0.70", lw=0.4, alpha=0.6)
+        ax.plot(t, _l2(X[idx].mean(0)), color=col, lw=1.6)               # stack
+        ax.axvline(0, color="b", lw=0.6, ls="--")
+        if zoom is not None:
+            ax.set_xlim(*zoom)
+        ax.margins(x=0); ax.set_yticks([]); ax.tick_params(labelsize=7)
+        row = table[table["cluster"] == cid].iloc[0]
+        ax.set_title("fam {} — n={}, mean_cc={}, spread={} km, recur≈{} d, {}→{}".format(
+            cid, int(row["n"]), row.get("mean_cc", "?"), row.get("spread_km", "?"),
+            row.get("recur_med_days", "?"), row.get("t_first", "?"), row.get("t_last", "?")),
+            fontsize=8, loc="left", color=col)
+        if k < n - 1:
+            ax.set_xticklabels([])
+    axes.ravel()[-1].set_xlabel("Time from P (s)", fontsize=9)
+    fig.suptitle(title or "Repeater family gathers ({}-{} Hz): grey = members, bold = stack".format(
+        band[0], band[1]), fontsize=10)
+    fig.tight_layout()
+    return fig
+
+
 def plot_antipair_gathers(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, ncol=3, title=None):
     """Overlay gallery for candidate ANTI-correlated pairs. Each panel shows, on the P-aligned
     `band` window: event *i* (black), event *j* un-flipped (faint grey), and event *j* **flipped**
@@ -783,7 +822,8 @@ def plot_repeater_sequences(meta, labels, table, top=15, colors=None, title=None
 
 def map_cluster_links(meta, labels, table, top=None, reg=None, subregion=ufc.SUBREGION,
                       fault_trace=ufc.FAULT_TRACE, station=STATION, summary_csv=CLUSTER_SUMMARY,
-                      pad=0.02, link="centroid", colors=None, title="Repeater families — UF subregion"):
+                      pad=0.02, link="centroid", colors=None, width=22.0,
+                      title="Repeater families — UF subregion"):
     """PyGMT **close-up on the UF subregion** with each family's events **linked by lines**, so a
     co-located repeating family reads as a tight coloured star (or time-path). `link='centroid'` draws
     a spoke from the family centroid to every member; `link='time'` draws the time-ordered path.
@@ -798,7 +838,7 @@ def map_cluster_links(meta, labels, table, top=None, reg=None, subregion=ufc.SUB
         reg = [subregion[0] - pad, subregion[1] + pad, subregion[2] - pad, subregion[3] + pad]
     fig = pmt.Figure()
     pmt.config(FORMAT_GEO_MAP="ddd.xx", MAP_FRAME_TYPE="plain")
-    fig.basemap(region=reg, projection="M16c", frame=["af", f"+t{title}"])
+    fig.basemap(region=reg, projection=f"M{width}c", frame=["af", f"+t{title}"])
     fig.coast(land="white", water="lightblue", shorelines=True)
     ufc.plot_faults(fig, fault_trace)
     bg = m[~m["fam"].isin(cids)]
