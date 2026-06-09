@@ -704,39 +704,66 @@ def plot_antipair_detail(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, zoom
     return fig
 
 
-def plot_antipair_compare(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, zoom=None,
-                          width=14.0, row_h=1.8, title=None):
-    """**Two overlays per pair, side by side**, at the SAME P-aligned (lag-0) datum, so you can see
-    directly whether a pair is an anti-repeater or an ordinary repeater:
+def plot_antipair_compare(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, maxlag=DEFAULT_MAXLAG,
+                          zoom=None, width=14.0, row_h=1.8, title=None):
+    """**Two overlays per pair, EACH aligned at its OWN best lag** (not forced to lag 0), so the
+    repeater and anti-repeater hypotheses get a fair, like-for-like comparison:
 
-      LEFT  — event i (black) vs event j **as-is** (blue): they overlay for a *repeater*, mirror for
-              an *anti-repeater*. (At lag 0 the as-is correlation is `cc_lag0`.)
-      RIGHT — event i (black) vs event j **flipped** (`-X[j]`, red): they overlay for an *anti-repeater*.
+      LEFT  — event i (black) vs event j shifted to its best **positive-CC** lag (blue): the *repeater*
+              fit (how well they overlay when allowed to slide ±`maxlag`).
+      RIGHT — event i (black) vs event j shifted to its best **negative-CC** lag, then flipped (red):
+              the *anti-repeater* fit.
 
-    Caveat baked into the title: `pos` is the best POSITIVE correlation over *all* lags — if it is high,
-    the as-is traces also match after a small (≈ half-period) shift, i.e. a half-cycle-offset repeater
-    rather than a true reversal; a genuine anti-repeater has a clean flipped match AND a *low* `pos`.
-    `zoom=(t0,t1)` for detail; `pairs` = dicts with i, j (+ optional cc_lag0/cc_neg/cc_pos)."""
+    Why this matters: the candidates are selected for a strong NEGATIVE correlation **at lag 0**, so
+    drawing the as-is overlay at lag 0 unfairly makes every pair look anti. Aligning the as-is at its
+    own maximum CC reveals the truth — if the positive fit (left) is as good or **better** than the
+    flipped fit (right), typically at a ≈ half-period lag, the pair is a half-cycle-offset **repeater**,
+    not a polarity reversal. The titles report each best correlation and the lag (ms) at which it
+    occurs. `zoom=(t0,t1)` for detail; `pairs` = dicts with i, j."""
     import matplotlib.pyplot as plt
     X = res["bands"][tuple(band)]; kept = res["kept"]
     t = np.arange(X.shape[1]) / sr + win[0]
+    L = int(round(maxlag * sr))
+
+    def _shift(b, lag):                                      # integer-sample shift, zero the wrap
+        out = np.roll(b, lag)
+        if lag > 0:
+            out[:lag] = 0.0
+        elif lag < 0:
+            out[lag:] = 0.0
+        return out
+
+    def _best_lags(a, b):                                    # lag (samples) of max +CC and min -CC over +/-L
+        a2 = _l2(a); cp, lp, cn, ln = -2.0, 0, 2.0, 0
+        for lag in range(-L, L + 1):
+            c = float(np.dot(a2, _l2(_shift(b, lag))))
+            if c > cp:
+                cp, lp = c, lag
+            if c < cn:
+                cn, ln = c, lag
+        return lp, cp, ln, cn
+
     n = len(pairs)
     fig, axes = plt.subplots(n, 2, figsize=(width, row_h * n), dpi=130, squeeze=False, sharex=True)
     for r, p in enumerate(pairs):
         i, j = p["i"], p["j"]; a0, a1 = axes[r]
-        a0.plot(t, _l2(X[i]), color="k", lw=1.0); a0.plot(t, _l2(X[j]), color="royalblue", lw=1.0)
-        a1.plot(t, _l2(X[i]), color="k", lw=1.0); a1.plot(t, -_l2(X[j]), color="crimson", lw=1.0)
+        lp, cp, ln, cn = _best_lags(X[i], X[j])
+        a0.plot(t, _l2(X[i]), color="k", lw=1.0)
+        a0.plot(t, _l2(_shift(X[j], lp)), color="royalblue", lw=1.0)        # best +CC alignment
+        a1.plot(t, _l2(X[i]), color="k", lw=1.0)
+        a1.plot(t, -_l2(_shift(X[j], ln)), color="crimson", lw=1.0)        # best -CC alignment, flipped
         for a in (a0, a1):
             a.axvline(0, color="b", lw=0.5, ls="--"); a.set_yticks([]); a.tick_params(labelsize=7); a.margins(x=0)
             if zoom is not None:
                 a.set_xlim(*zoom)
-        a0.set_title("{} × {}   as-is (blue)   lag0={:.2f}".format(
-            kept[i], kept[j], p.get("cc_lag0", np.nan)), fontsize=7, loc="left")
-        a1.set_title("flipped (red)   neg={:.2f}   pos={:.2f}".format(
-            p.get("cc_neg", np.nan), p.get("cc_pos", np.nan)), fontsize=7, loc="left")
+        a0.set_title("{} × {}   repeater fit +CC={:.2f} @ {:+.0f} ms".format(
+            kept[i], kept[j], cp, 1000.0 * lp / sr), fontsize=7, loc="left")
+        a1.set_title("anti fit −CC={:.2f} @ {:+.0f} ms   {}".format(
+            cn, 1000.0 * ln / sr, "← repeater wins" if cp >= abs(cn) else "← anti wins"),
+            fontsize=7, loc="left")
     axes[-1, 0].set_xlabel("Time from P (s)", fontsize=9); axes[-1, 1].set_xlabel("Time from P (s)", fontsize=9)
-    fig.suptitle(title or "Each pair — LEFT: event j as-is (blue) · RIGHT: event j flipped (red) · "
-                 "black = event i   [{}-{} Hz]".format(band[0], band[1]), fontsize=10)
+    fig.suptitle(title or "Each pair aligned at its OWN best lag — LEFT: j → best +CC (repeater) · "
+                 "RIGHT: j → best −CC, flipped (anti)   [{}-{} Hz]".format(band[0], band[1]), fontsize=9.5)
     fig.tight_layout()
     return fig
 

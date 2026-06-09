@@ -189,14 +189,17 @@ code("""wf.plot_antipair_detail(res, PAIRS[:TOPN], band=PRIMARY, win=WIN);
 wf.plot_antipair_detail(res, PAIRS[:min(8, TOPN)], band=PRIMARY, win=WIN, zoom=(-0.3, 3.0),
                         title="Anti-pair detail — zoom P→S");""")
 
-md("""### 5c · Two overlays per pair — repeater vs anti-repeater (at the P datum)
+md("""### 5c · Repeater vs anti-repeater — each aligned at its OWN best lag
 
-For each pair, **left** overlays event *j* **as-is** (blue) on event *i* (black); **right** overlays
-event *j* **flipped** (red). At the P-aligned datum an anti-repeater reads as **mirror on the left,
-match on the right**. Watch `pos` in the titles: if it is high the as-is traces *also* match after a
-~half-period shift (a half-cycle-offset repeater), so a clean anti-repeater is **match-when-flipped
-AND low `pos`**.""")
-code("""wf.plot_antipair_compare(res, PAIRS[:min(8, TOPN)], band=PRIMARY, win=WIN, zoom=(-0.3, 3.0));""")
+For each pair, **left** slides event *j* to its best **positive**-CC lag and overlays it (blue) on
+event *i* (black) — the *repeater* fit; **right** slides *j* to its best **negative**-CC lag and flips
+it (red) — the *anti-repeater* fit. Because the candidates are selected for a strong negative CC **at
+lag 0**, drawing the as-is overlay at lag 0 would unfairly make every pair look anti; aligning each
+hypothesis at its **own maximum CC** is the honest, like-for-like test. The title reports each best
+correlation + lag (ms) and flags **"repeater wins"** when the positive fit (typically at a ~half-period
+lag) is at least as strong as the flipped fit. A **genuine anti-repeater is one where _anti wins_**
+clearly — and on HHZ a few do.""")
+code("""wf.plot_antipair_compare(res, PAIRS[:min(8, TOPN)], band=PRIMARY, win=WIN, maxlag=MAXLAG, zoom=(-0.3, 3.0));""")
 
 md("""> **Caveat — KG.HDB horizontal sensor rotation.** The cross-component `confirmed` flag (§4) requires
 > the flip on N and E as well, but **HDB's horizontal sensor orientation has changed over time**, so for
