@@ -14,12 +14,22 @@ import nbformat as nbf
 NB_COMP = sys.argv[1] if len(sys.argv) > 1 else "HHZ"
 assert NB_COMP in ("HHZ", "HHN", "HHE"), NB_COMP
 
+# optional analysis band "LO-HI" Hz (default 1-10). A stricter high-frequency band (e.g. 1-25)
+# makes the half-cycle degeneracy WORSE (shorter periods → a half-period is an even smaller lag),
+# so it is a harder test for genuine polarity reversals.
+BAND_ARG = sys.argv[2] if len(sys.argv) > 2 else "1-10"
+PRIMARY_BAND = tuple(int(x) for x in BAND_ARG.split("-"))
+assert len(PRIMARY_BAND) == 2 and PRIMARY_BAND[0] < PRIMARY_BAND[1], BAND_ARG
+IS_DEFAULT_BAND = PRIMARY_BAND == (1, 10)
+BAND_TAG = f"{PRIMARY_BAND[0]}-{PRIMARY_BAND[1]}Hz"
+BANDS_LIST = list(dict.fromkeys([PRIMARY_BAND, (1, 10), (2, 8), (4, 12), (5, 15)]))
+
 nb = nbf.v4.new_notebook()
 C = []
 def md(s): C.append(nbf.v4.new_markdown_cell(s))
 def code(s): C.append(nbf.v4.new_code_cell(s))
 
-md(f"""# Anti-repeating events at `KG.HDB` ({NB_COMP}) — signed cross-correlation
+md(f"""# Anti-repeating events at `KG.HDB` ({NB_COMP}, {BAND_TAG}) — signed cross-correlation
 
 **Question.** Do *anti-repeaters* exist — event pairs whose `KG.HDB.{NB_COMP}` waveforms are
 near-perfect **polarity-reversed** copies (cross-correlation ≈ **−1.0**)? Physically that would mean
@@ -51,8 +61,8 @@ STATION   = "KG.HDB"
 COMP      = "{NB_COMP}"          # primary component for this notebook
 COMPS     = ("HHZ", "HHN", "HHE")   # all three, for the cross-component confirmation
 WIN       = (-0.5, 7.5)         # s relative to P (same short window as the blast screen)
-BANDS     = [(1, 10), (2, 8), (4, 12), (5, 15)]   # Hz
-PRIMARY   = (1, 10)            # analysis band (P alignment still uses REF_BAND 2-8 Hz internally)
+BANDS     = {BANDS_LIST}   # Hz
+PRIMARY   = {PRIMARY_BAND}            # analysis band (P alignment still uses REF_BAND 2-8 Hz internally)
 MAXLAG    = 0.2                 # s, signed-CC lag search
 NEG_THRESHOLD = -0.85          # a candidate anti-pair needs cc_neg / cc_lag0 at least this negative
 POS_GATE      = 0.6            # ...and cc_pos BELOW this (else it is a half-cycle-offset repeater)
@@ -246,6 +256,7 @@ md(f"""## 7 · Conclusion / how to read this
 
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
-out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/06_anti_repeaters_KGHDB_{NB_COMP}_phasenet_plus.ipynb"
+_suffix = "" if IS_DEFAULT_BAND else f"_{BAND_TAG}"
+out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/06_anti_repeaters_KGHDB_{NB_COMP}{_suffix}_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")
