@@ -9,6 +9,11 @@ they `import uf_cluster` / `uf_waveform_similarity` with a bare import and read 
 paths relative to this directory, so they must run with the working directory set here. Nothing was
 deleted; nothing tracked was moved.
 
+On 2026-06-10 the **repeater + anti-repeater** analyses (06/07/09/10 notebooks + their builders) moved
+into **[`repeaters/`](repeaters/README.md)**. Those notebooks were made **cwd-independent** (setup cell
+does `sys.path.insert(0, <HypoInv>)` + absolute `CACHE = wf.CACHE_DIR`), so they run from anywhere and
+still hit the cache here. The shared modules + cache + catalogs stay at this root.
+
 ## What stays at the root (do not move — code references these by path)
 
 The tracked `.py` modules use absolute `HYPO_DIR` paths (`uf_waveform_similarity.py:35-40`), so the

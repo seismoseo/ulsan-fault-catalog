@@ -70,10 +70,12 @@ TOPN      = 12                 # candidates to gallery / map
 CACHE     = "wf_similarity_cache"
 """)
 
-code("""import os, numpy as np, pandas as pd, matplotlib.pyplot as plt
+code("""import os, sys, numpy as np, pandas as pd, matplotlib.pyplot as plt
+sys.path.insert(0, "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv")  # run from repeaters/ or anywhere
 import uf_waveform_similarity as wf
 import uf_cluster as ufc
 wf.use_helvetica()
+CACHE = wf.CACHE_DIR          # absolute cache dir (overrides the relative default; cwd-independent)
 os.makedirs(CACHE, exist_ok=True)
 pd.set_option("display.width", 180); pd.set_option("display.max_columns", 40)
 print("station", STATION, COMP, "| window", WIN, "s | primary band", PRIMARY)""")
@@ -257,6 +259,6 @@ md(f"""## 7 · Conclusion / how to read this
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
 _suffix = "" if IS_DEFAULT_BAND else f"_{BAND_TAG}"
-out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/06_anti_repeaters_KGHDB_{NB_COMP}{_suffix}_phasenet_plus.ipynb"
+out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/repeaters/06_anti_repeaters_KGHDB_{NB_COMP}{_suffix}_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")

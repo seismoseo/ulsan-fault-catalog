@@ -46,11 +46,13 @@ N_STATIONS = 6               # how many of the closest stations to validate agai
 N_OVERLAY = 6                # candidate pairs to draw as multi-station overlays
 CACHE     = "wf_similarity_cache\"""")
 
-code("""import os, glob, numpy as np, pandas as pd, matplotlib.pyplot as plt
+code("""import os, sys, glob, numpy as np, pandas as pd, matplotlib.pyplot as plt
+sys.path.insert(0, "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv")  # run from repeaters/ or anywhere
 from obspy.geodetics.base import gps2dist_azimuth
 import uf_waveform_similarity as wf
 import uf_cluster as ufc
 wf.use_helvetica()
+CACHE = wf.CACHE_DIR          # absolute cache dir (overrides the relative default; cwd-independent)
 pd.set_option("display.width", 260); pd.set_option("display.max_columns", 50)
 WF = wf.WF_ROOT""")
 
@@ -178,6 +180,6 @@ display(pd.DataFrame([ctl]))""")
 
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
-out = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/09_antirepeater_multistation_1-25Hz_phasenet_plus.ipynb"
+out = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/repeaters/09_antirepeater_multistation_1-25Hz_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")
