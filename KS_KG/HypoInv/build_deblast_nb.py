@@ -93,26 +93,33 @@ hi[["cluster","n","mean_cc","daytime_frac","depth_med","lat_c","lon_c","blast_li
 
 md("""## 2 · Reclassify vetted natural clusters → blast & de-blasted catalogs
 
-`NATURAL_OVERRIDE` (cl 1158) is removed from the blast set; the de-blasted catalog is the blastclean
-catalog minus the remaining blast-family events (matched on origin-time id).""")
+**Scope.** The blastclean catalog spans the **whole study area** (2010-2024, ~15 k events); the blast
+screen only sees events **recorded at KG.HDB**, which are the **UF subregion** population (~2.8 k).
+So the de-blasted *product* is restricted to the subregion: subregion events minus the blast-family
+events. `NATURAL_OVERRIDE` (cl 1158) is kept out of the blast set.""")
 code("""blast_ids = [c for c in blast_ids_raw if c not in NATURAL_OVERRIDE]
 removed = [c for c in blast_ids_raw if c in NATURAL_OVERRIDE]
 m = meta.copy(); m["fam"] = labels
 blast_events = set(m.loc[m["fam"].isin(blast_ids), "event"])
 print(f"blast families kept: {sorted(blast_ids)}  ({len(blast_events)} events)")
-print(f"reclassified to natural: {removed}  ("
-      f"{len(set(m.loc[m['fam'].isin(removed), 'event']))} events returned)")
+print(f"reclassified to natural: {removed}")
 
 cat = pd.read_csv(wf.BLASTCLEAN)
 cat["time"] = pd.to_datetime(cat["time"], utc=True)
 cat = ufc.add_kst_columns(cat, ufc.KST)
 cat["event"] = cat["time"].dt.strftime("%Y%m%d%H%M%S")
 cat["is_blast"] = cat["event"].isin(blast_events)
-blast_cat   = cat[cat["is_blast"]].copy()
-deblast_cat = cat[~cat["is_blast"]].copy()
-print(f"\\nblastclean: {len(cat)} | blast: {len(blast_cat)} | de-blasted: {len(deblast_cat)}")
+
+# restrict to the UF subregion (the screened scope) — the de-blasted product is NOT the whole 15 k
+s = ufc.SUBREGION
+in_sub = cat["lon"].between(s[0], s[1]) & cat["lat"].between(s[2], s[3])
+orig_cat    = cat[in_sub].copy()
+blast_cat   = cat[in_sub & cat["is_blast"]].copy()
+deblast_cat = cat[in_sub & ~cat["is_blast"]].copy()
+print(f"\\nblastclean (whole study area): {len(cat)}")
+print(f"  -> UF subregion: {len(orig_cat)}  =  de-blasted {len(deblast_cat)} + blast {len(blast_cat)}")
 deblast_cat.drop(columns=["is_blast"]).to_csv(DEBLAST_CSV, index=False)
-print(f"wrote rough de-blasted catalog -> {DEBLAST_CSV}")""")
+print(f"wrote rough de-blasted SUBREGION catalog -> {DEBLAST_CSV}")""")
 
 md("""## 3 · Maps over the UF subregion — coloured by hour-of-day (KST)
 
@@ -122,24 +129,45 @@ Origin *time* is reliable even though the locations are not — so hour-of-day i
 A blast family reads as one **daytime** colour; the natural background spreads across all 24 h. (Depth
 / epicentral position are intentionally not shown — the blast events are severely mislocated.)""")
 code("""SUB = list(ufc.SUBREGION)   # exact subregion bounds [lonmin, lonmax, latmin, latmax]
-def _in_sub(d, s=ufc.SUBREGION):
-    return d[d["lon"].between(s[0], s[1]) & d["lat"].between(s[2], s[3])]
-mapkw = dict(color_by="hour", reg=SUB, draw_box=False)   # exact zoom, no blue box
-print(f"subregion events: original {len(_in_sub(cat))} | de-blasted {len(_in_sub(deblast_cat))} "
-      f"| blast {len(_in_sub(blast_cat))}")""")
+mapkw = dict(color_by="hour", reg=SUB, draw_box=False)   # exact zoom, no blue box""")
 
 md("### 3a · Original catalog (before de-blasting) — hour-of-day (KST)")
-code("""wf.map_catalog_subregion(cat, **mapkw,
-    title=f"Original catalog ({len(_in_sub(cat))} in subregion) — hour of day (KST)").show()""")
+code("""wf.map_catalog_subregion(orig_cat, **mapkw,
+    title=f"Original catalog ({len(orig_cat)} in subregion) — hour of day (KST)").show()""")
 md("### 3b · De-blasted (natural) catalog — hour-of-day (KST)")
 code("""wf.map_catalog_subregion(deblast_cat, **mapkw,
-    title=f"De-blasted catalog ({len(_in_sub(deblast_cat))} in subregion) — hour of day (KST)").show()""")
+    title=f"De-blasted catalog ({len(deblast_cat)} in subregion) — hour of day (KST)").show()""")
 md("### 3c · Blast catalog — hour-of-day (KST)")
 code("""wf.map_catalog_subregion(blast_cat, size="0.28c", **mapkw,
-    title=f"Blast catalog ({len(_in_sub(blast_cat))} in subregion) — hour of day (KST)").show()""")
+    title=f"Blast catalog ({len(blast_cat)} in subregion) — hour of day (KST)").show()""")
 
-md("""## 4 · How to read this
+md("""## 4 · Blast-family waveforms — visual confirmation (every member, by cluster)
 
+Record sections of **all** members of **every** blast family (P-aligned at *t*=0, S arrival as a
+short bar), grouped and coloured by cluster — so you can confirm by eye that each flagged family is a
+set of near-identical repeating waveforms (the quarry signature). Nothing is omitted: every event in
+every blast cluster is drawn. 1-10 Hz (the screening band).""")
+code("""SP = wf.s_minus_p(kept, station=STATION)            # S markers (slow once)
+BLAST_COLORS = wf.cluster_colors(blast_ids)
+_ = wf.plot_cluster_sections(res["bands"][PRIMARY], labels, kept, win=WIN, station=STATION, comp=COMP,
+                             clusters=blast_ids, colors=BLAST_COLORS, show_singletons=False,
+                             max_per_cluster=10**6, sp=SP,
+                             title=f"{STATION} {COMP} blast families ({PRIMARY[0]}-{PRIMARY[1]} Hz) — every member")""")
+
+md("""## 5 · Hour-of-day histogram per blast family (KST)
+
+One panel per blast family — the temporal signature behind the flag. A genuine quarry family piles
+into **working hours** (06-17 KST, shaded); a family with appreciable night-time activity is a
+candidate misclassification (add it to `NATURAL_OVERRIDE`).""")
+code("""# evidence restricted to the kept blast families, so the histogram helper shows exactly those
+blast_evid = evid[evid["cluster"].isin(blast_ids)].copy()
+blast_evid["blast_like"] = True
+_ = wf.plot_blast_hour_histograms(meta, labels, blast_evid, station=STATION, colors=BLAST_COLORS)""")
+
+md("""## 6 · How to read this
+
+- **§4 waveforms** are the visual confirmation: each blast family should be a column of near-identical
+  repeating wiggles. **§5 histograms** should pile into the shaded daytime band.
 - **Blast catalog** should read as a tight set of **daytime** (working-hours) colours. The map
   *positions* are unreliable (blasts are severely mislocated) — the **colour** (hour) is the signal.
 - **De-blasted (natural) catalog** should show origins across **all 24 h** (no daytime bias),
