@@ -15,6 +15,8 @@ import nbformat as nbf
 
 NB_COMP = sys.argv[1] if len(sys.argv) > 1 else "HHZ"
 assert NB_COMP in ("HHZ", "HHN", "HHE"), NB_COMP
+NB_BAND = sys.argv[2] if len(sys.argv) > 2 else "5-15"     # clustering/confirmation band, e.g. "5-25"
+LO, HI = (int(x) for x in NB_BAND.split("-"))
 HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
 
 nb = nbf.v4.new_notebook()
@@ -42,8 +44,9 @@ md("## Parameters")
 code(f"""STATION    = "KG.HDB"
 COMP       = "{NB_COMP}"          # HDB clustering channel (HHZ vertical is the robust basis)
 WIN        = (-0.5, 7.5)
-BANDS      = [(5, 15), (1, 10), (2, 8), (4, 12)]
-PRIMARY    = (5, 15)           # clustering + confirmation band (user-set)
+BANDS      = [({LO}, {HI}), (1, 10), (2, 8), (4, 12)]
+PRIMARY    = ({LO}, {HI})           # clustering + confirmation band (user-set)
+TOP_N      = 20                # §5: render gathers / CC matrices / map / temporal for the top-N families
 MAXLAG     = 0.2               # CC lag search for the HDB clustering (P/S reliable there)
 CC_MAXLAG  = 5.0               # LARGER lag for the per-station CC matrices (§5): P/S can be
                                # mis-picked / mis-aligned at non-HDB stations, so allow up to 5 s
@@ -145,25 +148,28 @@ if len(bad):
 else:
     print("(no covered-but-unconfirmed family — all families with coverage confirmed)")""")
 
-md("""## 5 · Waveform similarity per cluster, per station — 10 largest clusters (full width)
+md("""## 5 · Waveform similarity per cluster, per station — top `TOP_N` clusters (full width)
 
 The family membership is **fixed by the KG.HDB HHZ clustering of §1** (5-15 Hz, single-linkage,
 CC >= 0.9); these panels only *display* the same members at the other nearby stations. For each of the
-10 largest families:
+top-`TOP_N` families:
 
 - **`plot_family_station_sections`** — one **full-width chronological gather per nearby station** (the
   multi-station analogue of `plot_clusters_individually`: one trace per event, P-aligned at t=0, S bars,
-  UTC origin time on the right, earliest on top), so each station's waveforms are big and readable;
+  UTC origin time on the right, earliest on top; the **family date range** is in each title), so each
+  station's waveforms are big and readable;
 - **`plot_family_station_cc_matrices`** — the **time-ordered waveform CC matrix per station** (one row
   of panels). The clustering used KG.HDB, where P/S are reliable; at other stations the picks may be
   mis-aligned, so the matrix CC uses a **large lag search (`CC_MAXLAG` = 5 s)** to still recover a
   genuine waveform match. A genuine repeater is a uniformly bright block at every station; a
   chained/HDB-only family decoheres off KG.HDB;
 - **`map_family_subregion`** — a **wide subregion map** of the family's epicentres (coloured by origin
-  year), with the nearby stations used (cyan triangles), faults, KG.HDB and the quarry centroids — so
-  you see *where* the cluster is while reading its waveforms.""")
-code("""TOP10 = rep.head(10)["cluster"].tolist()
-for fam in TOP10:
+  year), with the nearby stations used (cyan triangles), faults, KG.HDB and the quarry centroids;
+- **`plot_family_recurrence`** — the cluster's **temporal progression**: a marker rake of member origin
+  times + a cumulative-count staircase on calendar time (2016 Gyeongju mainshock marked).""")
+code("""from IPython.display import display as _display
+TOPN = rep.head(TOP_N)["cluster"].tolist()
+for fam in TOPN:
     wf.plot_family_station_sections(meta, labels, int(fam), band=PRIMARY, win=WIN,
             station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS, fig_w=11)
     fig = wf.plot_family_station_cc_matrices(meta, labels, int(fam), band=PRIMARY, win=WIN,
@@ -171,7 +177,10 @@ for fam in TOP10:
     if fig is not None:
         plt.show()
     wf.map_family_subregion(meta, labels, int(fam), station_K=6, max_km=MAX_KM,
-            min_members=MIN_MEMBERS, width="20c").show()""")
+            min_members=MIN_MEMBERS, width="20c").show()
+    for _cid, _f in wf.plot_family_recurrence(meta, labels, rep[rep["cluster"] == fam],
+            mark_gyeongju=True):                          # temporal progression of this cluster
+        _display(_f); plt.close(_f)""")
 
 md("""## 6 · Recurrence timeline — largest families, 2016 Gyeongju mainshock marked
 
@@ -204,8 +213,13 @@ md(f"""## 8 · How to read this
   by distance — never assuming HHZ (which would silently drop the closest newer stations).
 - **Component**: this is `{NB_COMP}`. HHZ is the robust basis; HHN/HHE are a parameter swap.""")
 
+if NB_BAND != "5-15":                                      # band-tag everything but the default
+    for _c in C:
+        if _c.cell_type == "markdown":
+            _c.source = _c.source.replace("5-15 Hz", f"{NB_BAND} Hz").replace("5-15Hz", f"{NB_BAND}Hz")
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
-out = f"{HYPO}/repeaters/10_multistation_repeaters_KGHDB_{NB_COMP}_phasenet_plus.ipynb"
+_btag = "" if NB_BAND == "5-15" else f"_{NB_BAND}Hz"
+out = f"{HYPO}/repeaters/10_multistation_repeaters_KGHDB_{NB_COMP}{_btag}_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")

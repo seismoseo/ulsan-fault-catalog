@@ -230,8 +230,10 @@ def build_features(events, station=STATION, comp=COMP, band=REF_BAND, win=DEFAUL
         p = pick_time(ev, station, "P", wf_root, comp)
         if p is not None:
             src = "pick"
-        else:
+        elif np.isfinite(med_tt):
             p = origin_time(ev) + med_tt; src = "fallback"
+        else:                                           # no pick at this station for ANY of these
+            n_skip += 1; continue                       # events -> no traveltime datum; skip cleanly
         seg = _cut(_proc(tr, band, sr), p, win_pad, sr)
         if seg is None:
             n_skip += 1; continue
@@ -268,6 +270,8 @@ def align_fallback(Xpad, info, sr=SR, maxshift=REFINE_MAXSHIFT, ref_sources=("pi
     pick jitter is absorbed by the per-pair lag search in `similarity_matrix`.
 
     Returns integer SAMPLE shifts (0 for picked/header events)."""
+    if len(info) == 0 or "p_source" not in info.columns:    # empty build (station with no usable
+        return np.zeros(Xpad.shape[0], dtype=int)           # traces/picks for these events) -> no-op
     src = info["p_source"].values
     ref = np.isin(src, ref_sources)
     shifts = np.zeros(Xpad.shape[0], dtype=int)
@@ -364,6 +368,12 @@ def make_bands(events, station=STATION, comp=COMP, bands=None, win=DEFAULT_WIN,
         return dict(kept=kept, info=info, shifts=shifts, bands={b: have[b] for b in want})
     # shared alignment from REF_BAND (only the unpicked fallbacks are moved onto the pick datum)
     Xp, kept, info = build_features(events, station, comp, REF_BAND, win, wf_root, sr, verbose=verbose)
+    if len(kept) == 0:                                  # station has no usable trace/datum for these
+        M = int(round((win[1] - win[0]) * sr))          # events -> return empty (do NOT cache)
+        if verbose:
+            print(f"[make_bands] {station}.{comp}: 0 usable events -> empty (not cached)")
+        return {"kept": [], "info": info, "shifts": np.zeros(0, dtype=int),
+                "bands": {tuple(b): np.zeros((0, M), dtype=np.float32) for b in bands}}
     shifts = align_fallback(Xp, info, sr)
     out = {"kept": kept, "info": info, "shifts": shifts, "bands": {}}
     for b in bands:
@@ -1666,6 +1676,10 @@ def plot_family_station_sections(meta, labels, family_id, band=(5, 15), win=DEFA
     members, data = _family_stations(meta, labels, family_id, band, win, station_K, max_km,
                                      min_members, cache_dir, wf_root, sta_dir, sr)
     col = color or cluster_colors([int(family_id)])[int(family_id)]
+    drange = ""
+    if members:                                             # family date range (event ids sort by time)
+        a, b = min(members), max(members)
+        drange = f", {a[:4]}-{a[4:6]}-{a[6:8]} to {b[:4]}-{b[4:6]}-{b[6:8]}"
     try:
         from IPython.display import display
     except Exception:                                       # noqa: BLE001
@@ -1678,7 +1692,7 @@ def plot_family_station_sections(meta, labels, family_id, band=(5, 15), win=DEFA
                                   show_singletons=False, annotate_utc=True, row_h=row_h, fig_w=fig_w,
                                   min_fig_h=1.2, head_in=0.92,
                                   title=f"{st} {ch} ({dist:.0f} km) — cluster {int(family_id)} "
-                                        f"(n={len(kept)}), chronological  [{band[0]}-{band[1]} Hz]")
+                                        f"(n={len(kept)}{drange}), chronological  [{band[0]}-{band[1]} Hz]")
         if show and display is not None:
             display(f); plt.close(f)
         else:
