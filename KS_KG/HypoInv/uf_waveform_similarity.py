@@ -1151,6 +1151,138 @@ def s_minus_p(kept, station=STATION, wf_root=WF_ROOT):
     return np.asarray(out, dtype=float)
 
 
+# ----------------------------------------------- multi-station network confirmation of repeaters
+def native_channel(station, events, wf_root=WF_ROOT, prefer=("HHZ", "HGZ", "ELZ")):
+    """The vertical channel a station ACTUALLY records, by checking which SAC exists across a **sample
+    spread over `events`** (not just the first few — a station may be absent in the early era but
+    present later). Returns the first of `prefer` present, else None. **Never assume HHZ** — newer
+    KS/KG stations record on HG?, older ones on EL?; only HH? was visible to the original code."""
+    net, sta = station.split(".")
+    step = max(1, len(events) // 24)
+    sample = events[::step] if len(events) > 24 else events
+    for ch in prefer:
+        if any(os.path.exists(os.path.join(wf_root, ev, f"{ev}.{net}.{sta}.{ch}.sac")) for ev in sample):
+            return ch
+    return None
+
+
+def nearby_stations(events, center, max_km=40.0, sta_dir=STA_DIR, wf_root=WF_ROOT,
+                    prefer=("HHZ", "HGZ", "ELZ")):
+    """Stations recording `events` within `max_km` of `center=(lat,lon)`, each with its **native
+    vertical channel**, distance, and coverage. DataFrame [station, channel, dist_km, coverage] sorted
+    by distance. Coordinates via `used_stations` (per-year UF{y}.sta) — so it is era-aware: an old
+    event set yields few stations, a recent one many."""
+    from obspy.geodetics.base import gps2dist_azimuth
+    coords = used_stations(events, sta_dir=sta_dir, wf_root=wf_root)
+    rows = []
+    for r in coords.itertuples():
+        ch = native_channel(r.station, events, wf_root=wf_root, prefer=prefer)
+        if ch is None:
+            continue
+        d = gps2dist_azimuth(center[0], center[1], r.lat, r.lon)[0] / 1000.0
+        if d > max_km:
+            continue
+        cov = sum(os.path.exists(os.path.join(wf_root, e, f"{e}.{r.station}.{ch}.sac")) for e in events)
+        rows.append(dict(station=r.station, channel=ch, dist_km=round(d, 1), coverage=int(cov)))
+    return pd.DataFrame(rows, columns=["station", "channel", "dist_km", "coverage"]).sort_values(
+        "dist_km").reset_index(drop=True)
+
+
+def network_confirm(meta, labels, table, band=(5, 15), maxlag=DEFAULT_MAXLAG, win=DEFAULT_WIN,
+                    station_K=8, max_km=40.0, conf_cc=0.6, min_members=3, min_conf=2,
+                    sr=SR, cache_dir=CACHE_DIR, wf_root=WF_ROOT, sta_dir=STA_DIR, verbose=False):
+    """Network confirmation of single-station (KG.HDB) repeater families: per family, measure the
+    intra-family mean CC at the nearby stations that recorded its members (each on its **native**
+    vertical channel), and flag `confirmed` if >= `min_conf` stations reproduce the family at mean
+    CC >= `conf_cc`.
+
+    **Adaptive to the time-varying network**: confirmation uses whatever stations recorded the
+    family's members; a family whose era offers < `min_conf` usable stations gets
+    `coverage='insufficient'` (NOT rejected) — distinct from a family that HAD stations but failed
+    (a likely HDB-only artifact). Returns `table` + columns: n_sta_avail, n_sta_conf, net_mean_cc,
+    confirmed, coverage. Reuses `make_bands` (built once per station for the union of family members)
+    + `similarity_matrix` on the per-family member submatrix."""
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels
+    fam_events = sorted(set(m.loc[m["fam"].isin(table["cluster"]), "event"]))   # union of all members
+    _cache = {}
+    def _station(st, ch):
+        if (st, ch) not in _cache:
+            r = make_bands(fam_events, station=st, comp=ch, bands=[band], win=win, cache_dir=cache_dir,
+                           wf_root=wf_root, sr=sr, verbose=verbose)
+            _cache[(st, ch)] = (r["bands"][tuple(band)], {e: i for i, e in enumerate(r["kept"])})
+        return _cache[(st, ch)]
+
+    out = []
+    for fam in table["cluster"]:
+        g = m[m["fam"] == fam]; members = list(g["event"]); gj = g[g["joined"]]
+        rec = dict(cluster=int(fam), n_sta_avail=0, n_sta_conf=0, net_mean_cc=np.nan,
+                   confirmed=False, coverage="insufficient")
+        if len(gj):
+            center = (float(gj["lat"].mean()), float(gj["lon"].mean()))
+            sels = nearby_stations(members, center, max_km=max_km, sta_dir=sta_dir, wf_root=wf_root)
+            sels = sels[sels["coverage"] >= min_members].head(station_K)
+            ccs = []
+            for r in sels.itertuples():
+                X, idx = _station(r.station, r.channel)
+                mi = [idx[e] for e in members if e in idx]
+                if len(mi) < min_members:
+                    continue
+                cc = similarity_matrix(X[mi], maxlag=maxlag, sr=sr)
+                iu = np.triu_indices(len(mi), k=1)
+                ccs.append(float(cc[iu].mean()))
+            n_avail = len(ccs); n_conf = int(sum(c >= conf_cc for c in ccs))
+            rec["n_sta_avail"] = n_avail; rec["n_sta_conf"] = n_conf
+            rec["net_mean_cc"] = round(float(np.median(ccs)), 3) if ccs else np.nan
+            rec["coverage"] = "ok" if n_avail >= min_conf else "insufficient"
+            rec["confirmed"] = bool(rec["coverage"] == "ok" and n_conf >= min_conf)
+        out.append(rec)
+    aug = pd.DataFrame(out)
+    return table.merge(aug, on="cluster", how="left")
+
+
+def plot_family_network(meta, labels, family_id, band=(5, 15), maxlag=DEFAULT_MAXLAG, win=DEFAULT_WIN,
+                        station_K=6, max_km=40.0, min_members=3, sr=SR, cache_dir=CACHE_DIR,
+                        wf_root=WF_ROOT, sta_dir=STA_DIR):
+    """One panel per nearby station for ONE family: member traces (grey) + the family **stack** (red),
+    titled station/distance/channel/intra-family mean-CC — the visual proof a family does (or does not)
+    repeat network-wide. Stations ordered by distance, each on its native channel. Returns the fig."""
+    import matplotlib.pyplot as plt
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels
+    g = m[m["fam"] == family_id]; members = list(g["event"]); gj = g[g["joined"]]
+    if not len(gj):
+        return None
+    center = (float(gj["lat"].mean()), float(gj["lon"].mean()))
+    sels = nearby_stations(members, center, max_km=max_km, sta_dir=sta_dir, wf_root=wf_root)
+    sels = sels[sels["coverage"] >= min_members].head(station_K)
+    panels = []
+    for r in sels.itertuples():
+        res = make_bands(members, station=r.station, comp=r.channel, bands=[band], win=win,
+                         cache_dir=cache_dir, wf_root=wf_root, sr=sr, verbose=False)
+        idx = {e: i for i, e in enumerate(res["kept"])}
+        mi = [idx[e] for e in members if e in idx]
+        if len(mi) < min_members:
+            continue
+        X = res["bands"][tuple(band)][mi]
+        cc = similarity_matrix(X, maxlag=maxlag, sr=sr); iu = np.triu_indices(len(mi), k=1)
+        panels.append((r.station, r.channel, r.dist_km, float(cc[iu].mean()), len(mi), X))
+    if not panels:
+        return None
+    n = len(panels)
+    fig, axes = plt.subplots(1, n, figsize=(2.6 * n, 3.4), dpi=130, squeeze=False, sharex=True)
+    t = np.arange(panels[0][5].shape[1]) / sr + win[0]
+    for ax, (st, ch, d, mc, k, X) in zip(axes[0], panels):
+        for row in X:
+            ax.plot(t, _l2(row), color="0.7", lw=0.4, alpha=0.7)
+        ax.plot(t, _l2(X.mean(0)), color="crimson", lw=1.1)
+        ax.axvline(0, color="b", lw=0.5, ls="--"); ax.set_yticks([]); ax.margins(x=0); ax.tick_params(labelsize=7)
+        ax.set_title(f"{st} {ch}\n{d:.0f} km  n={k}  mCC={mc:.2f}", fontsize=7)
+    axes[0, 0].set_xlabel("Time from P (s)", fontsize=8)
+    fig.suptitle(f"Family {family_id} across {n} nearby stations  [{band[0]}-{band[1]} Hz] "
+                 f"(grey=members, red=stack)", fontsize=10)
+    fig.tight_layout()
+    return fig
+
+
 def cluster_colors(keep_ids):
     """Map each cluster id to a DISTINCT colour. The first 20 ids (the families most likely to be
     plotted — `keep_ids` is passed in size order) get the qualitative `tab20` palette so adjacent
