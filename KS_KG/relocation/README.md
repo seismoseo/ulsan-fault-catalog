@@ -36,6 +36,18 @@ PocketQuake run outputs land under `15.PocketQuake/external/korea-cluster-reloca
 (`2.HypoDD/02.dt.cc/hypoDD.reloc`). Scaffolding registers `f738_reuse`/`f738_fresh` cluster modules in
 that submodule (re-created by `run.sh`, so they need not be committed).
 
+## Where the results are
+- **Tidy tables** (`save_results.py`, written to `family738/`): `reloc_f738_reuse.csv`,
+  `reloc_f738_fresh.csv` (event_id, time_utc, lat, lon, depth_km, relative x/y/z m, **ex95/ey95/ez95**
+  bootstrap 95% half-widths once the bootstrap step has run, and P/S link counts), and
+  `reloc_compare.csv` ((1)-vs-(2) per-event horizontal + depth offsets).
+- **Raw PocketQuake outputs** under
+  `15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/f738_{reuse,fresh}/`:
+  `1.HypoInv/kim2011/*.sum` (absolute), `2.HypoDD/02.dt.cc/hypoDD.reloc` (dt.cc relocated),
+  `2.HypoDD/02.dt.cc/bootstrap_errors.csv` + `bootstrap_samples.npz` (bootstrap).
+- **Figures**: `compare_relocations.ipynb` (collapse overlay, PocketQuake map, depth + fault-frame SVD
+  sections with bootstrap error bars, and the (1)-vs-(2) offset).
+
 ## Result (family 738)
 - **Collapse**: absolute HypoInverse(kim2011) RMS horizontal spread **530 m → 94 m** with dt.cc (5.6×);
   depth std **410 m → 30 m** (14×). The multiplet tightens into a compact patch, as expected for a

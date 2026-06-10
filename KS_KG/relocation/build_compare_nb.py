@@ -56,6 +56,18 @@ for name, d in [("absolute HypoInverse(kim2011)", A), ("(1) reuse-picks dt.cc", 
     h, z = spread(d); rows.append(dict(catalog=name, n=len(d), rms_horiz_m=round(h), depth_std_m=round(z)))
 pd.DataFrame(rows)""")
 
+md("""### Saved result tables
+The relocated catalogs + the (1)-vs-(2) offsets are written to `family738/reloc_*.csv` (readable
+CSVs — event_id, lat/lon/depth, relative x/y/z, link counts, and the **bootstrap 95% errors** once
+`run.sh`'s bootstrap step has run). Raw PocketQuake outputs live at
+`…/runs/f738_{reuse,fresh}/2.HypoDD/02.dt.cc/hypoDD.reloc`.""")
+co("""import subprocess
+subprocess.run([sys.executable, "save_results.py"], check=True)        # writes family738/reloc_*.csv
+print("reloc_compare.csv (first 8 of 35):")
+display(pd.read_csv("family738/reloc_compare.csv").head(8))
+print("reloc_f738_reuse.csv (first 5):")
+display(pd.read_csv("family738/reloc_f738_reuse.csv").head(5))""")
+
 md("""## 2 · Map + depth — the three catalogs overlaid (shared extent)
 
 A tight repeating multiplet should **collapse** from the absolute scatter to a compact dt.cc patch.""")
@@ -91,18 +103,42 @@ ax[0].hist(off, bins=15, color="teal", alpha=0.8); ax[0].set(xlabel="(1)-(2) hor
 ax[1].hist(dz, bins=15, color="indianred", alpha=0.8); ax[1].set(xlabel="(1)-(2) depth offset (m)", title="(depth)")
 fig.tight_layout(); plt.show()""")
 
-md("""## 4 · Bootstrap 95% errors (optional — data-resampling uncertainty)
+md("""## 4 · Bootstrap 95% errors (data-resampling uncertainty)
 
 PocketQuake's Fortran-hypoDD bootstrap (`hypodd.bootstrap_relocation`) resamples the differential-time
-data and re-inverts; the per-event 95% half-widths put the (1)-vs-(2) offset above in context. Slow
-(N replicas) and cached — uncomment to run.""")
-co("""# from pipeline.core import hypodd
-# for slug in ("f738_reuse", "f738_fresh"):
-#     bb = hypodd.bootstrap_relocation(config.load_cluster(slug), branch="dtcc", n=200, seed=0)
-#     print(slug, "median 95% half-width (m): horiz",
-#           round(float(np.nanmedian(np.hypot(bb.ex95, bb.ey95)))), " vert", round(float(np.nanmedian(bb.ez95))))""")
+data and re-inverts `n=1000` times (cached — `run.sh` precomputes it, so this loads instantly). The
+per-event 95% half-widths are the honest relative-location uncertainty, and put the (1)-vs-(2) offset
+(§3) in context.""")
+co("""from pipeline.core import hypodd
+boot = {}
+for slug in ("f738_reuse", "f738_fresh"):
+    bb = hypodd.bootstrap_relocation(config.load_cluster(slug), branch="dtcc", n=1000, seed=0)  # cached
+    boot[slug] = bb
+    hw = np.hypot(bb["ex95"], bb["ey95"])
+    print(f"{slug}: median 95% half-width  horiz {np.nanmedian(hw):.0f} m  vert {np.nanmedian(bb['ez95']):.0f} m"
+          f"  (n_events {bb['ex95'].notna().sum()})")
+print(f"\\n(1)-vs-(2) horizontal offset median was ~124 m — compare to the 95% half-widths above:"
+      f" a larger offset than the error means the pick instance dominates that dimension.)" )""")
 
-md("""## 5 · Reading this
+md("""## 5 · Depth sections + fault-frame (SVD plane) — PocketQuake views
+
+The standard PocketQuake cross-sections for each dt.cc relocation: `depth_sections` (lon-depth /
+lat-depth) and `fault_sections` (2×2 in fault coordinates, the fault plane = the **SVD best-fit plane**
+of the relocated cloud, `frame_from="svd"`), with the **bootstrap 95% error bars** overlaid.""")
+co("""for slug in ("f738_reuse", "f738_fresh"):
+    cfg = config.load_cluster(slug)
+    print(f"================  {slug}  ================")
+    try:
+        viz.depth_sections(cfg, velmodel="kim2011", source="reloc"); plt.show()
+    except Exception as e:
+        print(slug, "depth_sections skipped:", type(e).__name__, e)
+    try:
+        viz.fault_sections(cfg, velmodel="kim2011", frame_from="svd", color_by="time",
+                           show_bootstrap=True); plt.show()
+    except Exception as e:
+        print(slug, "fault_sections skipped:", type(e).__name__, e)""")
+
+md("""## 6 · Reading this
 
 - **Collapse** (§1): the dt.cc relocation should tighten the multiplet far below the absolute scatter
   (repeaters are co-located) — that is the precision gain from waveform cross-correlation.

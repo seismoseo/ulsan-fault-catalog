@@ -38,7 +38,18 @@ rp --cluster f738_reuse --stage-from hypoinverse --through dtcc --arc-velmodel k
 "$PY" "$HERE/stage.py" f738_fresh                                                 # raw SAC symlinks only
 rp --cluster f738_fresh --stage-from stations --through dtcc --arc-velmodel kim2011       # gather + RE-PICK + locate + reloc
 
-# ---------- compare (absolute vs reuse-dt.cc vs fresh-dt.cc) ----------
+# ---------- bootstrap 95% relative-location errors (Fortran hypoDD, n=1000; cached) ----------
+# n=1000 replicas x 2 clusters = 2000 full HypoDD inversions; parallelise across BOOT_CORES
+# (default 48; the pipeline default cfg.num_cores is much smaller, hence override here).
+BOOT_CORES=${BOOT_CORES:-48}
+for slug in f738_reuse f738_fresh; do
+  ( cd "$PIPE" && "$PY" -c "import sys; sys.path.insert(0,'.'); from pipeline import config; from pipeline.core import hypodd; hypodd.bootstrap_relocation(config.load_cluster('$slug'), branch='dtcc', n=1000, seed=0, cores=$BOOT_CORES)" )
+done
+
+# ---------- save tidy result tables (reloc + bootstrap errors) into family738/ ----------
+"$PY" "$HERE/save_results.py"
+
+# ---------- compare (absolute vs reuse-dt.cc vs fresh-dt.cc; collapse, sections, bootstrap) ----------
 "$PY" "$HERE/build_compare_nb.py"
 ( cd "$HERE" && "$PY" -m jupyter nbconvert --to notebook --execute --inplace compare_relocations.ipynb )
 echo "Done — open $HERE/compare_relocations.ipynb"
