@@ -33,11 +33,11 @@ are **severely mislocated**, so depth and epicentral spread carry no information
 4. split the blastclean catalog into a **blast catalog** and a **de-blasted catalog**, and
 5. map both over the UF subregion, **coloured by hour-of-day (KST)**.
 
-> **Why `daytime_frac ≥ 0.7` (not 0.6).** The daytime window is ~11 h, so a *random* (natural) family
-> sits near 0.46 daytime; a quarry fires almost entirely in working hours. The old 0.6 cut admitted
-> families that are ~40 % **night-time** and caught **cl 1158** (0.60 daytime, a genuine repeating
-> natural cluster). A `0.7` cut keeps families that are ≥70 % daytime and drops cl 1158 *automatically*.
-> `NATURAL_OVERRIDE` keeps it out explicitly too. (Tighten toward 0.9 for only the cleanest blasts.)
+> **Why `daytime_frac == 1.0` over `DAY = 06-19 KST`.** These families have only a **few members
+> each**, so a single night-time origin is enough to disqualify a genuine quarry — we therefore
+> demand a **perfect** daytime fraction (every member inside the 06-19 KST working-hours window).
+> This isolates the cleanest blasts and excludes **cl 1158** (a deep repeating natural cluster).
+> `BLAST_OVERRIDE` can force-include any obvious blast that just misses 1.0.
 
 > **Rough / preliminary.** Only KG.HDB-recorded events are screened; magnitude is not used.""")
 
@@ -53,11 +53,17 @@ LINKAGE      = "average"
 MIN_SIZE     = 4               # min cluster size to evaluate
 # blast_like = waveform-similar AND strongly daytime — the ONLY two measures (no location: blasts
 # are severely mislocated, so depth / epicentral spread are not trustworthy).
+DAY        = (6, 19)          # daytime / working-hours window (KST) — quarry firing hours
 BLAST_MEAN_CC = 0.6            # family tightness (events already cluster at CC_THRESHOLD)
-BLAST_DAYFRAC = 0.7            # >= 70% of origins in working hours (06-17 KST) — anthropogenic
+BLAST_DAYFRAC = 1.0            # require ALL members inside DAY. With only a few members per family,
+                              # one night-time event already disqualifies a genuine quarry — so
+                              # demand a perfect daytime fraction.
 # clusters flagged daytime+similar that are actually natural earthquakes (manually vetted) — kept in
-# the de-blasted catalog. cl 1158 = deep repeating natural cluster (also excluded by the 0.9 cut).
+# the de-blasted catalog. cl 1158 = deep repeating natural cluster (also excluded by the cut).
 NATURAL_OVERRIDE = [1158]
+# clusters to FORCE into the blast set despite daytime_frac < 1.0 (manually vetted obvious blasts) —
+# empty by default. e.g. cl 837 (n=19, peak 12h, p=0.000) misses 1.0 only by one ~18 h event.
+BLAST_OVERRIDE = []
 CACHE      = "wf_similarity_cache"
 DEBLAST_CSV = "catalog_phasenet_plus_2010_2024_deblasted_rough.csv\"""")
 
@@ -81,9 +87,10 @@ def band_cc(band):
 
 CC = band_cc(PRIMARY)
 labels, Z, order = wf.ward_clusters(CC, threshold=1 - CC_THRESHOLD, method=LINKAGE)
-evid = wf.cluster_evidence(meta, labels, CC, min_size=MIN_SIZE)
+evid = wf.cluster_evidence(meta, labels, CC, min_size=MIN_SIZE, day=DAY)
 # blast_like: ONLY waveform similarity + daytime fraction (no rayleigh_p, no spread_km, no depth)
 evid["blast_like"] = (evid["mean_cc"] >= BLAST_MEAN_CC) & (evid["daytime_frac"] >= BLAST_DAYFRAC)
+evid.loc[evid["cluster"].isin(BLAST_OVERRIDE), "blast_like"] = True   # force-include vetted blasts
 blast_ids_raw = evid.loc[evid["blast_like"], "cluster"].tolist()
 print(f"{len(blast_ids_raw)} blast_like families (mean_cc>={BLAST_MEAN_CC}, daytime>={BLAST_DAYFRAC}): "
       f"{sorted(blast_ids_raw)}  ({int(evid.loc[evid['blast_like'],'n'].sum())} events)")
@@ -146,23 +153,31 @@ md("""## 4 · Blast-family waveforms — visual confirmation (every member, by c
 Record sections of **all** members of **every** blast family (P-aligned at *t*=0, S arrival as a
 short bar), grouped and coloured by cluster — so you can confirm by eye that each flagged family is a
 set of near-identical repeating waveforms (the quarry signature). Nothing is omitted: every event in
-every blast cluster is drawn. 1-10 Hz (the screening band).""")
+every blast cluster is drawn, in **two filters** — the **1-10 Hz** screening band and a minimally-
+processed **1 Hz high-pass** (broadband shape) — so the match is shown not to be a band-pass artifact.""")
 code("""SP = wf.s_minus_p(kept, station=STATION)            # S markers (slow once)
-BLAST_COLORS = wf.cluster_colors(blast_ids)
-_ = wf.plot_cluster_sections(res["bands"][PRIMARY], labels, kept, win=WIN, station=STATION, comp=COMP,
+BLAST_COLORS = wf.cluster_colors(blast_ids)""")
+md("### 4a · 1-10 Hz (screening band)")
+code("""_ = wf.plot_cluster_sections(res["bands"][PRIMARY], labels, kept, win=WIN, station=STATION, comp=COMP,
                              clusters=blast_ids, colors=BLAST_COLORS, show_singletons=False,
                              max_per_cluster=10**6, sp=SP,
                              title=f"{STATION} {COMP} blast families ({PRIMARY[0]}-{PRIMARY[1]} Hz) — every member")""")
+md("### 4b · 1 Hz high-pass (broadband shape — same P-alignment)")
+code("""Xhp = wf.display_matrix(res, band=("highpass", 1.0), station=STATION, comp=COMP)   # re-reads SAC, slow
+_ = wf.plot_cluster_sections(Xhp, labels, kept, win=WIN, station=STATION, comp=COMP,
+                             clusters=blast_ids, colors=BLAST_COLORS, show_singletons=False,
+                             max_per_cluster=10**6, sp=SP,
+                             title=f"{STATION} {COMP} blast families (1 Hz high-pass) — every member")""")
 
 md("""## 5 · Hour-of-day histogram per blast family (KST)
 
 One panel per blast family — the temporal signature behind the flag. A genuine quarry family piles
-into **working hours** (06-17 KST, shaded); a family with appreciable night-time activity is a
+into **working hours** (06-19 KST, shaded); a family with appreciable night-time activity is a
 candidate misclassification (add it to `NATURAL_OVERRIDE`).""")
 code("""# evidence restricted to the kept blast families, so the histogram helper shows exactly those
 blast_evid = evid[evid["cluster"].isin(blast_ids)].copy()
 blast_evid["blast_like"] = True
-_ = wf.plot_blast_hour_histograms(meta, labels, blast_evid, station=STATION, colors=BLAST_COLORS)""")
+_ = wf.plot_blast_hour_histograms(meta, labels, blast_evid, station=STATION, colors=BLAST_COLORS, day=DAY)""")
 
 md("""## 6 · How to read this
 

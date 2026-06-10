@@ -188,8 +188,36 @@ correlate too but separate by hour-of-day + location).
   `20100531170439` (HHE,HHN; no HHZ), `20131113192434` (HHN only), `20140104222332` (HHE,HHN; no
   HHZ), `20140911190328` (HHZ only) → HHN = 2770+3−1, HHE = 2770+2−1. ~0.1 %, no material effect;
   caches/notebooks are per-component (cache tag has comp + events-hash).
-- **Next (deferred):** confirm the 7 families by eye in the gathers/spectrograms → write a cleaned
-  catalog dropping their members (the removal step) + re-run ML/summaries. Run in the **`Seis`** env.
+- **Repeater / anti-repeater notebooks (2026-06-09).** Same `uf_waveform_similarity.py` infra,
+  positive- and negative-CC counterparts at KG.HDB.
+  - `06_anti_repeaters_KGHDB_{HHZ,HHN,HHE}_phasenet_plus.ipynb` (`build_antirepeater_nb.py`): signed
+    CC (`signed_similarity` → cc_pos/cc_neg/cc_ext/cc_lag0), hunts near-(−1) polarity-reversed pairs.
+    **NULL result** — half-period degeneracy (every strong cc_neg also has high cc_pos) + cross-
+    component inconsistency. `plot_antipair_compare` aligns each hypothesis at its **own** best lag
+    (repeater-fit vs anti-fit), not lag 0 (the lag-0 bias was a real bug, fixed).
+  - `07_repeaters_KGHDB_{COMP}[_1-25Hz][_single]_phasenet_plus.ipynb`
+    (`build_repeater_nb.py [COMP] [BAND] [CC] [LINKAGE]`): classic repeating-earthquake families.
+    `repeater_table` is **magnitude-free** (catalog ML is preliminary). `plot_family_sections`
+    (per-family record sections, S bars, 1 Hz-HP variant), `plot_family_recurrence` (one fig/family
+    + cumulative-N staircase), `plot_repeater_sequences` (full-width timeline, **2016 Gyeongju**
+    mainshock marked; histogram removed), `map_cluster_links` (UF-subregion, `top=15`). Built for
+    band ∈ {1-10, 1-25} Hz × linkage ∈ {**average** UPGMA, **single** = friends-of-friends chaining}.
+  - `make_bands` now builds **missing bands incrementally** (cache key = events+window, NOT the band
+    list — a newly-requested band like 1-25 Hz was silently absent before → KeyError/stale).
+
+- **Rough de-blasted catalog — the removal step, DONE (2026-06-10).** `08_deblasted_catalog_KGHDB_
+  HHZ_phasenet_plus.ipynb` (`build_deblast_nb.py`). **Blast events are severely mislocated**, so the
+  flag is **location-free** — only **waveform similarity + daytime fraction** (NO depth, spread_km,
+  rayleigh_p): `mean_cc ≥ 0.6` AND `daytime_frac == 1.0` over `DAY=(6,19)` KST (every member in
+  working hours — families are small, one night event disqualifies). → **8 families / 59 events**
+  `[71,803,824,837,838,869,1097,1175]`. `NATURAL_OVERRIDE=[1158]` keeps a **deep (~11.5 km) repeating
+  natural** cluster out (also dropped by the cut); `BLAST_OVERRIDE` force-includes any obvious blast
+  under 1.0. **Product is subregion-scoped**: blastclean 14803 (whole study area) → **UF subregion
+  2798 = de-blasted 2741 + blast 57** → `catalog_phasenet_plus_2010_2024_deblasted_rough.csv`. Maps
+  (`map_catalog_subregion`, `color_by="hour"|"depth"`, `draw_box`): original / de-blasted / blast over
+  the **exact** subregion (no blue box), coloured by **hour-of-day** only (depth dropped — mislocated).
+  §4 per-cluster waveforms in **two filters (1-10 Hz + 1 Hz high-pass), every member, no omission**;
+  §5 per-family hour histograms. Run in the project default (`python` in HypoInv: obspy+scipy+pygmt).
 
 ## Status & next steps (2026-06-03)
 
