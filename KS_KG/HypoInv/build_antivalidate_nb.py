@@ -1,10 +1,12 @@
-"""Build the multi-station view of notebook 06's anti-pair candidates. Usage: python build_antivalidate_nb.py
+"""Build the multi-station anti-repeater validation notebook — FAIR ACROSS CHANNELS.
+Usage: python build_antivalidate_nb.py
 
-Takes the EXACT candidate pairs of 06_anti_repeaters_KGHDB_HHZ_1-25Hz (ranked by `cc_lag0` — the
-signed CC at the exact P datum — top N), which form a tight ~1 km spatial cluster, and shows how the
-SAME event pairs correlate / anti-correlate at the other long-term stations KG.MKL / KG.YSB / KG.CHS.
-Pairs are matched by event id (NOT a forced common set — a pair is shown at every station that
-recorded both its events; n/a where a station is missing one).
+Takes notebook 06's HDB anti-pair candidates (top-N by cc_lag0, a tight ~1 km cluster) and shows how
+the SAME pairs correlate / anti-correlate at the **genuinely closest** stations — selected by DISTANCE
+to the cluster and read on each station's **native vertical channel** (HHZ, HGZ, or ELZ). The earlier
+version used `comp='HHZ'` everywhere, which silently dropped every HG/EL station — including the
+closest ones (KG.SIG 7 km, KS.YGBA 10 km, KG.BOG 13 km on HG). No data was missing; it was a band-code
+filter. The catalog is unaffected (locations use the picks from all channels).
 """
 import nbformat as nbf
 
@@ -13,145 +15,166 @@ C = []
 def md(s): C.append(nbf.v4.new_markdown_cell(s))
 def code(s): C.append(nbf.v4.new_code_cell(s))
 
-md("""# Notebook 06's HDB anti-pair candidates — how do they look at other stations?
+md("""# Anti-repeater candidates — multi-station check, fair across HH / HG / EL channels
 
-The 1-25 Hz signed-CC screen (`06_anti_repeaters_KGHDB_HHZ_1-25Hz`) ranks pairs by **`cc_lag0`** — the
-signed correlation at the **exact P datum** (lag 0), the physically meaningful quantity once both
-events are P-aligned — and its top candidates form a **tight ~1 km spatial cluster** of strongly
-**lag-0-anti-correlated** HDB pairs. Here we take **those exact pairs** and show how they
-correlate / anti-correlate at the three other long-term stations **KG.MKL, KG.YSB, KG.CHS**.
+Notebook 06 ranks HDB pairs by **`cc_lag0`** (signed CC at the exact P datum) and its top candidates
+form a tight ~1 km cluster of strongly lag-0-**anti-correlated** HDB pairs. We test those exact pairs
+at the stations **closest to the cluster**, each on its **native vertical channel**.
 
-Per station we report three numbers for each pair:
+**Why this matters.** Stations split by SEED band-code: **HH** (broadband: HDB, MKL, YSB, CHS, JEJB…),
+**HG** (SIG, YGBA, BOG, CGU…), **EL** (short-period: CGD, DKJ, HAK…). An analysis fixed to `HHZ`
+silently excludes HG/EL — and the *closest* stations to this cluster are HG. So we pick stations by
+**distance** and use whatever vertical channel each one actually records. (No data is missing — the
+HG/EL stations are fully archived; the catalog locations already use their picks.)
 
-| | meaning |
-|---|---|
-| `cc_lag0` | signed CC at lag 0 (the 06 ranking metric; ≈ −1 = clean polarity reversal *there*) |
-| `cc_pos`  | best **positive** CC over ±MAXLAG (are the waveforms *similar at all* there?) |
-| `cc_neg`  | best **negative** CC over ±MAXLAG (the anti side, allowing a small lag) |
-
-**Reading it.** A genuine co-located anti-repeater is the same waveform up to **sign** at every
-station: `max(|cc_pos|,|cc_neg|)` ≈ 1 everywhere, with the *sign* varying by take-off geometry —
-e.g. anti at HDB but positive at a station in a different quadrant. If instead the validators show
-**low `cc_pos` and low `|cc_neg|`** (decorrelation), the strong HDB lag-0 negative is a single-station
-effect, not a source-side polarity reversal. Matched by event id, no pair dropped.""")
+**The test.** A genuine co-located anti-repeater is the same waveform up to **sign** at every station
+(`max(|cc_pos|,|cc_neg|)` high everywhere, sign set by take-off geometry). Decorrelation at the close
+stations ⇒ the HDB lag-0 negative is a single-station effect. Read `cc_pos` (similar at all?) together
+with `cc_lag0` (anti at the datum). **Caveat:** HG (≈accelerometer-class) and HH (broadband) are not
+directly comparable for fine 1-25 Hz correlation of small events — low `cc_pos` at an HG station can be
+instrument/SNR, not source; §5 offers a control.""")
 
 md("## Parameters")
-code("""STATION   = "KG.HDB"
-VAL_STATIONS = ["KG.MKL", "KG.YSB", "KG.CHS"]
-ALL_STATIONS = [STATION] + VAL_STATIONS
-COMP      = "HHZ"
+code("""STATION   = "KG.HDB"          # screening station (HHZ)
+COMP      = "HHZ"             # screening channel
 WIN       = (-0.5, 7.5)
 BANDS     = [(1, 25), (1, 10), (2, 8), (4, 12), (5, 15)]
 BAND      = (1, 25)
 MAXLAG    = 0.2
-TOPN      = 12               # same as notebook 06: top-N pairs by most-negative cc_lag0
-N_OVERLAY = 8                # pairs to draw as multi-station overlays
+TOPN      = 12               # notebook 06's top-N pairs by most-negative cc_lag0
+N_STATIONS = 6               # how many of the closest stations to validate against
+N_OVERLAY = 6                # candidate pairs to draw as multi-station overlays
 CACHE     = "wf_similarity_cache\"""")
 
-code("""import os, numpy as np, pandas as pd, matplotlib.pyplot as plt
+code("""import os, glob, numpy as np, pandas as pd, matplotlib.pyplot as plt
+from obspy.geodetics.base import gps2dist_azimuth
 import uf_waveform_similarity as wf
 import uf_cluster as ufc
 wf.use_helvetica()
-pd.set_option("display.width", 260); pd.set_option("display.max_columns", 50)""")
+pd.set_option("display.width", 260); pd.set_option("display.max_columns", 50)
+WF = wf.WF_ROOT""")
 
-md("""## 1 · Reproduce notebook 06's candidate pairs (HDB, rank by `cc_lag0`, top N)""")
-code("""res_raw = {st: wf.make_bands(wf.list_events(station=st, comp=COMP), station=st, comp=COMP,
-                            bands=BANDS, win=WIN, cache_dir=CACHE, verbose=False)
-           for st in ALL_STATIONS}
-keptH = res_raw[STATION]["kept"]; meta = wf.load_event_meta(keptH)
-SH = wf.signed_similarity(res_raw[STATION]["bands"][BAND], maxlag=MAXLAG)
+md("""## 1 · Notebook 06's candidate pairs (HDB, rank by `cc_lag0`, top N)""")
+code("""resH = wf.make_bands(wf.list_events(station=STATION, comp=COMP), station=STATION, comp=COMP,
+                     bands=BANDS, win=WIN, cache_dir=CACHE, verbose=False)
+keptH = resH["kept"]; meta = wf.load_event_meta(keptH)
+SH = wf.signed_similarity(resH["bands"][BAND], maxlag=MAXLAG)
 iu = np.triu_indices(len(keptH), k=1)
-order = np.argsort(SH["cc_lag0"][iu])[:TOPN]                 # most-negative cc_lag0 first (= 06)
+order = np.argsort(SH["cc_lag0"][iu])[:TOPN]
 PAIRS = [dict(i=int(iu[0][o]), j=int(iu[1][o])) for o in order]
 evset = sorted(set([p["i"] for p in PAIRS]) | set([p["j"] for p in PAIRS]))
-la, lo = meta.iloc[evset]["lat"].dropna(), meta.iloc[evset]["lon"].dropna()
-print(f"top-{TOPN} by cc_lag0: {len(evset)} events | extent "
-      f"~{(la.max()-la.min())*111:.1f} x {(lo.max()-lo.min())*90:.1f} km, centroid ({la.mean():.3f}, {lo.mean():.3f})")
+cand_events = [keptH[i] for i in evset]
+clat = float(meta.iloc[evset]["lat"].mean()); clon = float(meta.iloc[evset]["lon"].mean())
+print(f"top-{TOPN} pairs -> {len(cand_events)} events, centroid ({clat:.4f}, {clon:.4f}); "
+      f"years {sorted({e[:4] for e in cand_events})}")
 pd.DataFrame([dict(ev_i=keptH[p["i"]], ev_j=keptH[p["j"]],
                    cc_lag0=round(float(SH["cc_lag0"][p["i"], p["j"]]), 3),
-                   cc_neg=round(float(SH["cc_neg"][p["i"], p["j"]]), 3),
                    cc_pos=round(float(SH["cc_pos"][p["i"], p["j"]]), 3)) for p in PAIRS])""")
 
-md("""## 2 · The spatial cluster (PyGMT) — pairs linked, coloured by `cc_lag0`""")
-code("""try:
-    wf.map_antipairs(meta, PAIRS, value="cc_lag0", station=STATION,
-                     title=f"06 HDB anti-pair candidates ({BAND[0]}-{BAND[1]} Hz) — tight cluster").show()
-except Exception as e:
-    print("PyGMT map skipped:", type(e).__name__, e)""")
+md("""## 2 · Select the CLOSEST stations (by distance, native vertical channel)
 
-md("""## 3 · The SAME pairs at MKL / YSB / CHS — `cc_lag0`, `cc_pos`, `cc_neg`
+Distances from station coordinates (`STA/UF<year>.sta`); native vertical channel = whichever of
+`HHZ / HGZ / ELZ` the station actually has SAC for. We keep the `N_STATIONS` closest that cover all
+candidate events.""")
+code("""# station coords from the per-year HYPOINVERSE station tables (union over candidate years)
+coords = {}
+for y in sorted({e[:4] for e in cand_events}):
+    f = os.path.join(wf.STA_DIR, f"UF{y}.sta")
+    if os.path.exists(f):
+        for ln in open(f):
+            pr = ln.strip().split(",")
+            if len(pr) >= 3:
+                try: coords[pr[0]] = (float(pr[1]), float(pr[2]))
+                except ValueError: pass
 
-Matched by event id; `n/a` where a station did not record one of the pair's events (no pair dropped).""")
+def native_vz(stacode):                       # vertical channel a station records (HH/HG/EL...)
+    for ch in ("HHZ", "HGZ", "ELZ"):
+        if any(os.path.exists(os.path.join(WF, e, f"{e}.{stacode}.{ch}.sac")) for e in cand_events[:6]):
+            return ch
+    return None
+
+rows = []
+for st, (la, lo) in coords.items():
+    vz = native_vz(st)
+    if vz is None:
+        continue
+    cov = sum(os.path.exists(os.path.join(WF, e, f"{e}.{st}.{vz}.sac")) for e in cand_events)
+    if cov == 0:
+        continue
+    d = gps2dist_azimuth(clat, clon, la, lo)[0] / 1000.0
+    rows.append(dict(station=st, channel=vz, dist_km=round(d, 1), coverage=f"{cov}/{len(cand_events)}", _cov=cov))
+stab = pd.DataFrame(rows).sort_values("dist_km").reset_index(drop=True)
+# validators: the N closest with full coverage (HDB is the screen, always first)
+full = stab[stab["_cov"] == len(cand_events)]
+SEL = full.head(N_STATIONS)[["station", "channel", "dist_km"]].values.tolist()
+print("closest fully-covering stations (all channel band-codes):")
+display(stab[stab["_cov"] == len(cand_events)].head(12).drop(columns="_cov"))
+print("selected for validation:", [(s, c, f"{d}km") for s, c, d in SEL])""")
+
+md("""## 3 · Build features at each selected station (native channel) and the signed CC
+
+Each station is P-aligned on its own pick (fallback+xcorr if unpicked); the ±MAXLAG search absorbs
+small jitter. We report `cc_lag0` (signed at the datum), `cc_pos` (best +, "similar at all?") and
+`cc_neg` (best −) for every candidate pair.""")
 code("""SIG = {}
-for st in ALL_STATIONS:
-    S = wf.signed_similarity(res_raw[st]["bands"][BAND], maxlag=MAXLAG)
-    SIG[st] = (S, {e: k for k, e in enumerate(res_raw[st]["kept"])})
+for st, ch, _ in SEL:
+    r = wf.make_bands(wf.list_events(station=st, comp=ch), station=st, comp=ch,
+                      bands=BANDS, win=WIN, cache_dir=CACHE, verbose=False)
+    S = wf.signed_similarity(r["bands"][BAND], maxlag=MAXLAG)
+    SIG[st] = (S, {e: k for k, e in enumerate(r["kept"])}, ch, r)
+    print(f"  {st}.{ch}: {len(r['kept'])} events")
 
-def _vals(ei, ej, key):
-    out = {}
-    for st in ALL_STATIONS:
-        S, idx = SIG[st]
-        out[st.split('.')[1]] = round(float(S[key][idx[ei], idx[ej]]), 2) if (ei in idx and ej in idx) else np.nan
-    return out
+def _tab(key):
+    out = []
+    for p in PAIRS:
+        ei, ej = keptH[p["i"]], keptH[p["j"]]
+        rec = {"ev_i": ei, "ev_j": ej}
+        for st, ch, d in SEL:
+            S, idx, _, _ = SIG[st]
+            rec[f"{st.split('.')[1]}/{ch[:2]}({d:.0f})"] = (
+                round(float(S[key][idx[ei], idx[ej]]), 2) if (ei in idx and ej in idx) else np.nan)
+        out.append(rec)
+    return pd.DataFrame(out)
 
-for key, label in [("cc_lag0", "cc_lag0 (signed, at exact P datum)"),
-                   ("cc_pos",  "cc_pos (best positive over lags — similar at all?)"),
-                   ("cc_neg",  "cc_neg (best negative over lags)")]:
-    print("\\n###", label)
-    df = pd.DataFrame([dict(ev_i=keptH[p["i"]], ev_j=keptH[p["j"]], **_vals(keptH[p["i"]], keptH[p["j"]], key))
-                       for p in PAIRS])
-    display(df)""")
+for key, lab in [("cc_lag0", "cc_lag0 (signed, exact P datum)"),
+                 ("cc_pos",  "cc_pos (best positive — similar at all?)"),
+                 ("cc_neg",  "cc_neg (best negative)")]:
+    print("\\n###", lab); display(_tab(key))""")
 
-md("""### 3b · One-line summary per pair — does any validator stay strongly correlated?
+md("""## 4 · Waveform overlays at the closest stations
 
-`HDB_lag0` vs the validators' **best similarity** `max|CC| = max(cc_pos, |cc_neg|)`. A real co-located
-pair keeps `max|CC|` high at the validators; decorrelation (≲0.4) = HDB-only.""")
-code("""rows = []
-for p in PAIRS:
-    ei, ej = keptH[p["i"]], keptH[p["j"]]
-    r = {"ev_i": ei, "ev_j": ej, "HDB_lag0": round(float(SH["cc_lag0"][p["i"], p["j"]]), 2)}
-    for st in VAL_STATIONS:
-        S, idx = SIG[st]
-        if ei in idx and ej in idx:
-            a, b = idx[ei], idx[ej]
-            r[f"{st.split('.')[1]}_maxabs"] = round(float(max(S["cc_pos"][a, b], -S["cc_neg"][a, b])), 2)
-        else:
-            r[f"{st.split('.')[1]}_maxabs"] = np.nan
-    rows.append(r)
-pd.DataFrame(rows)""")
-
-md("""## 4 · Waveform overlays across stations
-
-For the strongest candidates: at each station, event *i* (black) vs event *j* at its best **+CC** lag
-(blue, repeater fit) and best **−CC** lag flipped (red, anti fit). If neither overlays *i* off HDB,
-the pair isn't similar there; if the red (anti) overlays at several stations, it is a real reversal.""")
-code("""RESp = {st: dict(kept=res_raw[st]["kept"], bands={tuple(BAND): res_raw[st]["bands"][BAND]}) for st in ALL_STATIONS}
+Per pair, at each selected station: event *i* (black) vs *j* at its best **+CC** lag (blue, repeater
+fit) and best **−CC** lag flipped (red, anti fit). Distance + channel in each row title.""")
+code("""RESp = {st: SIG[st][3] for st, _, _ in SEL}
+STATIONS = [st for st, _, _ in SEL]
 for p in PAIRS[:N_OVERLAY]:
-    wf.plot_antipair_stations(RESp, keptH[p["i"]], keptH[p["j"]], stations=ALL_STATIONS, band=BAND,
+    wf.plot_antipair_stations(RESp, keptH[p["i"]], keptH[p["j"]], stations=STATIONS, band=BAND,
                               win=WIN, maxlag=MAXLAG, zoom=(-0.3, 4.0))
     plt.show()""")
 
-md("""## 5 · How to read / verdict
+md("""## 5 · How to read / verdict + an HG-vs-HH control
 
-**These are co-located *repeaters*, not anti-repeaters.** The candidates form a real, tight (~1 km)
-cluster — but the data say the "anti" is the half-cycle degeneracy, not a polarity reversal:
+- **Validated reversal:** `max(|cc_pos|,|cc_neg|)` high at HDB **and** the close stations, with the
+  winning sign flipping by geometry.
+- **HDB-only artifact:** the close stations decorrelate (low `cc_pos` *and* low `|cc_neg|`).
+- **Channel caveat (read this):** the closest stations here are **HG** (≈ accelerometer-class). HG and
+  HH are not directly comparable for fine 1-25 Hz correlation of *small* events — a low `cc_pos` at an
+  HG station may be instrument/SNR, not source. Distance can't be the cause when an HG station at 7 km
+  decorrelates while an HH station at 10 km stays correlated; the **band-code** can.
 
-- **At HDB**, the same pairs have **`cc_pos ≈ 0.75`** — *above* `POS_GATE` (0.6) — so they are genuinely
-  **similar** waveforms. `cc_neg ≈ −0.73` is *equally* strong: a half-period (1-25 Hz ⇒ ~10-25 ms,
-  inside ±MAXLAG) shift flips the sign, and `cc_lag0 ≈ −0.73` just means the P-datum happens to land on
-  the anti-aligned half-cycle. A true anti-repeater would have **low** `cc_pos` — these don't.
-- **At MKL** (which recorded the 2020-2022 pairs), the correlation is **positive-dominated**:
-  `cc_pos ≈ 0.60 > |cc_neg| ≈ 0.40`, `cc_lag0` only weakly negative. So at a *second* station the same
-  events read as **repeaters**, not reversed — the decisive evidence against a source-side flip.
-- **At YSB/CHS** the pairs decorrelate (`max|CC| ≲ 0.25`).
-- This is exactly why notebook 06's strict test (`cc_pos < POS_GATE` on all 3 components) **confirmed 0**:
-  the 06 *map* ranks top-N by `cc_lag0` and shows them clustered, but they fail the `cc_pos` gate.
-
-So the cluster is a genuine group of **repeating earthquakes** whose HDB records are half-cycle-offset
-at the P datum — a nice illustration of the degeneracy, not anti-repeaters.
-
-- Caveat: `cc_lag0` is alignment-sensitive at 1-25 Hz (a small P-pick error decorrelates lag 0 fast),
-  so it is read **together with** `cc_pos`/`cc_neg` (±MAXLAG, jitter-tolerant) and the §4 overlays.""")
+**Control — can the HG channels resolve a *known* repeater at all?** Pick the tightest HDB repeater
+family (high `cc_pos`) and check `cc_pos` at the same HG stations. If HG can't reproduce even a genuine
+repeater, the HG decorrelation above is uninformative about the source; if it can, it is meaningful.""")
+code("""# tightest positive-CC HDB pair (a near-certain repeater) as the control
+pos = SH["cc_pos"][iu]; bo = int(np.argmax(pos))
+ci, cj = int(iu[0][bo]), int(iu[1][bo]); ce_i, ce_j = keptH[ci], keptH[cj]
+print(f"control repeater pair {ce_i} x {ce_j}: HDB cc_pos = {pos[bo]:.2f}")
+ctl = {"pair": f"{ce_i}x{ce_j}", "HDB": round(float(SH['cc_pos'][ci, cj]), 2)}
+for st, ch, d in SEL:
+    S, idx, _, _ = SIG[st]
+    ctl[f"{st.split('.')[1]}/{ch[:2]}"] = round(float(S['cc_pos'][idx[ce_i], idx[ce_j]]), 2) if (ce_i in idx and ce_j in idx) else np.nan
+print("control cc_pos across stations (does HG resolve a true repeater?):")
+display(pd.DataFrame([ctl]))""")
 
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
