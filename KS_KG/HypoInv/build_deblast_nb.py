@@ -190,7 +190,28 @@ blast_evid = evid[evid["cluster"].isin(blast_ids)].copy()
 blast_evid["blast_like"] = True
 _ = wf.plot_blast_hour_histograms(meta, labels, blast_evid, station=STATION, colors=BLAST_COLORS, day=DAY)""")
 
-md("""## 6 · How to read this
+md("""## 6 · Whole-subregion hour-of-day — before vs after de-blasting
+
+The aggregate effect on the catalog: hour-of-day of **all** UF-subregion events **before** (original)
+and **after** removing the blast families. The de-blasting selectively removes **daytime** events, so
+the daytime band (06-19 KST, shaded) should flatten and the overall daytime fraction drop — though
+only slightly, since the blasts are a small share (a few dozen of ~2.8 k events). The third panel
+shows the **removed** blast events alone: an entirely-daytime population.""")
+code("""edges = np.arange(0, 25, 1)
+panels = [(orig_cat, "Before de-blasting"), (deblast_cat, "After de-blasting"),
+          (blast_cat, "Removed (blast)")]
+fig, ax = plt.subplots(1, 3, figsize=(15, 3.6), dpi=130)
+for a, (d, lab) in zip(ax, panels):
+    a.axvspan(DAY[0], DAY[1], color="0.88", zorder=0)
+    a.hist(d["hour"], bins=edges, color="steelblue", edgecolor="white", linewidth=0.3, zorder=2)
+    frac = float(d["hour"].between(DAY[0], DAY[1]).mean()) if len(d) else float("nan")
+    a.set_title(f"{lab}\\nn={len(d)}, daytime frac={frac:.3f}", fontsize=10)
+    a.set_xlabel("Hour of day (KST)"); a.set_xlim(0, 24); a.set_xticks([0, 6, 12, 18, 24])
+ax[0].set_ylabel("events")
+fig.suptitle("UF subregion seismicity — hour-of-day, before vs after waveform-similarity de-blasting",
+             fontsize=11); fig.tight_layout()""")
+
+md("""## 7 · How to read this
 
 - **§4 waveforms** are the visual confirmation: each blast family should be a column of near-identical
   repeating wiggles. **§5 histograms** should pile into the shaded daytime band.
