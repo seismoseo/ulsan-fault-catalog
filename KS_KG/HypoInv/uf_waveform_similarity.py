@@ -866,6 +866,72 @@ def plot_antipair_compare(res, pairs, band=REF_BAND, sr=SR, win=DEFAULT_WIN, max
     return fig
 
 
+def plot_antipair_stations(res_by_station, ev_i, ev_j, stations=None, band=REF_BAND, sr=SR,
+                           win=DEFAULT_WIN, maxlag=DEFAULT_MAXLAG, zoom=None, width=12.0, row_h=1.7):
+    """Cross-station validation of ONE anti-repeater candidate: the repeater-fit vs anti-fit overlay
+    (as in `plot_antipair_compare`) at EACH station, one row per station.
+
+      LEFT  — event i (black) vs event j at its best **+CC** lag (blue): repeater fit.
+      RIGHT — event i (black) vs event j at its best **−CC** lag, flipped (red): anti fit.
+
+    A *genuine* co-located anti-repeater overlays well (one fit, |CC|→1) at **every** station, with the
+    winning sign set by that station's take-off geometry. A single-station (e.g. HDB-only) artifact
+    overlays only there and **decorrelates** (both fits weak) elsewhere. `res_by_station` =
+    {station: make_bands(...) result}; events missing at a station get a blank row."""
+    import matplotlib.pyplot as plt
+    stations = stations or list(res_by_station)
+    L = int(round(maxlag * sr))
+
+    def _shift(b, lag):
+        out = np.roll(b, lag)
+        if lag > 0:
+            out[:lag] = 0.0
+        elif lag < 0:
+            out[lag:] = 0.0
+        return out
+
+    def _best(a, b):
+        a2 = _l2(a); cp, lp, cn, ln = -2.0, 0, 2.0, 0
+        for lag in range(-L, L + 1):
+            c = float(np.dot(a2, _l2(_shift(b, lag))))
+            if c > cp:
+                cp, lp = c, lag
+            if c < cn:
+                cn, ln = c, lag
+        return lp, cp, ln, cn
+
+    rows = []
+    for st in stations:
+        res = res_by_station[st]; idx = {e: k for k, e in enumerate(res["kept"])}
+        Xb = res["bands"][tuple(band)]
+        rows.append((st, Xb[idx[ev_i]], Xb[idx[ev_j]]) if (ev_i in idx and ev_j in idx) else (st, None, None))
+    n = len(rows)
+    fig, axes = plt.subplots(n, 2, figsize=(width, row_h * n), dpi=130, squeeze=False, sharex=True)
+    for r, (st, Xi, Xj) in enumerate(rows):
+        a0, a1 = axes[r]
+        if Xi is None:
+            for a in (a0, a1):
+                a.text(0.5, 0.5, f"{st}: event missing", ha="center", va="center",
+                       transform=a.transAxes, fontsize=8); a.set_yticks([])
+            continue
+        t = np.arange(len(Xi)) / sr + win[0]
+        lp, cp, ln, cn = _best(Xi, Xj)
+        a0.plot(t, _l2(Xi), "k", lw=1.0); a0.plot(t, _l2(_shift(Xj, lp)), color="royalblue", lw=1.0)
+        a1.plot(t, _l2(Xi), "k", lw=1.0); a1.plot(t, -_l2(_shift(Xj, ln)), color="crimson", lw=1.0)
+        for a in (a0, a1):
+            a.axvline(0, color="b", lw=0.5, ls="--"); a.set_yticks([]); a.tick_params(labelsize=7); a.margins(x=0)
+            if zoom is not None:
+                a.set_xlim(*zoom)
+        a0.set_title(f"{st}   repeater fit +CC={cp:.2f}", fontsize=7, loc="left")
+        a1.set_title(f"anti fit −CC={cn:.2f}   {'repeater wins' if cp >= abs(cn) else '← ANTI wins'}",
+                     fontsize=7, loc="left")
+    axes[-1, 0].set_xlabel("Time from P (s)", fontsize=9); axes[-1, 1].set_xlabel("Time from P (s)", fontsize=9)
+    fig.suptitle(f"{ev_i} × {ev_j} — repeater vs anti fit across stations  [{band[0]}-{band[1]} Hz]",
+                 fontsize=9.5)
+    fig.tight_layout()
+    return fig
+
+
 # --------------------------------------------------------------- repeating earthquakes
 def repeater_table(meta, labels, cc, min_size=2, day=(6, 17)):
     """Per repeating-earthquake FAMILY (a waveform cluster with >= `min_size` members) — the classic
