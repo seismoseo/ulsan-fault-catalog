@@ -44,7 +44,10 @@ COMP       = "{NB_COMP}"          # HDB clustering channel (HHZ vertical is the 
 WIN        = (-0.5, 7.5)
 BANDS      = [(5, 15), (1, 10), (2, 8), (4, 12)]
 PRIMARY    = (5, 15)           # clustering + confirmation band (user-set)
-MAXLAG     = 0.2
+MAXLAG     = 0.2               # CC lag search for the HDB clustering (P/S reliable there)
+CC_MAXLAG  = 5.0               # LARGER lag for the per-station CC matrices (§5): P/S can be
+                               # mis-picked / mis-aligned at non-HDB stations, so allow up to 5 s
+                               # to still recover a genuine waveform match
 CC_REPEAT  = 0.90              # HDB family threshold
 LINKAGE    = "single"          # single-linkage: events join a family if CC >= CC_REPEAT for >=1 pair
 MIN_FAMILY = 3                 # min members to call a family (need >=3 for a meaningful network CC)
@@ -152,16 +155,23 @@ CC >= 0.9); these panels only *display* the same members at the other nearby sta
   multi-station analogue of `plot_clusters_individually`: one trace per event, P-aligned at t=0, S bars,
   UTC origin time on the right, earliest on top), so each station's waveforms are big and readable;
 - **`plot_family_station_cc_matrices`** — the **time-ordered waveform CC matrix per station** (one row
-  of panels), so you can read cross-event similarity at every station at a glance. A genuine repeater
-  is a uniformly bright block at every station; a chained/HDB-only family decoheres off KG.HDB.""")
+  of panels). The clustering used KG.HDB, where P/S are reliable; at other stations the picks may be
+  mis-aligned, so the matrix CC uses a **large lag search (`CC_MAXLAG` = 5 s)** to still recover a
+  genuine waveform match. A genuine repeater is a uniformly bright block at every station; a
+  chained/HDB-only family decoheres off KG.HDB;
+- **`map_family_subregion`** — a **wide subregion map** of the family's epicentres (coloured by origin
+  year), with the nearby stations used (cyan triangles), faults, KG.HDB and the quarry centroids — so
+  you see *where* the cluster is while reading its waveforms.""")
 code("""TOP10 = rep.head(10)["cluster"].tolist()
 for fam in TOP10:
     wf.plot_family_station_sections(meta, labels, int(fam), band=PRIMARY, win=WIN,
             station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS, fig_w=11)
     fig = wf.plot_family_station_cc_matrices(meta, labels, int(fam), band=PRIMARY, win=WIN,
-            maxlag=MAXLAG, station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS)
+            maxlag=CC_MAXLAG, station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS)
     if fig is not None:
-        plt.show()""")
+        plt.show()
+    wf.map_family_subregion(meta, labels, int(fam), station_K=6, max_km=MAX_KM,
+            min_members=MIN_MEMBERS, width="20c").show()""")
 
 md("""## 6 · Recurrence timeline — largest families, 2016 Gyeongju mainshock marked
 

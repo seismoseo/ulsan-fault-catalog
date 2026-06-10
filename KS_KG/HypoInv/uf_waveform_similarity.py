@@ -2144,6 +2144,64 @@ def map_catalog_subregion(df, color_by="depth", station=STATION, reg=None,
     return fig
 
 
+def map_family_subregion(meta, labels, family_id, station=STATION, reg=None, subregion=ufc.SUBREGION,
+                         fault_trace=ufc.FAULT_TRACE, summary_csv=CLUSTER_SUMMARY, pad=0.03,
+                         width="20c", year_range=(2010, 2025), show_stations=True, station_K=6,
+                         max_km=40.0, min_members=3, sta_dir=STA_DIR, wf_root=WF_ROOT, title=None):
+    """**Wide PyGMT subregion map of ONE family's epicentres** — the spatial companion to the
+    per-station gathers / CC matrices. All located subregion events are faint grey context; **this
+    family's events** are drawn larger, **coloured by origin year**; the **nearby stations** used by
+    the per-station panels are cyan triangles (labelled, native-channel set), with fault traces,
+    KG.HDB (yellow square), known quarry centroids (red x) and the subregion box. Returns the PyGMT
+    Figure (`width` e.g. '20c' for a large panel)."""
+    import pygmt as pmt
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels
+    fam = m[m["fam"] == family_id]
+    g = fam[fam["joined"]] if "joined" in fam else fam.dropna(subset=["lat"])
+    allj = m[m["joined"]] if "joined" in m else m.dropna(subset=["lat"])
+    if reg is None:
+        reg = [subregion[0] - pad, subregion[1] + pad, subregion[2] - pad, subregion[3] + pad]
+    fig = pmt.Figure()
+    pmt.config(FORMAT_GEO_MAP="ddd.xx", MAP_FRAME_TYPE="plain")
+    ttl = title or f"cluster {int(family_id)} (n={len(fam)}) - epicentres"
+    fig.basemap(region=reg, projection=f"M{width}", frame=["af", f"+t{ttl}"])
+    fig.coast(land="white", water="lightblue", shorelines=True)
+    ufc.plot_faults(fig, fault_trace)
+    if len(allj):
+        fig.plot(x=allj["lon"], y=allj["lat"], fill="gray80", style="c0.10c")        # context
+    if len(g):
+        yrs = event_decimal_years(list(g["event"]))
+        pmt.makecpt(cmap="viridis", series=[year_range[0], year_range[1]])
+        fig.plot(x=g["lon"], y=g["lat"], fill=yrs, cmap=True, style="c0.30c", pen="0.5p,black")
+        fig.colorbar(frame=["af", "x+lOrigin year"])
+    if show_stations and len(g):
+        center = (float(g["lat"].mean()), float(g["lon"].mean()))
+        sel = nearby_stations(list(fam["event"]), center, max_km=max_km, sta_dir=sta_dir, wf_root=wf_root)
+        sel = sel[sel["coverage"] >= min_members].head(station_K)
+        sel = sel.merge(used_stations(list(fam["event"]), sta_dir=sta_dir, wf_root=wf_root),
+                        on="station", how="left").dropna(subset=["lat", "lon"])
+        if len(sel):
+            fig.plot(x=sel["lon"], y=sel["lat"], style="t0.45c", fill="cyan", pen="0.8p,black")
+            for r in sel.itertuples():
+                fig.text(x=r.lon, y=r.lat, text=r.station.split(".")[-1],
+                         font="6p,Helvetica-Bold,black", fill="white@30",
+                         offset="0.20c/0.20c", clearance="0.03c/0.03c")
+    if summary_csv and os.path.exists(summary_csv):
+        cs = pd.read_csv(summary_csv); q = cs[cs.get("is_blast", False) == True]
+        if len(q):
+            fig.plot(x=q["lon_centroid"], y=q["lat_centroid"], style="x0.40c", pen="2p,red")
+    try:                                                    # KG.HDB station (yellow square)
+        tr = read(_sac_path(str(fam["event"].iloc[0]), station))[0]
+        fig.plot(x=[tr.stats.sac.stlo], y=[tr.stats.sac.stla], style="s0.45c", fill="yellow",
+                 pen="1.2p,black")
+    except Exception:                                       # noqa: BLE001
+        pass
+    if subregion is not None:
+        bl, ba = ufc._subregion_box(subregion)
+        fig.plot(x=bl, y=ba, pen="1.5p,blue")
+    return fig
+
+
 def map_antipairs(meta, pairs, value="cc_neg", station=STATION, reg=None,
                   subregion=ufc.SUBREGION, fault_trace=ufc.FAULT_TRACE, pad=0.08,
                   title="Anti-correlated pairs"):
