@@ -116,6 +116,7 @@ cat["time"] = pd.to_datetime(cat["time"], utc=True)
 cat = ufc.add_kst_columns(cat, ufc.KST)
 cat["event"] = cat["time"].dt.strftime("%Y%m%d%H%M%S")
 cat["is_blast"] = cat["event"].isin(blast_events)
+cat["cluster"] = cat["event"].map(dict(zip(m["event"], m["fam"])))   # blast family id per event
 
 # restrict to the UF subregion (the screened scope) — the de-blasted product is NOT the whole 15 k
 s = ufc.SUBREGION
@@ -136,7 +137,8 @@ Origin *time* is reliable even though the locations are not — so hour-of-day i
 A blast family reads as one **daytime** colour; the natural background spreads across all 24 h. (Depth
 / epicentral position are intentionally not shown — the blast events are severely mislocated.)""")
 code("""SUB = list(ufc.SUBREGION)   # exact subregion bounds [lonmin, lonmax, latmin, latmax]
-mapkw = dict(color_by="hour", reg=SUB, draw_box=False)   # exact zoom, no blue box""")
+mapkw = dict(color_by="hour", reg=SUB, draw_box=False)   # exact zoom, no blue box
+BLAST_COLORS = wf.cluster_colors(blast_ids)   # shared palette across maps / waveforms / histograms""")
 
 md("### 3a · Original catalog (before de-blasting) — hour-of-day (KST)")
 code("""wf.map_catalog_subregion(orig_cat, **mapkw,
@@ -148,6 +150,16 @@ md("### 3c · Blast catalog — hour-of-day (KST)")
 code("""wf.map_catalog_subregion(blast_cat, size="0.28c", **mapkw,
     title=f"Blast catalog ({len(blast_cat)} in subregion) — hour of day (KST)").show()""")
 
+md("""### 3d · Blast catalog — grouped by cluster (each family one colour)
+
+Same events, but coloured by **blast family** (cluster id labelled at each group's centroid) — so you
+can see how the flagged events group spatially. The colours match the §4 waveform sections and §5
+histograms. (Positions are still mislocated; this shows *which events share a family*, not precise
+epicentres — a single quarry can smear across a pocket.)""")
+code("""wf.map_catalog_subregion(blast_cat, color_by="cluster", reg=SUB, draw_box=False, size="0.30c",
+    colors=BLAST_COLORS,
+    title=f"Blast families ({len(blast_cat)} in subregion) — coloured by cluster").show()""")
+
 md("""## 4 · Blast-family waveforms — visual confirmation (every member, by cluster)
 
 Record sections of **all** members of **every** blast family (P-aligned at *t*=0, S arrival as a
@@ -155,8 +167,7 @@ short bar), grouped and coloured by cluster — so you can confirm by eye that e
 set of near-identical repeating waveforms (the quarry signature). Nothing is omitted: every event in
 every blast cluster is drawn, in **two filters** — the **1-10 Hz** screening band and a minimally-
 processed **1 Hz high-pass** (broadband shape) — so the match is shown not to be a band-pass artifact.""")
-code("""SP = wf.s_minus_p(kept, station=STATION)            # S markers (slow once)
-BLAST_COLORS = wf.cluster_colors(blast_ids)""")
+code("""SP = wf.s_minus_p(kept, station=STATION)            # S markers (slow once); BLAST_COLORS from §3""")
 md("### 4a · 1-10 Hz (screening band)")
 code("""_ = wf.plot_cluster_sections(res["bands"][PRIMARY], labels, kept, win=WIN, station=STATION, comp=COMP,
                              clusters=blast_ids, colors=BLAST_COLORS, show_singletons=False,

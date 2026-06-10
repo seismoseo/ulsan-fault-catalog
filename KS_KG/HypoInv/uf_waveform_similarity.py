@@ -1746,17 +1746,19 @@ def map_catalog_subregion(df, color_by="depth", station=STATION, reg=None,
                           subregion=ufc.SUBREGION, fault_trace=ufc.FAULT_TRACE,
                           summary_csv=CLUSTER_SUMMARY, pad=0.03, depth_range=None,
                           size="0.20c", title=None, show_quarries=True, day=(6, 17),
-                          draw_box=True):
+                          draw_box=True, cluster_col="cluster", colors=None, label_clusters=True):
     """PyGMT close-up of a catalog DataFrame over the UF subregion, every event coloured by either
-    its **depth** (`color_by="depth"`, sequential cpt) or its **hour-of-day in KST**
-    (`color_by="hour"`, cyclic cpt — matches `uf_cluster.hour_map`). `df` needs `lon`/`lat` plus
-    either `depth` (depth mode) or `hour` (hour mode; falls back to deriving it from `time`+KST).
+    its **depth** (`color_by="depth"`, sequential cpt), its **hour-of-day in KST** (`color_by="hour"`,
+    cyclic cpt — matches `uf_cluster.hour_map`), or its **cluster membership** (`color_by="cluster"`,
+    a distinct qualitative colour per `cluster_col` value, with the id labelled at each group's
+    centroid). `df` needs `lon`/`lat` plus the field the mode uses (`depth` / `hour` / `cluster_col`).
 
     Draws fault traces, the KG.HDB station (yellow square), known quarry centroids (red ✗, from the
     cluster-summary `is_blast` rows) and the subregion box, so a catalog reads against the fault and
-    the quarries. Returns the PyGMT Figure (depth/hour share this scaffold for a fair side-by-side)."""
+    the quarries. Returns the PyGMT Figure (the modes share this scaffold for a fair side-by-side)."""
     import pygmt as pmt
-    d = df.dropna(subset=["lon", "lat"]).copy()
+    sub_need = ["lon", "lat"] + ([cluster_col] if color_by == "cluster" else [])
+    d = df.dropna(subset=sub_need).copy()
     if reg is None:
         reg = [subregion[0] - pad, subregion[1] + pad, subregion[2] - pad, subregion[3] + pad]
     fig = pmt.Figure()
@@ -1764,7 +1766,17 @@ def map_catalog_subregion(df, color_by="depth", station=STATION, reg=None,
     fig.basemap(region=reg, projection="M14c", frame=["af", f"+t{title or ''}"])
     fig.coast(land="white", water="lightblue", shorelines=True)
     ufc.plot_faults(fig, fault_trace)
-    if color_by == "hour":
+    if color_by == "cluster":
+        cids = sorted(int(c) for c in d[cluster_col].unique())
+        cols = colors or cluster_colors(cids)
+        for cid in cids:
+            g = d[d[cluster_col] == cid]
+            fig.plot(x=g["lon"], y=g["lat"], fill=_gmt_rgb(cols.get(int(cid), "steelblue")),
+                     style=f"c{size}", pen="0.3p,black")
+            if label_clusters:                              # cluster id at the group's centroid
+                fig.text(x=float(g["lon"].mean()), y=float(g["lat"].mean()), text=str(cid),
+                         font="7p,Helvetica-Bold,black", fill="white@30", clearance="0.04c/0.04c")
+    elif color_by == "hour":
         if "hour" in d:
             hrs = d["hour"].to_numpy(dtype=float)
         else:                                              # derive KST hour-of-day from origin time
