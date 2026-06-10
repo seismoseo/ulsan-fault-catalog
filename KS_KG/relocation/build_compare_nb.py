@@ -1,0 +1,118 @@
+#!/usr/bin/env python
+"""Generate compare_relocations.ipynb — compare the family-738 relocations:
+  (0) Ulsan/PocketQuake absolute HypoInverse(kim2011)  vs
+  (1) reuse-picks dt.cc relocation  vs
+  (2) fresh-picks dt.cc relocation.
+Shows the spatial collapse, map + depth sections, and the (1)-vs-(2) per-event offset (matched by
+cuspid) — the robustness-to-pick-source headline. Reuses PocketQuake's sumio + viz.
+
+Usage: python build_compare_nb.py   (writes compare_relocations.ipynb next to this file)
+"""
+import os
+import nbformat as nbf
+
+PQ = "/home/msseo/works/15.PocketQuake"
+PIPE = os.path.join(PQ, "external", "korea-cluster-relocation")
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+nb = nbf.v4.new_notebook(); C = []
+def md(s): C.append(nbf.v4.new_markdown_cell(s))
+def co(s): C.append(nbf.v4.new_code_cell(s))
+
+md("""# Family 738 relocation — reuse-picks vs fresh-picks (PocketQuake HypoInverse + HypoDD, kim2011)
+
+The largest waveform-similarity multiplet (KG.HDB 5-25 Hz single-linkage CC>=0.9, 35 events,
+2016-11-17 -> 2017-03-11) relocated two ways through the **same** PocketQuake Fortran
+HypoInverse+HypoDD pipeline on the **same** Ulsan waveforms, **kim2011** — differing only in the picks:
+
+- **(1) reuse** — Ulsan's existing PhaseNet+ picks (`f738_reuse`).
+- **(2) fresh** — PocketQuake re-picked PhaseNet+ on the identical waveforms (`f738_fresh`).
+
+Compared against the **absolute** HypoInverse(kim2011) catalog (before relative relocation).""")
+
+co(f"""import os, sys
+sys.path.insert(0, "{PQ}"); sys.path.insert(0, "{PIPE}")
+import numpy as np, pandas as pd, matplotlib.pyplot as plt
+from obspy.geodetics.base import gps2dist_azimuth
+from pipeline import config, viz
+from pipeline.core import sumio
+
+RUNS = os.path.join("{PIPE}", "pipeline", "runs")
+def sum_abs(slug):   return sumio.read_sum(os.path.join(RUNS, slug, "1.HypoInv", "kim2011", slug + ".sum"))
+def reloc(slug):     return sumio.read_reloc(os.path.join(RUNS, slug, "2.HypoDD", "02.dt.cc", "hypoDD.reloc"))
+A  = sum_abs("f738_reuse")     # absolute HypoInverse(kim2011) — same picks as (1)
+R1 = reloc("f738_reuse")       # (1) reuse-picks dt.cc
+R2 = reloc("f738_fresh")       # (2) fresh-picks dt.cc
+print(f"abs {{len(A)}} | reuse-dtcc {{len(R1)}} | fresh-dtcc {{len(R2)}} events")""")
+
+md("""## 1 · Spatial collapse — absolute vs dt.cc (RMS horizontal spread + depth scatter)""")
+co("""def spread(d):
+    clat, clon = d["lat"].mean(), d["lon"].mean()
+    h = np.array([gps2dist_azimuth(clat, clon, la, lo)[0] for la, lo in zip(d["lat"], d["lon"])])
+    return np.sqrt((h**2).mean()), d["depth"].std() * 1000.0   # m, m
+rows = []
+for name, d in [("absolute HypoInverse(kim2011)", A), ("(1) reuse-picks dt.cc", R1),
+                ("(2) fresh-picks dt.cc", R2)]:
+    h, z = spread(d); rows.append(dict(catalog=name, n=len(d), rms_horiz_m=round(h), depth_std_m=round(z)))
+pd.DataFrame(rows)""")
+
+md("""## 2 · Map + depth — the three catalogs overlaid (shared extent)
+
+A tight repeating multiplet should **collapse** from the absolute scatter to a compact dt.cc patch.""")
+co("""fig, ax = plt.subplots(1, 3, figsize=(15, 5), dpi=130)
+def panel(a, x, y, ttl, xl, yl):
+    for d, c, m, lab in [(A, "0.6", "o", "abs"), (R1, "crimson", "o", "(1) reuse"), (R2, "steelblue", "x", "(2) fresh")]:
+        a.scatter(d[x], d[y], s=22, c=c, marker=m, alpha=0.8, label=lab, edgecolor="k" if m=="o" else None, lw=0.3)
+    a.set_xlabel(xl); a.set_ylabel(yl); a.set_title(ttl); a.legend(fontsize=8)
+panel(ax[0], "lon", "lat", "Map", "lon", "lat"); ax[0].set_aspect(1/np.cos(np.radians(A['lat'].mean())))
+panel(ax[1], "lon", "depth", "Lon-depth", "lon", "depth (km)"); ax[1].invert_yaxis()
+panel(ax[2], "lat", "depth", "Lat-depth", "lat", "depth (km)"); ax[2].invert_yaxis()
+fig.suptitle("Family 738: absolute (grey) vs (1) reuse-picks dt.cc (red) vs (2) fresh-picks dt.cc (blue)")
+fig.tight_layout(); plt.show()""")
+md("""Publication-quality PocketQuake map of each dt.cc relocation (depth-coloured, bootstrap errors if cached):""")
+co("""for slug in ("f738_reuse", "f738_fresh"):
+    try:
+        viz.map_catalog(config.load_cluster(slug), source="reloc"); plt.show()
+    except Exception as e:
+        print(slug, "map skipped:", type(e).__name__, e)""")
+
+md("""## 3 · (1) reuse vs (2) fresh — per-event offset (matched by cuspid)
+
+Same waveforms, same engine, same velocity model — so this offset isolates the effect of the **pick
+instance** (existing Ulsan PhaseNet+ picks vs a fresh PhaseNet+ re-pick).""")
+co("""m = R1.set_index("id").join(R2.set_index("id"), lsuffix="_1", rsuffix="_2", how="inner")
+off = np.array([gps2dist_azimuth(a, b, c, e)[0] for a, b, c, e in zip(m.lat_1, m.lon_1, m.lat_2, m.lon_2)])
+dz = (m.depth_1 - m.depth_2).abs() * 1000.0
+print(f"matched {len(m)}/{len(R1)} | horiz offset median {np.median(off):.0f} m, max {off.max():.0f} m"
+      f" | depth offset median {dz.median():.0f} m, max {dz.max():.0f} m")
+fig, ax = plt.subplots(1, 2, figsize=(11, 4), dpi=130)
+ax[0].hist(off, bins=15, color="teal", alpha=0.8); ax[0].set(xlabel="(1)-(2) horizontal offset (m)", ylabel="events",
+          title="Pick-source sensitivity (horizontal)")
+ax[1].hist(dz, bins=15, color="indianred", alpha=0.8); ax[1].set(xlabel="(1)-(2) depth offset (m)", title="(depth)")
+fig.tight_layout(); plt.show()""")
+
+md("""## 4 · Bootstrap 95% errors (optional — data-resampling uncertainty)
+
+PocketQuake's Fortran-hypoDD bootstrap (`hypodd.bootstrap_relocation`) resamples the differential-time
+data and re-inverts; the per-event 95% half-widths put the (1)-vs-(2) offset above in context. Slow
+(N replicas) and cached — uncomment to run.""")
+co("""# from pipeline.core import hypodd
+# for slug in ("f738_reuse", "f738_fresh"):
+#     bb = hypodd.bootstrap_relocation(config.load_cluster(slug), branch="dtcc", n=200, seed=0)
+#     print(slug, "median 95% half-width (m): horiz",
+#           round(float(np.nanmedian(np.hypot(bb.ex95, bb.ey95)))), " vert", round(float(np.nanmedian(bb.ez95))))""")
+
+md("""## 5 · Reading this
+
+- **Collapse** (§1): the dt.cc relocation should tighten the multiplet far below the absolute scatter
+  (repeaters are co-located) — that is the precision gain from waveform cross-correlation.
+- **(1) ≈ (2)?** (§3): both runs share waveforms + engine + kim2011, so any offset is the **pick
+  instance**. A small offset (within the bootstrap 95%) means the result is robust to re-picking; a
+  larger offset flags pick-source sensitivity worth reporting.
+- Everything here is reproduced by `run.sh` (no manual steps); scale to the other multiplets by
+  re-running `make_catalog.py --family <id>` + the same staging/relocation commands.""")
+
+nb["cells"] = C
+nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
+out = os.path.join(HERE, "compare_relocations.ipynb")
+nbf.write(nb, out); print("wrote", out, len(C), "cells")

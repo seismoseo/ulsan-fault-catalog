@@ -1,0 +1,4 @@
+# generated artifacts (reproducible via run.sh / build_compare_nb.py)
+family738/
+*.ipynb
+__pycache__/
