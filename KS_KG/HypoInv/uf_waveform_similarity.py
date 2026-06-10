@@ -1283,6 +1283,56 @@ def plot_family_network(meta, labels, family_id, band=(5, 15), maxlag=DEFAULT_MA
     return fig
 
 
+def plot_family_station_gathers(meta, labels, family_id, band=(5, 15), maxlag=DEFAULT_MAXLAG,
+                                win=DEFAULT_WIN, station_K=6, max_km=40.0, min_members=3,
+                                max_traces=40, sr=SR, cache_dir=CACHE_DIR, wf_root=WF_ROOT,
+                                sta_dir=STA_DIR):
+    """For ONE family: a row of panels (one per nearby station, distance-ordered, native channel),
+    each showing the member event waveforms as **OFFSET wiggles** ordered by time — **no stack** — so
+    cross-event similarity at every station is directly visible. Band-filtered to `band`. Up to
+    `max_traces` events shown per panel; title carries station/distance/channel/intra-family mean-CC.
+    Returns the fig (the no-stack companion to `plot_family_network`)."""
+    import matplotlib.pyplot as plt
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels
+    g = m[m["fam"] == family_id]; members = list(g["event"]); gj = g[g["joined"]]
+    if not len(gj):
+        return None
+    center = (float(gj["lat"].mean()), float(gj["lon"].mean()))
+    sels = nearby_stations(members, center, max_km=max_km, sta_dir=sta_dir, wf_root=wf_root)
+    sels = sels[sels["coverage"] >= min_members].head(station_K)
+    panels = []
+    for r in sels.itertuples():
+        res = make_bands(members, station=r.station, comp=r.channel, bands=[band], win=win,
+                         cache_dir=cache_dir, wf_root=wf_root, sr=sr, verbose=False)
+        idx = {e: i for i, e in enumerate(res["kept"])}
+        order = [idx[e] for e in members if e in idx]            # members are time-sorted already
+        if len(order) < min_members:
+            continue
+        X = res["bands"][tuple(band)][order]
+        cc = similarity_matrix(X, maxlag=maxlag, sr=sr); iu = np.triu_indices(len(order), k=1)
+        panels.append((r.station, r.channel, r.dist_km, float(cc[iu].mean()), X))
+    if not panels:
+        return None
+    n = len(panels)
+    rows = min(max(p[4].shape[0] for p in panels), max_traces)
+    fig, axes = plt.subplots(1, n, figsize=(2.7 * n, max(3.0, 0.20 * rows + 1.0)), dpi=130,
+                             squeeze=False, sharex=True)
+    t = np.arange(panels[0][4].shape[1]) / sr + win[0]
+    for ax, (st, ch, d, mc, X) in zip(axes[0], panels):
+        k = min(len(X), max_traces)
+        for j in range(k):
+            ax.plot(t, _l2(X[j]) * 0.45 + j, color="k", lw=0.4)   # offset wiggle, no stack
+        ax.axvline(0, color="b", lw=0.5, ls="--")
+        ax.set_yticks([]); ax.margins(x=0, y=0.01); ax.tick_params(labelsize=7)
+        ax.set_title(f"{st} {ch}\n{d:.0f} km  n={k}  mCC={mc:.2f}", fontsize=7)
+    axes[0, 0].set_xlabel("Time from P (s)", fontsize=8)
+    axes[0, 0].set_ylabel("events (earliest → latest)", fontsize=8)
+    fig.suptitle(f"Family {family_id} — member waveforms at each station  [{band[0]}-{band[1]} Hz], "
+                 f"no stack", fontsize=10)
+    fig.tight_layout()
+    return fig
+
+
 def cluster_colors(keep_ids):
     """Map each cluster id to a DISTINCT colour. The first 20 ids (the families most likely to be
     plotted — `keep_ids` is passed in size order) get the qualitative `tab20` palette so adjacent

@@ -22,7 +22,7 @@ C = []
 def md(s): C.append(nbf.v4.new_markdown_cell(s))
 def code(s): C.append(nbf.v4.new_code_cell(s))
 
-md(f"""# Multi-station confirmation of `KG.HDB` repeater families ({NB_COMP}, 5-15 Hz)
+md(f"""# Multi-station confirmation of `KG.HDB` repeater families ({NB_COMP}, 5-15 Hz, single-linkage)
 
 The repeating-earthquake families are detected at the single common station **KG.HDB** (5-15 Hz,
 CC >= 0.9). But a strong HDB waveform similarity can be a **single-station** effect — the
@@ -45,8 +45,8 @@ WIN        = (-0.5, 7.5)
 BANDS      = [(5, 15), (1, 10), (2, 8), (4, 12)]
 PRIMARY    = (5, 15)           # clustering + confirmation band (user-set)
 MAXLAG     = 0.2
-CC_REPEAT  = 0.90              # HDB family threshold (average/UPGMA linkage)
-LINKAGE    = "average"
+CC_REPEAT  = 0.90              # HDB family threshold
+LINKAGE    = "single"          # single-linkage: events join a family if CC >= CC_REPEAT for >=1 pair
 MIN_FAMILY = 3                 # min members to call a family (need >=3 for a meaningful network CC)
 # --- network confirmation ---
 STATION_K  = 8                 # up to this many closest stations per family
@@ -64,7 +64,13 @@ wf.use_helvetica()
 CACHE = wf.CACHE_DIR           # absolute cache dir (cwd-independent)
 pd.set_option("display.width", 220); pd.set_option("display.max_columns", 40)""")
 
-md("""## 1 · KG.HDB repeater families (5-15 Hz, CC >= 0.9)""")
+md("""## 1 · KG.HDB repeater families (5-15 Hz, CC >= 0.9, **single-linkage**)
+
+**Linkage = single (friends-of-friends):** two events are joined into the same family if their CC is
+>= `CC_REPEAT` (0.9) for **at least one pair** — clusters grow by chaining any near-duplicate pair,
+rather than requiring the whole group to be mutually similar (that is average/UPGMA linkage). This is
+the looser, pair-based definition of a repeating sequence; `wf.ward_clusters(CC, 1-0.9, "single")`
+cuts the single-linkage tree at distance 1-CC.""")
 code("""events = wf.list_events(station=STATION, comp=COMP)
 res  = wf.make_bands(events, station=STATION, comp=COMP, bands=BANDS, win=WIN, cache_dir=CACHE, verbose=False)
 kept = res["kept"]; meta = wf.load_event_meta(kept)
@@ -136,7 +142,30 @@ if len(bad):
 else:
     print("(no covered-but-unconfirmed family — all families with coverage confirmed)")""")
 
-md("""## 5 · Map — confirmed vs unconfirmed vs insufficient-coverage families (PyGMT, UF subregion)""")
+md("""## 5 · Waveform similarity across events at EACH station — 10 largest clusters (no stack)
+
+For the **10 largest** families: the member event waveforms as **offset wiggles** (earliest -> latest)
+at every nearby station, band-filtered to PRIMARY (5-15 Hz). **No stack** — the raw cross-event
+similarity at each station is shown directly. A genuine repeating family looks near-identical row-to-row
+at the close stations; chained/incoherent members show up as rows that don't match.""")
+code("""TOP10 = rep.head(10)["cluster"].tolist()
+for fam in TOP10:
+    fig = wf.plot_family_station_gathers(meta, labels, int(fam), band=PRIMARY, win=WIN,
+            station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS, max_traces=40)
+    if fig is not None:
+        plt.show()""")
+
+md("""## 6 · Recurrence timeline — largest families, 2016 Gyeongju mainshock marked
+
+The same temporal view used for the KG.HDB-only analysis (`plot_repeater_sequences`): one full-width
+row per family (largest first), a marker at every member origin time, coloured by family. The **2016
+Gyeongju M5.8 mainshock** is the red dashed line.""")
+code("""fig = wf.plot_repeater_sequences(meta, labels, rep, top=30, mark_gyeongju=True,
+        title=f"KG.HDB {COMP} repeater families ({PRIMARY[0]}-{PRIMARY[1]} Hz, single-linkage CC>={CC_REPEAT}) "
+              f"- recurrence timeline (largest 30)")
+plt.show()""")
+
+md("""## 7 · Map — confirmed vs unconfirmed vs insufficient-coverage families (PyGMT, UF subregion)""")
 code("""try:
     conf_ids = net.loc[net["confirmed"], "cluster"].tolist()
     fig = wf.map_cluster_links(meta, labels, net[net["confirmed"]], link="centroid",
@@ -145,7 +174,7 @@ code("""try:
 except Exception as e:
     print("PyGMT map skipped:", type(e).__name__, e)""")
 
-md(f"""## 6 · How to read this
+md(f"""## 8 · How to read this
 
 - **`confirmed`** = the family repeats at >= {{MIN_CONF}} nearby stations (intra-family mean CC >=
   {{CONF_CC}}) on their native channel — a genuine, network-verified repeating-earthquake family.
