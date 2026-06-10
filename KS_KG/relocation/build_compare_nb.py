@@ -120,6 +120,30 @@ for slug in ("f738_reuse", "f738_fresh"):
 print(f"\\n(1)-vs-(2) horizontal offset median was ~124 m — compare to the 95% half-widths above:"
       f" a larger offset than the error means the pick instance dominates that dimension.)" )""")
 
+md("""### 4a · Under-constrained events + reuse-vs-fresh
+
+An event is flagged **under-constrained** (and dropped from the §5 dt.cc views) when its bootstrap 95%
+half-width exceeds **100 m horizontally** or **100 m vertically** (`viz.BOOT_DROP_{HORIZ,VERT}_KM=0.1`),
+is relocated in < 60 % of replicas, or has no CI. Same waveforms + engine + kim2011 → the only
+difference between the two runs is the **pick instance**, so the comparison below isolates pick
+robustness. The poorly-resolved direction is consistently **N-S (ey95)** and **depth (ez95)** — the
+E-W (ex95) is always tight — i.e. the azimuthal station geometry, not the waveforms, sets the limit.""")
+co("""def under(slug):
+    df = pd.read_csv(os.path.join(RUNS, slug, "2.HypoDD", "02.dt.cc", "bootstrap_errors.csv"), comment="#")
+    df["horiz"] = np.hypot(df.ex95, df.ey95)
+    rl = (reloc(slug)).set_index("id")
+    df["eid"] = df.id.map(lambda i: rl.loc[i, "time"].strftime("%Y%m%d%H%M%S") if i in rl.index else str(i))
+    return df, df[(df.horiz > 100) | (df.ez95 > 100)]
+for slug in ("f738_reuse", "f738_fresh"):
+    df, bad = under(slug)
+    print(f"{slug}: {len(bad)} under-constrained / {len(df)}  | ez95 median {df.ez95.median():.0f} m, "
+          f"mean {df.ez95.mean():.0f} m, max {df.ez95.max():.0f} m  | ey95 mean {df.ey95.mean():.0f} m")
+    for r in bad.sort_values("ez95", ascending=False).itertuples():
+        print(f"    {r.eid}   ex95={r.ex95:.0f}  ey95={r.ey95:.0f}  ez95={r.ez95:.0f} m")
+print("\\nThe well-constrained core (median) is ~identical between runs; reuse has a much lighter TAIL\\n"
+      "(1 vs 7 under-constrained) — the existing Ulsan PhaseNet+ picks give more *stable* relative\\n"
+      "locations even where the fresh re-pick has more raw obs, so reuse is the more robust choice.")""")
+
 md("""## 5 · Depth sections + fault-frame (SVD plane) — PocketQuake views
 
 The standard PocketQuake cross-sections for each dt.cc relocation: `depth_sections` (lon-depth /
@@ -137,6 +161,26 @@ co("""for slug in ("f738_reuse", "f738_fresh"):
                            show_bootstrap=True); plt.show()
     except Exception as e:
         print(slug, "fault_sections skipped:", type(e).__name__, e)""")
+
+md("""## 5b · Same sections, **keeping** the under-constrained events
+
+The §5 figures drop the bootstrap-flagged under-constrained events. Here we relax the three
+`viz.BOOT_DROP_*` thresholds so **all 35 events** are plotted with their (larger) 95% error bars — the
+dropped events appear as the points with big N-S / depth bars. (Note the SVD plane is now fit to all 35,
+so the poorly-located events can tilt it slightly vs §5.) The constants are restored afterwards.""")
+co("""_save = (viz.BOOT_DROP_HORIZ_KM, viz.BOOT_DROP_VERT_KM, viz.BOOT_DROP_MIN_NBOOT_FRAC)
+viz.BOOT_DROP_HORIZ_KM = np.inf      # keep everything
+viz.BOOT_DROP_VERT_KM = None
+viz.BOOT_DROP_MIN_NBOOT_FRAC = 0.0
+try:
+    for slug in ("f738_reuse", "f738_fresh"):
+        cfg = config.load_cluster(slug)
+        print(f"================  {slug}  (ALL 35 events kept)  ================")
+        viz.depth_sections(cfg, velmodel="kim2011", source="reloc"); plt.show()
+        viz.fault_sections(cfg, velmodel="kim2011", frame_from="svd", color_by="time",
+                           show_bootstrap=True); plt.show()
+finally:
+    viz.BOOT_DROP_HORIZ_KM, viz.BOOT_DROP_VERT_KM, viz.BOOT_DROP_MIN_NBOOT_FRAC = _save""")
 
 md("""## 6 · Reading this
 
