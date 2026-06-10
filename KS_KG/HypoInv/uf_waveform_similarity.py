@@ -1631,6 +1631,90 @@ def plot_clusters_individually(X, labels, kept, sr=SR, win=DEFAULT_WIN, station=
     return out
 
 
+def _family_stations(meta, labels, family_id, band, win, station_K, max_km, min_members,
+                     cache_dir=CACHE_DIR, wf_root=WF_ROOT, sta_dir=STA_DIR, sr=SR):
+    """For one HDB-defined family, build the per-station aligned matrices at the nearby stations that
+    recorded its members (each on its native channel). Returns `(members, [(station, channel, dist_km,
+    X, kept) …])`, distance-ordered. Shared by the per-station gather + CC-matrix plotters."""
+    m = meta.copy().reset_index(drop=True); m["fam"] = labels
+    g = m[m["fam"] == family_id]; members = list(g["event"]); gj = g[g["joined"]]
+    if not len(gj):
+        return members, []
+    center = (float(gj["lat"].mean()), float(gj["lon"].mean()))
+    sels = nearby_stations(members, center, max_km=max_km, sta_dir=sta_dir, wf_root=wf_root)
+    sels = sels[sels["coverage"] >= min_members].head(station_K)
+    out = []
+    for r in sels.itertuples():
+        res = make_bands(members, station=r.station, comp=r.channel, bands=[band], win=win,
+                         cache_dir=cache_dir, wf_root=wf_root, sr=sr, verbose=False)
+        kept = res["kept"]
+        if len(kept) >= min_members:
+            out.append((r.station, r.channel, r.dist_km, res["bands"][tuple(band)], kept))
+    return members, out
+
+
+def plot_family_station_sections(meta, labels, family_id, band=(5, 15), win=DEFAULT_WIN, sr=SR,
+                                 station_K=6, max_km=40.0, min_members=3, row_h=0.16, fig_w=11,
+                                 color=None, cache_dir=CACHE_DIR, wf_root=WF_ROOT, sta_dir=STA_DIR,
+                                 show=True):
+    """**One full-width chronological gather per nearby station** for HDB family `family_id` — the
+    multi-station analogue of `plot_clusters_individually`. Each figure reuses `plot_cluster_sections`
+    (full width, constant per-trace height, P-aligned at t=0, S bars, UTC origin times on the right,
+    earliest on top), titled with the station / channel / distance. With `show=True` each figure is
+    displayed inline and closed; with `show=False` a list of `(station, fig)` is returned."""
+    import matplotlib.pyplot as plt
+    members, data = _family_stations(meta, labels, family_id, band, win, station_K, max_km,
+                                     min_members, cache_dir, wf_root, sta_dir, sr)
+    col = color or cluster_colors([int(family_id)])[int(family_id)]
+    try:
+        from IPython.display import display
+    except Exception:                                       # noqa: BLE001
+        display = None
+    out = []
+    for st, ch, dist, X, kept in data:
+        labs = np.full(len(kept), int(family_id))
+        f = plot_cluster_sections(X, labs, kept, sr=sr, win=win, station=st, comp=ch, wf_root=wf_root,
+                                  clusters=[int(family_id)], colors={int(family_id): col},
+                                  show_singletons=False, annotate_utc=True, row_h=row_h, fig_w=fig_w,
+                                  min_fig_h=1.2, head_in=0.92,
+                                  title=f"{st} {ch} ({dist:.0f} km) — cluster {int(family_id)} "
+                                        f"(n={len(kept)}), chronological  [{band[0]}-{band[1]} Hz]")
+        if show and display is not None:
+            display(f); plt.close(f)
+        else:
+            out.append((st, f))
+    return out
+
+
+def plot_family_station_cc_matrices(meta, labels, family_id, band=(5, 15), maxlag=DEFAULT_MAXLAG,
+                                    win=DEFAULT_WIN, sr=SR, station_K=6, max_km=40.0, min_members=3,
+                                    cache_dir=CACHE_DIR, wf_root=WF_ROOT, sta_dir=STA_DIR):
+    """**Time-ordered waveform CC similarity matrix per nearby station** for HDB family `family_id` —
+    a row of `imshow` panels (events in chronological order, the same order as the gather), one per
+    station, each titled with station / channel / distance / intra-family mean CC. A genuine repeater
+    is a uniformly bright block at every station. Returns the fig (or None)."""
+    import matplotlib.pyplot as plt
+    members, data = _family_stations(meta, labels, family_id, band, win, station_K, max_km,
+                                     min_members, cache_dir, wf_root, sta_dir, sr)
+    if not data:
+        return None
+    n = len(data)
+    fig, axes = plt.subplots(1, n, figsize=(3.3 * n, 3.7), dpi=130, squeeze=False)
+    im = None
+    for ax, (st, ch, dist, X, kept) in zip(axes[0], data):
+        cc = similarity_matrix(X, maxlag=maxlag, sr=sr)         # X rows are chronological (kept sorted)
+        im = ax.imshow(cc, vmin=0, vmax=1, cmap="viridis", origin="upper")
+        iu = np.triu_indices(len(kept), 1)
+        mcc = float(cc[iu].mean()) if len(kept) > 1 else 1.0
+        ax.set_title(f"{st} {ch}\n{dist:.0f} km, n={len(kept)}, mCC={mcc:.2f}", fontsize=7)
+        ax.set_xticks([]); ax.set_yticks([])
+    if im is not None:
+        fig.colorbar(im, ax=axes[0].tolist(), label="waveform CC", fraction=0.025, pad=0.02)
+    fig.suptitle(f"Cluster {int(family_id)} — time-ordered waveform CC matrix per station "
+                 f"[{band[0]}-{band[1]} Hz]  (earliest -> latest)", fontsize=10)
+    return fig
+
+
 def spacetime_region(meta, pad=0.03):
     """Fixed map region [W, E, S, N] enclosing ALL joined events (+`pad`°) — the SAME extent for
     every family's map so the per-cluster space-time panels are spatially comparable."""

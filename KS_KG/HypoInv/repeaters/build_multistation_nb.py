@@ -142,16 +142,24 @@ if len(bad):
 else:
     print("(no covered-but-unconfirmed family — all families with coverage confirmed)")""")
 
-md("""## 5 · Waveform similarity across events at EACH station — 10 largest clusters (no stack)
+md("""## 5 · Waveform similarity per cluster, per station — 10 largest clusters (full width)
 
-For the **10 largest** families: the member event waveforms as **offset wiggles** (earliest -> latest)
-at every nearby station, band-filtered to PRIMARY (5-15 Hz). **No stack** — the raw cross-event
-similarity at each station is shown directly. A genuine repeating family looks near-identical row-to-row
-at the close stations; chained/incoherent members show up as rows that don't match.""")
+The family membership is **fixed by the KG.HDB HHZ clustering of §1** (5-15 Hz, single-linkage,
+CC >= 0.9); these panels only *display* the same members at the other nearby stations. For each of the
+10 largest families:
+
+- **`plot_family_station_sections`** — one **full-width chronological gather per nearby station** (the
+  multi-station analogue of `plot_clusters_individually`: one trace per event, P-aligned at t=0, S bars,
+  UTC origin time on the right, earliest on top), so each station's waveforms are big and readable;
+- **`plot_family_station_cc_matrices`** — the **time-ordered waveform CC matrix per station** (one row
+  of panels), so you can read cross-event similarity at every station at a glance. A genuine repeater
+  is a uniformly bright block at every station; a chained/HDB-only family decoheres off KG.HDB.""")
 code("""TOP10 = rep.head(10)["cluster"].tolist()
 for fam in TOP10:
-    fig = wf.plot_family_station_gathers(meta, labels, int(fam), band=PRIMARY, win=WIN,
-            station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS, max_traces=40)
+    wf.plot_family_station_sections(meta, labels, int(fam), band=PRIMARY, win=WIN,
+            station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS, fig_w=11)
+    fig = wf.plot_family_station_cc_matrices(meta, labels, int(fam), band=PRIMARY, win=WIN,
+            maxlag=MAXLAG, station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS)
     if fig is not None:
         plt.show()""")
 
