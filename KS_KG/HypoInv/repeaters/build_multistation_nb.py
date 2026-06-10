@@ -51,6 +51,8 @@ MAXLAG     = 0.2               # CC lag search for the HDB clustering (P/S relia
 CC_MAXLAG  = 5.0               # LARGER lag for the per-station CC matrices (§5): P/S can be
                                # mis-picked / mis-aligned at non-HDB stations, so allow up to 5 s
                                # to still recover a genuine waveform match
+ALIGN_MAXLAG = 2.0             # §5 CC-aligned gather: max integer-lag shift (s) to realign each trace
+                               # to the family stack (removes P-pick jitter; 2 s covers pick error)
 CC_REPEAT  = 0.90              # HDB family threshold
 LINKAGE    = "single"          # single-linkage: events join a family if CC >= CC_REPEAT for >=1 pair
 MIN_FAMILY = 3                 # min members to call a family (need >=3 for a meaningful network CC)
@@ -155,9 +157,17 @@ CC >= 0.9); these panels only *display* the same members at the other nearby sta
 top-`TOP_N` families:
 
 - **`plot_family_station_sections`** — one **full-width chronological gather per nearby station** (the
-  multi-station analogue of `plot_clusters_individually`: one trace per event, P-aligned at t=0, S bars,
-  UTC origin time on the right, earliest on top; the **family date range** is in each title), so each
-  station's waveforms are big and readable;
+  multi-station analogue of `plot_clusters_individually`: one trace per event, **P-aligned at t=0**, S
+  bars, UTC origin time on the right, earliest on top; the **family date range** is in each title), so
+  each station's waveforms are big and readable;
+- **`plot_family_station_sections_ccaligned`** — the **same gather, but aligned by CROSS-CORRELATION**
+  instead of the P pick. For each station it builds the family's L2-normalised stack, finds for every
+  trace the integer lag (≤ `ALIGN_MAXLAG` s) that maximises its cross-correlation with the stack, shifts
+  the trace by that lag, and iterates (re-stacking) a few times. Since the family is CC >= 0.9 by
+  construction, the rows collapse onto a near-identical waveform — P-pick jitter and inter-station pick
+  offsets removed — so coherence is shown at its best. `t=0` is the **CC-alignment datum** (≈ the common
+  P); per-event S marks are dropped (no longer at a fixed offset). The two gathers side by side show
+  how much of the apparent spread is pick error vs real waveform difference;
 - **`plot_family_station_cc_matrices`** — the **time-ordered waveform CC matrix per station** (one row
   of panels). The clustering used KG.HDB, where P/S are reliable; at other stations the picks may be
   mis-aligned, so the matrix CC uses a **large lag search (`CC_MAXLAG` = 5 s)** to still recover a
@@ -171,7 +181,9 @@ code("""from IPython.display import display as _display
 TOPN = rep.head(TOP_N)["cluster"].tolist()
 for fam in TOPN:
     wf.plot_family_station_sections(meta, labels, int(fam), band=PRIMARY, win=WIN,
-            station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS, fig_w=11)
+            station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS, fig_w=11)            # P-aligned
+    wf.plot_family_station_sections_ccaligned(meta, labels, int(fam), band=PRIMARY, win=WIN,
+            station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS, align_maxlag=ALIGN_MAXLAG, fig_w=11)  # CC-aligned
     fig = wf.plot_family_station_cc_matrices(meta, labels, int(fam), band=PRIMARY, win=WIN,
             maxlag=CC_MAXLAG, station_K=6, max_km=MAX_KM, min_members=MIN_MEMBERS)
     if fig is not None:

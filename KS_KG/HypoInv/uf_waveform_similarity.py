@@ -1700,6 +1700,71 @@ def plot_family_station_sections(meta, labels, family_id, band=(5, 15), win=DEFA
     return out
 
 
+def _cc_align(X, maxlag=2.0, sr=SR, iters=3):
+    """**Cross-correlation alignment** of a family's traces to one another (not to the P pick).
+
+    Iteratively: build the L2-normalised family **stack** (mean), find for each row the integer lag in
+    ±`maxlag` s that maximises its cross-correlation with the stack (`_best_lag`), shift the row by that
+    lag (`_apply_shifts`, zero-fill the vacated edge, re-L2), and repeat `iters` times (re-stacking).
+    For a CC>=0.9 family the rows collapse onto a near-identical waveform. Returns `(X_aligned,
+    total_lag_samples)`."""
+    L = int(round(maxlag * sr))
+    cur = _row_l2(np.asarray(X, dtype=np.float32))
+    total = np.zeros(len(cur), dtype=int)
+    for _ in range(max(1, iters)):
+        stack = _l2(cur.mean(0))
+        lags = np.array([_best_lag(cur[i], stack, L) for i in range(len(cur))], dtype=int)
+        if not lags.any():
+            break
+        cur = _apply_shifts(cur, lags)                  # re-L2 happens inside _apply_shifts
+        total += lags
+    return cur, total
+
+
+def plot_family_station_sections_ccaligned(meta, labels, family_id, band=(5, 15), win=DEFAULT_WIN,
+                                           sr=SR, station_K=6, max_km=40.0, min_members=3,
+                                           align_maxlag=2.0, iters=3, row_h=0.16, fig_w=11,
+                                           color=None, cache_dir=CACHE_DIR, wf_root=WF_ROOT,
+                                           sta_dir=STA_DIR, show=True):
+    """Companion to `plot_family_station_sections`, but each station's traces are **re-aligned to one
+    another by cross-correlation** (`_cc_align`, ±`align_maxlag` s, `iters` passes) instead of by the P
+    pick. The P-aligned gather honestly shows each trace at its pick (which carries pick-timing error
+    and inter-station pick offsets); this view removes that jitter so the family's CC>=0.9 coherence is
+    shown at its best — the rows collapse onto a near-identical waveform. **t=0 is the CC-alignment
+    datum** (≈ the common P); per-event S marks are dropped (no longer at a fixed offset). The title
+    reports the median |lag| applied. Returns/show like the P-aligned version."""
+    import matplotlib.pyplot as plt
+    members, data = _family_stations(meta, labels, family_id, band, win, station_K, max_km,
+                                     min_members, cache_dir, wf_root, sta_dir, sr)
+    col = color or cluster_colors([int(family_id)])[int(family_id)]
+    drange = ""
+    if members:
+        a, b = min(members), max(members)
+        drange = f", {a[:4]}-{a[4:6]}-{a[6:8]} to {b[:4]}-{b[4:6]}-{b[6:8]}"
+    try:
+        from IPython.display import display
+    except Exception:                                       # noqa: BLE001
+        display = None
+    out = []
+    for st, ch, dist, X, kept in data:
+        Xa, lags = _cc_align(X, maxlag=align_maxlag, sr=sr, iters=iters)
+        med_ms = float(np.median(np.abs(lags)) / sr * 1000.0)
+        labs = np.full(len(kept), int(family_id))
+        sp_nan = np.full(len(kept), np.nan)                 # S marks meaningless after CC realignment
+        f = plot_cluster_sections(Xa, labs, kept, sr=sr, win=win, station=st, comp=ch, wf_root=wf_root,
+                                  clusters=[int(family_id)], colors={int(family_id): col},
+                                  show_singletons=False, annotate_utc=True, row_h=row_h, fig_w=fig_w,
+                                  min_fig_h=1.2, head_in=0.92, sp=sp_nan,
+                                  title=f"{st} {ch} ({dist:.0f} km) — cluster {int(family_id)} "
+                                        f"(n={len(kept)}{drange}), CC-ALIGNED (|lag|<={align_maxlag:.0f} s, "
+                                        f"med {med_ms:.0f} ms)  [{band[0]}-{band[1]} Hz]")
+        if show and display is not None:
+            display(f); plt.close(f)
+        else:
+            out.append((st, f))
+    return out
+
+
 def plot_family_station_cc_matrices(meta, labels, family_id, band=(5, 15), maxlag=DEFAULT_MAXLAG,
                                     win=DEFAULT_WIN, sr=SR, station_K=6, max_km=40.0, min_members=3,
                                     cache_dir=CACHE_DIR, wf_root=WF_ROOT, sta_dir=STA_DIR):
