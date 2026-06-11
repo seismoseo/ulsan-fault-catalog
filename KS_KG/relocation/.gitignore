@@ -1,4 +1,7 @@
-# generated artifacts (reproducible via run.sh / build_compare_nb.py)
-family738/
+# generated artifacts (reproducible via run.sh / run_all.sh / build_*_nb.py)
+family*/          # per-family dirs (catalog, members, reloc tables, thumbnails) — regenerable
+batch.log
 *.ipynb
 __pycache__/
+# committed aggregates are force-added: master_metrics.csv, batch_manifest.csv, master_map_relocated.png,
+# and the flagship family738/ figures (reloc_*.csv, pygmt_reloc_*.png, *_seismicity.gif)

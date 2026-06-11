@@ -63,6 +63,27 @@ that submodule (re-created by `run.sh`, so they need not be committed).
   freshly-re-picked relocations is **~124 m median** (max ~260 m) horizontally — i.e. the pick instance
   moves events by about a cluster width. (§4 of the notebook can run the bootstrap 95% to contextualize.)
 
-## Scale to the other multiplets
-Re-run with `make_catalog.py --family <id> --outdir <name>` (any family from the 5-25 Hz clustering),
-then the same scaffold/stage/relocate commands with a new slug. Everything is scripted — no manual steps.
+## Scale to ALL multiplets — the batch (`run_all.sh`)
+The reuse scheme above is applied to **every 5-25 Hz family** (117 families ≥3 members) by:
+```bash
+./run_all.sh                     # all families, bootstrap n=200, then aggregate
+./run_all.sh --no-bootstrap      # faster; --families 738,1218 or --limit 5 for subsets; --redo to force
+```
+- **`batch_relocate.py`** — loops the families largest-first, running the per-family reuse pipeline for
+  each (slug `f<ID>_reuse`, dir `family<ID>`). **Robust**: a family HypoDD can't relocate (too few dt.cc
+  links) is logged and falls back to **absolute-only** — the loop never aborts. **Resumable**: families
+  already relocated are skipped. Writes **`batch_manifest.csv`** (one row/family: status, n_relocated,
+  timing) + `batch.log`.
+- **`aggregate_results.py`** — writes **`master_metrics.csv`** (one row per family: n, n_relocated,
+  absolute vs dt.cc spread, `collapse_ratio`, bootstrap 95% medians, mean_cc, recurrence, centroid,
+  status), **`master_map_relocated.png`** (all relocated families on the UF subregion + fault traces,
+  coloured by family; absolute-only families as grey context), and top-N per-family fault-frame thumbnails.
+
+Each family's tidy table lands in `family<ID>/reloc_f<ID>_reuse.csv`; PocketQuake run outputs under
+`…/runs/f<ID>_reuse/`. The heavy per-family products (`build_summary_nb.py` summary notebook + GIF,
+`build_compare_nb.py`) stay **on-demand** for scientifically interesting families — not generated in the batch.
+
+**Reading the master table**: `collapse_ratio = dt.cc spread / absolute spread` (≈0.18 for the flagship
+738) is the headline tightening; but cross-check `boot_horiz95_m` — a tiny family can collapse tight yet
+have a large bootstrap error (e.g. a 3-event family at 28 m spread but ~370 m 95% half-width), meaning the
+tightness is **not** well-constrained. Trust the collapse only where the bootstrap error is small.

@@ -55,9 +55,11 @@ def _plot_faults(fig, ufc, pen="0.8p,black"):
     fig.plot(x=np.array(xs), y=np.array(ys), pen=pen)
 
 
-def make_map(slug="f738_reuse"):
+def make_map(slug="f738_reuse", outdir=None):
     A, D = _load(slug)
-    os.makedirs(OUT, exist_ok=True)
+    if outdir is None:                                 # default: family<FID> from the slug (fNNN_reuse)
+        outdir = os.path.join(HERE, f"family{slug[1:].split('_')[0]}")
+    os.makedirs(outdir, exist_ok=True)
     ufc = _ufc()
 
     # zoom extent: square-in-distance about the cloud MEAN (robust to the one southern outlier),
@@ -106,7 +108,7 @@ def make_map(slug="f738_reuse"):
                          style="cc", pen="0.3p,black", transparency=15)
                 fig.basemap(map_scale="jBL+w0.5k+o0.3c/0.3c")              # plain scale bar, no box
     fig.colorbar(position="JBC+w7c/0.3c+h+o0c/1.0c", frame=["xaf+lDepth (km) - panels (b), (c)"], cmap=True)
-    out = os.path.join(OUT, f"pygmt_reloc_{slug}.png")
+    out = os.path.join(outdir, f"pygmt_reloc_{slug}.png")
     fig.savefig(out, dpi=300)
     print(f"wrote {out}  | zoom {np.round(zoom, 3)}  regional {np.round(reg, 3)}  depth [{dmin:.2f},{dmax:.2f}] km")
     return out

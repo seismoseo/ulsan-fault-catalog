@@ -26,7 +26,9 @@ OUT = os.path.join(HERE, "family738")
 RUNS = os.path.join(PIPE, "pipeline", "runs")
 
 
-def load(slug):
+def load(slug, outdir=OUT):
+    """Merge <slug>'s hypoDD.reloc + bootstrap errors → tidy <outdir>/reloc_<slug>.csv; return the
+    relocated DataFrame. `outdir` defaults to family738 for the flagship; pass family<FID> per family."""
     rl = sumio.read_reloc(os.path.join(RUNS, slug, "2.HypoDD", "02.dt.cc", "hypoDD.reloc"))
     rl["event_id"] = rl["time"].apply(lambda t: t.strftime("%Y%m%d%H%M%S"))
     rl["time_utc"] = rl["time"].apply(str)
@@ -40,14 +42,21 @@ def load(slug):
     cols = (["event_id", "time_utc", "lat", "lon", "depth", "x", "y", "z"]
             + [c for c in ("ex95", "ey95", "ez95") if c in rl.columns]
             + ["nccp", "nccs", "nctp", "ncts"])
-    out = rl[[c for c in cols if c in rl.columns]].copy()
-    out.to_csv(os.path.join(OUT, f"reloc_{slug}.csv"), index=False)
+    tab = rl[[c for c in cols if c in rl.columns]].copy()
+    os.makedirs(outdir, exist_ok=True)
+    tab.to_csv(os.path.join(outdir, f"reloc_{slug}.csv"), index=False)
     return rl
 
 
-def main():
+def save_results_one(slug, outdir):
+    """Single reuse run (used by the batch driver): write <outdir>/reloc_<slug>.csv, return the DataFrame."""
+    return load(slug, outdir)
+
+
+def main_738():
+    """Flagship family 738: the reuse + fresh tables + the (1)-vs-(2) comparison table."""
     os.makedirs(OUT, exist_ok=True)
-    r1, r2 = load("f738_reuse"), load("f738_fresh")
+    r1, r2 = load("f738_reuse", OUT), load("f738_fresh", OUT)
     m = r1.set_index("id").join(r2.set_index("id"), lsuffix="_reuse", rsuffix="_fresh", how="inner")
     m["horiz_offset_m"] = np.round([gps2dist_azimuth(a, b, c, e)[0]
                           for a, b, c, e in zip(m.lat_reuse, m.lon_reuse, m.lat_fresh, m.lon_fresh)]).astype(int)
@@ -62,4 +71,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser(description="Tidy relocation tables. No slug -> the family-738 "
+                                             "reuse+fresh comparison; a slug -> a single reuse run.")
+    ap.add_argument("slug", nargs="?", help="single reuse run, e.g. f155_reuse")
+    ap.add_argument("--outdir", help="output dir for the single-slug table, e.g. family155")
+    a = ap.parse_args()
+    if a.slug:
+        d = a.outdir or os.path.join(HERE, a.slug)
+        save_results_one(a.slug, d)
+        print(f"wrote reloc_{a.slug}.csv -> {d}")
+    else:
+        main_738()
