@@ -76,8 +76,13 @@ The reuse scheme above is applied to **every 5-25 Hz family** (117 families ≥3
   timing) + `batch.log`.
 - **`aggregate_results.py`** — writes **`master_metrics.csv`** (one row per family: n, n_relocated,
   absolute vs dt.cc spread, `collapse_ratio`, bootstrap 95% medians, mean_cc, recurrence, centroid,
-  status), **`master_map_relocated.png`** (all relocated families on the UF subregion + fault traces,
-  coloured by family; absolute-only families as grey context), and top-N per-family fault-frame thumbnails.
+  status/stage_failed/note), **`failures.csv`** (families not fully relocated), **`master_map_relocated.png`**
+  (all relocated families on the UF subregion + fault traces, coloured by family; absolute-only as grey),
+  and top-N per-family fault-frame thumbnails.
+- **`build_batch_summary_nb.py`** → **`batch_summary.ipynb`** — the aggregate overview notebook: status +
+  combined map, collapse statistics, the **repeater-vs-multiplet** view (dt.cc spread vs bootstrap error —
+  only families below the 1:1 line are well-resolved candidate repeaters), size/depth/time relationships,
+  the master table + failures, and a top-N thumbnail gallery. Loads the CSVs only (no pipeline re-run).
 
 Each family's tidy table lands in `family<ID>/reloc_f<ID>_reuse.csv`; PocketQuake run outputs under
 `…/runs/f<ID>_reuse/`. The heavy per-family products (`build_summary_nb.py` summary notebook + GIF,

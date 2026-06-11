@@ -16,4 +16,6 @@ PY=${PQ_PY:-/home/msseo/miniforge3/envs/pq-gpu/bin/python}
 
 "$PY" "$HERE/batch_relocate.py" "$@"
 "$PY" "$HERE/aggregate_results.py"
-echo "Done — see $HERE/{master_metrics.csv, master_map_relocated.png, batch_manifest.csv}"
+"$PY" "$HERE/build_batch_summary_nb.py"
+( cd "$HERE" && "$PY" -m jupyter nbconvert --to notebook --execute --inplace batch_summary.ipynb )
+echo "Done — see $HERE/{master_metrics.csv, master_map_relocated.png, batch_manifest.csv, batch_summary.ipynb}"
