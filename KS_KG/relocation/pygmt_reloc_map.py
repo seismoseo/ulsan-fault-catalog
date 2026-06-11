@@ -50,19 +50,20 @@ def make_map(slug="f738_reuse"):
 
     fig = pygmt.Figure()
     pygmt.config(FONT_HEADING="14p,Helvetica-Bold", FONT_ANNOT_PRIMARY="7p", FONT_LABEL="9p",
-                 MAP_TITLE_OFFSET="6p", MAP_FRAME_TYPE="plain")
+                 MAP_TITLE_OFFSET="6p", MAP_FRAME_TYPE="plain", FORMAT_GEO_MAP="ddd.xxF")
     pygmt.makecpt(cmap="viridis", series=[dmin, dmax], reverse=True)
-    panels = [(A, f"Before - absolute HypoInverse (kim2011), N={len(A)}"),
-              (D, f"After - dt.cc HypoDD relocation, N={len(D)}")]
-    with fig.subplot(nrows=1, ncols=2, figsize=("16c", "8c"), margins="0.7c", autolabel="(a)",
+    # panel (a) annotates the LEFT y-axis, panel (b) the RIGHT — so inter-panel labels never collide
+    panels = [(A, "WSne", f"Before - absolute HypoInverse (kim2011), N={len(A)}"),
+              (D, "wSnE", f"After - dt.cc HypoDD relocation, N={len(D)}")]
+    with fig.subplot(nrows=1, ncols=2, figsize=("16c", "8c"), margins=["1.4c", "0.5c"], autolabel="(a)",
                      title=f"Family 738 ({slug.replace('f738_', '')}) - event locations before vs after dt.cc relocation"):
-        for j, (df, lab) in enumerate(panels):
+        for j, (df, sides, lab) in enumerate(panels):
             with fig.set_panel(j):
-                fig.basemap(region=region, projection="M8c", frame=["WSne", "xa0.005f0.001", "ya0.005f0.001"])
+                fig.basemap(region=region, projection="M8c", frame=[sides, "xa0.02f0.01", "ya0.02f0.01"])
                 fig.plot(x=df.lon, y=df.lat, size=sizes(df.mag), fill=df.depth, cmap=True,
                          style="cc", pen="0.3p,black", transparency=15)
                 fig.text(position="TC", text=lab, font="8.5p,Helvetica-Bold", offset="0c/-0.3c", no_clip=True)
-                fig.basemap(map_scale="jBL+w0.5k+o0.3c/0.3c+f", box="+gwhite@30+p0.3p")
+                fig.basemap(map_scale="jBL+w0.5k+o0.3c/0.3c")          # plain scale bar, no surrounding box
     fig.colorbar(position="JBC+w8c/0.35c+h+o0c/1.0c", frame=["xaf+lDepth (km)"], cmap=True)
     out = os.path.join(OUT, f"pygmt_reloc_{slug}.png")
     fig.savefig(out, dpi=300)

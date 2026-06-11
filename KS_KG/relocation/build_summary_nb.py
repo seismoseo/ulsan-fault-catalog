@@ -85,6 +85,18 @@ positions (hollow), so nothing is silently hidden.""")
 co("""viz.fault_sections(cfg, velmodel=VELMODEL, frame_from="svd", color_by="time", show_bootstrap=True); plt.show()
 viz.map_catalog(cfg, velmodel=VELMODEL, source="reloc", include_all=True, show_errors=False); plt.show()""")
 
+md("""### Time-lapse animation (GIF) — cumulative seismicity in the fault frame
+
+`viz.animate_seismicity` is the animated twin of the fault-frame sections above (PocketQuake's summary
+GIF): events accumulate by **origin time** in the same SVD fault-frame layout, with a time-vs-magnitude
+clock. Saved at a **slow 2 fps** to `family738/<cluster>_seismicity.gif` for use in slides.""")
+co("""ANIM_FPS, ANIM_FRAMES = 2, 45        # slow + readable (45 frames / 2 fps = 22.5 s loop)
+gif_path = os.path.join("family738", f"{CLUSTER}_seismicity.gif")
+viz.animate_seismicity(cfg, velmodel=VELMODEL, frame_from="svd", fps=ANIM_FPS,
+                       frames=ANIM_FRAMES, out_path=gif_path)
+plt.close("all")                       # the FuncAnimation leaves an extra static fig open
+display(Image(filename=gif_path))""")
+
 md("""### HypoDD link map — inter-event differential-time connectivity""")
 co("""viz.link_maps(cfg, velmodel=VELMODEL); plt.show()""")
 
