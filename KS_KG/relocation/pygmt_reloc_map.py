@@ -32,42 +32,83 @@ def _load(slug):
     return A, D
 
 
+def _square(clat, clon, half_km):
+    """Square-in-distance [W, E, S, N] box of half-size `half_km` about (clat, clon)."""
+    dlat = half_km / 111.32
+    dlon = half_km / (111.32 * np.cos(np.radians(clat)))
+    return [clon - dlon, clon + dlon, clat - dlat, clat + dlat]
+
+
+def _ufc():
+    """Lazy import of the Ulsan-fault helper (SUBREGION extent + fault traces + plot_faults)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "HypoInv"))
+    import uf_cluster as ufc
+    return ufc
+
+
+def _plot_faults(fig, ufc, pen="0.8p,black"):
+    """Overlay the UF fault traces as ONE NaN-separated polyline (no legend label — unlike
+    `ufc.plot_faults`, which sets label='Fault trace' and leaves an empty legend box on each panel)."""
+    xs, ys = [], []
+    for s in ufc.read_fault_segments(ufc.FAULT_TRACE):
+        xs.extend(list(s[:, 1]) + [np.nan]); ys.extend(list(s[:, 0]) + [np.nan])
+    fig.plot(x=np.array(xs), y=np.array(ys), pen=pen)
+
+
 def make_map(slug="f738_reuse"):
     A, D = _load(slug)
     os.makedirs(OUT, exist_ok=True)
-    # shared, square-in-distance extent centred on the cloud MEAN (robust to the one southern outlier),
+    ufc = _ufc()
+
+    # zoom extent: square-in-distance about the cloud MEAN (robust to the one southern outlier),
     # sized to include every event, so the collapse is obvious on a common frame
     lat = np.r_[A.lat, D.lat]; lon = np.r_[A.lon, D.lon]
     clat, clon = float(lat.mean()), float(lon.mean())
     rad_km = max(np.hypot((lat - clat) * 111.32, (lon - clon) * 111.32 * np.cos(np.radians(clat))))
-    half_km = 1.12 * rad_km
-    dlat = half_km / 111.32; dlon = half_km / (111.32 * np.cos(np.radians(clat)))
-    region = [clon - dlon, clon + dlon, clat - dlat, clat + dlat]
+    zoom = _square(clat, clon, 1.12 * rad_km)
+    zbx = [zoom[0], zoom[1], zoom[1], zoom[0], zoom[0]]; zby = [zoom[2], zoom[2], zoom[3], zoom[3], zoom[2]]
+    # regional extent: the whole UF subregion, also square (so all three panels share one height)
+    sub = ufc.SUBREGION
+    rclat, rclon = (sub[2] + sub[3]) / 2, (sub[0] + sub[1]) / 2
+    rhalf = 1.05 * max((sub[3] - sub[2]) / 2 * 111.32, (sub[1] - sub[0]) / 2 * 111.32 * np.cos(np.radians(rclat)))
+    reg = _square(rclat, rclon, rhalf)
     dmin, dmax = float(min(A.depth.min(), D.depth.min())), float(max(A.depth.max(), D.depth.max()))
 
-    def sizes(mag):                                    # circle diameter (cm) from magnitude
+    def sizes(mag):                                    # circle diameter (cm) from local magnitude
         return 0.11 * (np.asarray(mag) + 1.6)
 
+    PANEL, MX = 5.6, 1.3                               # cm: square panel width + inter-panel gap
     fig = pygmt.Figure()
-    pygmt.config(FONT_HEADING="14p,Helvetica-Bold", FONT_ANNOT_PRIMARY="7p", FONT_LABEL="9p",
-                 MAP_TITLE_OFFSET="6p", MAP_FRAME_TYPE="plain", FORMAT_GEO_MAP="ddd.xxF")
+    pygmt.config(FONT_TITLE="11p,Helvetica-Bold", FONT_HEADING="13p,Helvetica-Bold",
+                 FONT_ANNOT_PRIMARY="7p", FONT_LABEL="9p", MAP_TITLE_OFFSET="5p",
+                 MAP_FRAME_TYPE="plain", FORMAT_GEO_MAP="ddd.xxF")
     pygmt.makecpt(cmap="viridis", series=[dmin, dmax], reverse=True)
-    # panel (a) annotates the LEFT y-axis, panel (b) the RIGHT — so inter-panel labels never collide
-    panels = [(A, "WSne", f"Before - absolute HypoInverse (kim2011), N={len(A)}"),
-              (D, "wSnE", f"After - dt.cc HypoDD relocation, N={len(D)}")]
-    with fig.subplot(nrows=1, ncols=2, figsize=("16c", "8c"), margins=["1.4c", "0.5c"], autolabel="(a)",
-                     title=f"Family 738 ({slug.replace('f738_', '')}) - event locations before vs after dt.cc relocation"):
-        for j, (df, sides, lab) in enumerate(panels):
+    with fig.subplot(nrows=1, ncols=3, figsize=(f"{3 * PANEL + 2 * MX}c", f"{PANEL}c"),
+                     margins=[f"{MX}c", "0.5c"], autolabel="(a)+o0.1c",
+                     title=f"Family 738 ({slug.replace('f738_', '')}) - dt.cc relocation in the Ulsan Fault subregion"):
+        # (a) regional framework — whole subregion, coastline + fault traces, zoom box + cluster star
+        with fig.set_panel(0):
+            fig.basemap(region=reg, projection=f"M{PANEL}c",
+                        frame=["WSne+tRegional: UF subregion and faults", "xa0.1f0.05", "ya0.1f0.05"])
+            fig.coast(land="245", water="220/233/245", shorelines="0.4p,gray60")
+            _plot_faults(fig, ufc)
+            fig.plot(x=zbx, y=zby, pen="1.2p,red")                          # zoom-area box
+            fig.plot(x=[float(D.lon.mean())], y=[float(D.lat.mean())], style="a0.45c", fill="red", pen="0.5p,black")
+            fig.basemap(map_scale="jBL+w10k+o0.3c/0.3c")
+        # (b) before, (c) after — shared zoom extent + depth scale; faults overlaid for the same framework
+        for j, (df, sides, ttl) in enumerate([(A, "wSne", "Before - HypoInverse (kim2011)"),
+                                              (D, "wSnE", "After - dt.cc HypoDD")], start=1):
             with fig.set_panel(j):
-                fig.basemap(region=region, projection="M8c", frame=[sides, "xa0.02f0.01", "ya0.02f0.01"])
+                fig.basemap(region=zoom, projection=f"M{PANEL}c",
+                            frame=[f"{sides}+t{ttl}", "xa0.02f0.01", "ya0.02f0.01"])
+                _plot_faults(fig, ufc)
                 fig.plot(x=df.lon, y=df.lat, size=sizes(df.mag), fill=df.depth, cmap=True,
                          style="cc", pen="0.3p,black", transparency=15)
-                fig.text(position="TC", text=lab, font="8.5p,Helvetica-Bold", offset="0c/-0.3c", no_clip=True)
-                fig.basemap(map_scale="jBL+w0.5k+o0.3c/0.3c")          # plain scale bar, no surrounding box
-    fig.colorbar(position="JBC+w8c/0.35c+h+o0c/1.0c", frame=["xaf+lDepth (km)"], cmap=True)
+                fig.basemap(map_scale="jBL+w0.5k+o0.3c/0.3c")              # plain scale bar, no box
+    fig.colorbar(position="JBC+w7c/0.3c+h+o0c/1.0c", frame=["xaf+lDepth (km) - panels (b), (c)"], cmap=True)
     out = os.path.join(OUT, f"pygmt_reloc_{slug}.png")
     fig.savefig(out, dpi=300)
-    print(f"wrote {out}  | region {region}  depth [{dmin:.2f},{dmax:.2f}] km")
+    print(f"wrote {out}  | zoom {np.round(zoom, 3)}  regional {np.round(reg, 3)}  depth [{dmin:.2f},{dmax:.2f}] km")
     return out
 
 
