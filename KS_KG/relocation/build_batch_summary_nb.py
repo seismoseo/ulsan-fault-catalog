@@ -151,7 +151,30 @@ for fid in top.id:
     else:
         print(f"family {fid}: thumbnail not generated (run aggregate_results.py --topn N)")""")
 
-md("""## 8 · Reading this
+md("""## 8 · Fault-frame sections (SVD plane) — large families
+
+The same SOTA fault-coordinate view used for the flagship family 738 (`viz.fault_sections`,
+`frame_from="svd"`), for every large family (n ≥ 15): fault-plane map view + along-strike (A-A') and
+across-strike (B-B', with the dip guide) depth sections + the along-dip view, coloured by origin time,
+with 95% bootstrap error bars. The fault plane is the **SVD best-fit** of each relocated cloud, so each
+family's strike/dip is read directly off the title — the basis for the fault-architecture analysis.""")
+co("""import sys
+sys.path.insert(0, "/home/msseo/works/15.PocketQuake")
+sys.path.insert(0, "/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation")
+from pipeline import config, viz
+
+NMIN = 15                                                        # "large" families
+big = M[(M.status.isin(["done", "done_cached"])) & (M.n >= NMIN)].sort_values("n", ascending=False)
+print(f"{len(big)} families with n >= {NMIN}")
+for fid, n in zip(big.id, big.n):
+    print(f"================  family {fid}  (n={int(n)})  ================")
+    try:
+        viz.fault_sections(config.load_cluster(f"f{fid}_reuse"), velmodel="kim2011",
+                           frame_from="svd", color_by="time", show_bootstrap=True); plt.show()
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  family {fid} skipped: {type(e).__name__}: {e}")""")
+
+md("""## 9 · Reading this
 
 - **Overview (§1)**: of the 117 multiplet families, most relocate; a handful of 3-4-event families are
   absolute-only (HypoDD too few links) — all tracked in `failures.csv`.
