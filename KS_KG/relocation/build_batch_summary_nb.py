@@ -151,28 +151,47 @@ for fid in top.id:
     else:
         print(f"family {fid}: thumbnail not generated (run aggregate_results.py --topn N)")""")
 
-md("""## 8 · Fault-frame sections (SVD plane) — large families
+md("""## 8 · Fault-frame sections (SVD plane) + recurrence — large families (n ≥ 10)
 
-The same SOTA fault-coordinate view used for the flagship family 738 (`viz.fault_sections`,
-`frame_from="svd"`), for every large family (n ≥ 15): fault-plane map view + along-strike (A-A') and
-across-strike (B-B', with the dip guide) depth sections + the along-dip view, coloured by origin time,
-with 95% bootstrap error bars. The fault plane is the **SVD best-fit** of each relocated cloud, so each
-family's strike/dip is read directly off the title — the basis for the fault-architecture analysis.""")
+The SOTA fault-coordinate view (`viz.fault_sections`, `frame_from="svd"`) for every large family
+(n ≥ 10). The fault plane is the **true SVD best-fit of the cluster** — its orientation (strike/dip in
+the title) is the principal plane of the relocated cloud, and the section is centred on the **cluster
+centroid** (`center_on="centroid"`), through which the SVD plane passes, so it is **not tied to any
+single event** (e.g. the mainshock). Panels: map view + along-strike (A-A') and across-strike (B-B',
+with the dip guide) depth sections + along-dip view, coloured by origin time, with 95% bootstrap bars.
+Below each family: its **magnitude-vs-time** history (the 2016-09-12 Gyeongju M5.8 is marked).""")
 co("""import sys
+import matplotlib.dates as mdates
 sys.path.insert(0, "/home/msseo/works/15.PocketQuake")
 sys.path.insert(0, "/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation")
 from pipeline import config, viz
+from pipeline.core import sumio
 
-NMIN = 15                                                        # "large" families
+NMIN = 10                                                        # "large" families
 big = M[(M.status.isin(["done", "done_cached"])) & (M.n >= NMIN)].sort_values("n", ascending=False)
 print(f"{len(big)} families with n >= {NMIN}")
 for fid, n in zip(big.id, big.n):
+    cfg = config.load_cluster(f"f{fid}_reuse")
     print(f"================  family {fid}  (n={int(n)})  ================")
     try:
-        viz.fault_sections(config.load_cluster(f"f{fid}_reuse"), velmodel="kim2011",
-                           frame_from="svd", color_by="time", show_bootstrap=True); plt.show()
+        viz.fault_sections(cfg, velmodel="kim2011", frame_from="svd", color_by="time",
+                           center_on="centroid", show_bootstrap=True); plt.show()   # true SVD, centroid-centred
     except Exception as e:                                       # noqa: BLE001
-        print(f"  family {fid} skipped: {type(e).__name__}: {e}")""")
+        print(f"  sections skipped: {type(e).__name__}: {e}"); continue
+    try:                                                         # magnitude-vs-time recurrence below
+        D = sumio.read_reloc(os.path.join(config.dtcc_dir(cfg), "hypoDD.reloc"))
+        t = pd.to_datetime([str(x) for x in D.time])
+        mw = np.asarray(viz._mag_for(cfg, D.id), float)
+        fig, ax = plt.subplots(figsize=(11, 2.1))
+        ax.vlines(t, 0, mw, color="0.75", lw=0.8, zorder=1)
+        ax.scatter(t, mw, s=18 + 12 * np.nan_to_num(mw), c=mdates.date2num(t), cmap="coolwarm",
+                   edgecolor="k", linewidth=0.3, zorder=3)
+        ax.axvline(pd.Timestamp("2016-09-12"), color="crimson", ls="--", lw=1.0, label="2016 Gyeongju M5.8")
+        ax.set(xlabel="Origin time", ylabel="Local magnitude", ylim=(0, None),
+               title=f"Family {fid} — magnitude vs time ({len(D)} events)")
+        ax.legend(fontsize=8, loc="upper left"); fig.tight_layout(); plt.show()
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  recurrence skipped: {type(e).__name__}: {e}")""")
 
 md("""## 9 · Reading this
 
