@@ -199,17 +199,21 @@ md("""## 6 · Recurrence timeline — largest families, 2016 Gyeongju mainshock 
 The same temporal view used for the KG.HDB-only analysis (`plot_repeater_sequences`): one full-width
 row per family (largest first), a marker at every member origin time, coloured by family. The **2016
 Gyeongju M5.8 mainshock** is the red dashed line.""")
-code("""fig = wf.plot_repeater_sequences(meta, labels, rep, top=30, mark_gyeongju=True,
-        title=f"KG.HDB {COMP} repeater families ({PRIMARY[0]}-{PRIMARY[1]} Hz, single-linkage CC>={CC_REPEAT}) "
+code(r"""fig = wf.plot_repeater_sequences(meta, labels, rep, top=30, mark_gyeongju=True,
+        title=rf"KG.HDB {COMP} multiplet families ({PRIMARY[0]}-{PRIMARY[1]} Hz, single-linkage CC$\geq${CC_REPEAT}) "
               f"- recurrence timeline (largest 30)")
+plt.show()""")
+code(r"""fig = wf.plot_repeater_sequences(meta, labels, rep, top=50, mark_gyeongju=True,
+        title=rf"KG.HDB {COMP} multiplet families ({PRIMARY[0]}-{PRIMARY[1]} Hz, single-linkage CC$\geq${CC_REPEAT}) "
+              f"- recurrence timeline (largest 50)")
 plt.show()""")
 
 md("""## 7 · Map — confirmed vs unconfirmed vs insufficient-coverage families (PyGMT, UF subregion)""")
 code("""try:
     conf_ids = net.loc[net["confirmed"], "cluster"].tolist()
     fig = wf.map_cluster_links(meta, labels, net[net["confirmed"]], link="centroid",
-            title=f"KG.HDB {COMP} network-CONFIRMED repeater families ({PRIMARY[0]}-{PRIMARY[1]} Hz)")
-    fig.show()
+            title=f"KG.HDB {COMP} multiplet families ({PRIMARY[0]}-{PRIMARY[1]} Hz)")
+    fig.show(width=1000)
 except Exception as e:
     print("PyGMT map skipped:", type(e).__name__, e)""")
 
