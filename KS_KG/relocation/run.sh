@@ -52,4 +52,8 @@ done
 # ---------- compare (absolute vs reuse-dt.cc vs fresh-dt.cc; collapse, sections, bootstrap) ----------
 "$PY" "$HERE/build_compare_nb.py"
 ( cd "$HERE" && "$PY" -m jupyter nbconvert --to notebook --execute --inplace compare_relocations.ipynb )
-echo "Done — open $HERE/compare_relocations.ipynb"
+
+# ---------- dedicated reuse summary (PocketQuake-style §1 locations, no FM) + PyGMT before/after map ----------
+"$PY" "$HERE/build_summary_nb.py"
+( cd "$HERE" && "$PY" -m jupyter nbconvert --to notebook --execute --inplace summary_reuse.ipynb )
+echo "Done — open $HERE/compare_relocations.ipynb and $HERE/summary_reuse.ipynb"

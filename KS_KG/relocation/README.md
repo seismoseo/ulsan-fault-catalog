@@ -26,7 +26,14 @@ Fortran HypoInverse+HypoDD — differing **only in the picks**:
   also convert the Ulsan `{eid}_picks.csv` → PocketQuake `picks/{eid}_picks.csv`.
 - `run.sh` — the full reproducible sequence (catalog → scaffold → stage → relocate (1)+(2) → compare).
 - `build_compare_nb.py` → `compare_relocations.ipynb` — absolute vs (1) vs (2): spatial collapse, map +
-  depth sections, and the **(1)-vs-(2) per-event offset** (pick-source robustness).
+  depth sections, fault-frame SVD sections (kept vs under-constrained-dropped), bootstrap 95 %, and the
+  **(1)-vs-(2) per-event offset** (pick-source robustness).
+- `build_summary_nb.py` → `summary_reuse.ipynb` — **dedicated summary of the chosen reuse run**, styled
+  after PocketQuake's results notebook §1 (locations), **no focal-mechanism parts**: relocation counts,
+  `location_table` (writes `final_locations.csv`), bootstrap uncertainty, absolute + dt.cc maps/sections,
+  fault-frame SVD, link map.
+- `pygmt_reloc_map.py` — **PyGMT** before/after subregion map (`family738/pygmt_reloc_f738_reuse.png`):
+  two panels on a shared square extent + depth colour scale, circles sized by KMA magnitude.
 
 ## Run it
 ```bash
