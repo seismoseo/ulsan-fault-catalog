@@ -30,14 +30,14 @@ sys.path.insert(0, HYPO)
 import uf_waveform_similarity as wf   # noqa: E402
 
 
-def family_members(family="largest"):
-    """Reproduce the 5-25 Hz single-linkage CC>=0.9 clustering and return (family_id, [event_id...])."""
+def family_members(family="largest", band=(5, 25)):
+    """Reproduce the single-linkage CC>=0.9 clustering at `band` and return (family_id, [event_id...])."""
     res = wf.make_bands(wf.list_events(station=STATION, comp=COMP), station=STATION, comp=COMP,
-                        bands=[PRIMARY, (1, 10), (2, 8), (4, 12)], win=WIN, cache_dir=wf.CACHE_DIR,
+                        bands=[band, (1, 10), (2, 8), (4, 12)], win=WIN, cache_dir=wf.CACHE_DIR,
                         verbose=False)
     kept = res["kept"]
     meta = wf.load_event_meta(kept)
-    tag = (f"{STATION}_{COMP}_w{WIN[0]}_{WIN[1]}_b{PRIMARY[0]}-{PRIMARY[1]}_lag{MAXLAG}_n{len(kept)}"
+    tag = (f"{STATION}_{COMP}_w{WIN[0]}_{WIN[1]}_b{band[0]}-{band[1]}_lag{MAXLAG}_n{len(kept)}"
            .replace(".", "p"))
     cc = np.load(os.path.join(wf.CACHE_DIR, f"cc_{tag}.npy"))
     labels, _, _ = wf.ward_clusters(cc, threshold=1 - 0.9, method="single")
@@ -52,9 +52,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--family", default="largest", help="'largest' (default) or a numeric family id")
     ap.add_argument("--outdir", default="family738", help="output subdir (created under this script's dir)")
+    ap.add_argument("--band", default="5-25", help="clustering band, e.g. 5-25 (default) or 5-15")
     args = ap.parse_args()
 
-    fam, members = family_members(args.family)
+    band = tuple(int(x) for x in args.band.split("-"))
+    fam, members = family_members(args.family, band)
     outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), args.outdir)
     os.makedirs(outdir, exist_ok=True)
 

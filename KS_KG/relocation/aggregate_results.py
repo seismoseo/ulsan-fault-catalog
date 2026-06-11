@@ -27,8 +27,9 @@ from obspy.geodetics.base import gps2dist_azimuth        # noqa: E402
 sys.path.insert(0, B.HYPO)
 import uf_waveform_similarity as wf                      # noqa: E402
 
-MASTER = os.path.join(HERE, "master_metrics.csv")
+MASTER = os.path.join(HERE, "master_metrics.csv")        # reassigned per band in main()
 MASTER_MAP = os.path.join(HERE, "master_map_relocated.png")
+FAILURES = os.path.join(HERE, "failures.csv")
 RELOCATED = ("done", "done_cached")
 
 
@@ -74,7 +75,7 @@ def _r(x):
 def master_table(rep, manifest):
     rows = []
     for r in rep.itertuples():
-        fid = int(r.cluster); slug = f"f{fid}_reuse"
+        fid = int(r.cluster); slug = B.slug_for(fid)
         mrow = manifest.get(fid, {})
         A, D = _read_sum(slug), _read_reloc(slug)
         ah, az = _spread(A); dh, dz = _spread(D)
@@ -110,19 +111,20 @@ def master_map(rep, manifest):
     fig = pygmt.Figure()
     pygmt.config(FORMAT_GEO_MAP="ddd.xx", MAP_FRAME_TYPE="plain",
                  FONT_TITLE="15p,Helvetica-Bold", FONT_ANNOT_PRIMARY="9p")
+    bandstr = f"{B.BAND[0]}-{B.BAND[1]}"
     fig.basemap(region=region, projection="M20c",
-                frame=[f"WSne+tUlsan multiplet families - dt.cc relocated (5-25 Hz, {len(ids)} families)",
+                frame=[f"WSne+tUlsan multiplet families - dt.cc relocated ({bandstr} Hz, {len(ids)} families)",
                        "xa0.1f0.05", "ya0.1f0.05"])
     fig.coast(land="245", water="220/233/245", shorelines="0.4p,gray60")
     PM._plot_faults(fig, ufc, pen="0.8p,black")
     for r in rep.itertuples():                          # absolute-only families = faint grey context
         fid = int(r.cluster)
         if manifest.get(fid, {}).get("status") == "absolute_only":
-            A = _read_sum(f"f{fid}_reuse")
+            A = _read_sum(B.slug_for(fid))
             if A is not None:
                 fig.plot(x=A.lon, y=A.lat, style="c0.05c", fill="gray75")
     for fid in ids:                                     # relocated families, coloured by family
-        D = _read_reloc(f"f{fid}_reuse")
+        D = _read_reloc(B.slug_for(fid))
         if D is not None:
             fig.plot(x=D.lon, y=D.lat, style="c0.09c", fill=wf._gmt_rgb(cols[fid]), pen="0.2p,black")
     bl, ba = ufc._subregion_box(sub)
@@ -136,8 +138,8 @@ def thumbnails(rep, manifest, topn):
            if manifest.get(int(r.cluster), {}).get("status") in RELOCATED][:topn]
     for fid in ids:
         try:
-            PM.make_map(f"f{fid}_reuse")
-            print(f"  thumbnail family{fid}")
+            PM.make_map(B.slug_for(fid), outdir=B.outdir_for(fid))
+            print(f"  thumbnail family{fid}{B.BT}")
         except Exception as e:                          # noqa: BLE001
             print(f"  thumbnail family{fid} skipped: {type(e).__name__}: {e}")
 
@@ -147,12 +149,21 @@ def main():
     ap.add_argument("--topn", type=int, default=10, help="number of largest relocated families to thumbnail")
     ap.add_argument("--no-map", action="store_true")
     ap.add_argument("--no-thumbs", action="store_true")
+    ap.add_argument("--band", default="5-25", help="clustering band, e.g. 5-25 (default) or 5-15")
     a = ap.parse_args()
+
+    global MASTER, MASTER_MAP, FAILURES                  # band-tag every output; configure the driver too
+    B.BAND = tuple(int(x) for x in a.band.split("-")); B.BT = B._bt(a.band)
+    B.MANIFEST = os.path.join(HERE, f"batch_manifest{B.BT}.csv")
+    MASTER = os.path.join(HERE, f"master_metrics{B.BT}.csv")
+    MASTER_MAP = os.path.join(HERE, f"master_map_relocated{B.BT}.png")
+    FAILURES = os.path.join(HERE, f"failures{B.BT}.csv")
+
     rep = B.family_table()
     manifest = B.load_manifest()
     df = master_table(rep, manifest)
     vc = df.status.value_counts().to_dict()
-    print(f"master_metrics.csv: {len(df)} families | status {vc}")
+    print(f"{os.path.basename(MASTER)}: {len(df)} families | status {vc}")
     rel = df[df.status.isin(RELOCATED)]
     if len(rel):
         print(f"  relocated: {len(rel)} | median collapse_ratio {rel.collapse_ratio.median():.2f} | "
@@ -161,9 +172,8 @@ def main():
     # explicit tracking of the families that did NOT fully relocate (absolute-only / failed / not-run)
     bad = df[~df.status.isin(RELOCATED)]
     if len(bad):
-        bad[["id", "n", "status", "stage_failed", "note"]].to_csv(os.path.join(HERE, "failures.csv"),
-                                                                  index=False)
-        print(f"\n  {len(bad)} family/ies NOT fully relocated (-> failures.csv):")
+        bad[["id", "n", "status", "stage_failed", "note"]].to_csv(FAILURES, index=False)
+        print(f"\n  {len(bad)} family/ies NOT fully relocated (-> {os.path.basename(FAILURES)}):")
         print("   " + bad[["id", "n", "status", "stage_failed"]].to_string(index=False).replace("\n", "\n   "))
     if not a.no_map:
         master_map(rep, manifest)

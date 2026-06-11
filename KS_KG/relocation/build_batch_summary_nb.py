@@ -12,18 +12,22 @@ Usage: python build_batch_summary_nb.py   (writes batch_summary.ipynb next to th
 import os
 import nbformat as nbf
 
+import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
+BAND = sys.argv[1] if len(sys.argv) > 1 else "5-25"            # e.g. "5-25" (default) or "5-15"
+BT = "" if BAND == "5-25" else "_b" + BAND.replace("-", "")    # filename/slug suffix per band
 nb = nbf.v4.new_notebook(); C = []
 def md(s): C.append(nbf.v4.new_markdown_cell(s))
 def co(s): C.append(nbf.v4.new_code_cell(s))
 
-md("""# Ulsan multiplet relocation — batch summary (5-25 Hz, all families)
+md(f"""# Ulsan multiplet relocation — batch summary ({BAND} Hz, all families)
 
-Aggregate overview of every 5-25 Hz waveform-similarity multiplet family relocated with the **reuse**
+Aggregate overview of every {BAND} Hz waveform-similarity multiplet family relocated with the **reuse**
 scheme (PocketQuake HypoInverse + dt.cc HypoDD, kim2011). Built from the batch products
-(`master_metrics.csv`, `batch_manifest.csv`, `failures.csv`, `master_map_relocated.png`) — no pipeline
-is re-run here. Regenerate the data with `./run_all.sh`, this notebook with `build_batch_summary_nb.py`.""")
+(`master_metrics{BT}.csv`, `batch_manifest{BT}.csv`, `failures{BT}.csv`, `master_map_relocated{BT}.png`)
+— no pipeline is re-run. Regenerate via `./run_all.sh --band {BAND}` then `build_batch_summary_nb.py {BAND}`.""")
 
+co(f'BAND, BT = "{BAND}", "{BT}"   # band selector — every file/slug reference below is suffixed by BT')
 co("""import os
 import numpy as np, pandas as pd, matplotlib.pyplot as plt
 import matplotlib as mpl, matplotlib.font_manager as fm
@@ -37,8 +41,8 @@ for _f in ("Helvetica", "Arial", "Nimbus Sans", "TeX Gyre Heros", "DejaVu Sans")
 mpl.rcParams.update({"figure.dpi": 120, "axes.grid": True, "grid.alpha": 0.3})
 
 HERE = os.getcwd()
-M = pd.read_csv("master_metrics.csv")
-MAN = pd.read_csv("batch_manifest.csv")
+M = pd.read_csv(f"master_metrics{BT}.csv")
+MAN = pd.read_csv(f"batch_manifest{BT}.csv")
 RELOC = M[M.status.isin(["done", "done_cached"])].copy()         # the dt.cc-relocated families
 print(f"{len(M)} families | {len(RELOC)} relocated | {(M.status=='absolute_only').sum()} absolute-only | "
       f"{M.status.str.startswith('failed').sum()} failed | {int(M.n.sum())} events in families, "
@@ -54,7 +58,7 @@ ax[1].set(title="Relocated family size", xlabel="Events per family", ylabel="Fam
 fig.tight_layout(); plt.show()""")
 md("""**Combined regional map** — all relocated families on the Ulsan Fault subregion (fault traces +
 coastline), one colour per family; absolute-only families are faint grey.""")
-co("""display(Image(filename="master_map_relocated.png"))""")
+co("""display(Image(filename=f"master_map_relocated{BT}.png"))""")
 
 md("""## 2 · Collapse — how much each family tightened under dt.cc
 
@@ -135,7 +139,7 @@ co("""cols = ["id", "n", "n_relocated", "status", "abs_spread_horiz_m", "dtcc_sp
         "collapse_ratio", "boot_horiz95_m", "boot_depth95_m", "mean_cc", "depth_med_km", "recur_med_days"]
 display(M.sort_values("n", ascending=False)[cols].head(25).reset_index(drop=True))""")
 md("""**Families not fully relocated** (`failures.csv`) — tracked explicitly, none silently dropped.""")
-co("""fpath = "failures.csv"
+co("""fpath = f"failures{BT}.csv"
 display(pd.read_csv(fpath) if os.path.exists(fpath) else pd.DataFrame({"note": ["no failures"]}))""")
 
 md("""## 7 · Fault-frame thumbnails — the largest relocated families
@@ -144,7 +148,7 @@ The before/after PyGMT panel (`pygmt_reloc_map.make_map`) for the top families b
 detail (depth sections, source patches, GIF) is in `build_summary_nb.py` (run on demand).""")
 co("""top = M[M.status.isin(["done", "done_cached"])].sort_values("n", ascending=False).head(6)
 for fid in top.id:
-    p = os.path.join(f"family{fid}", f"pygmt_reloc_f{fid}_reuse.png")
+    p = os.path.join(f"family{fid}{BT}", f"pygmt_reloc_f{fid}{BT}_reuse.png")
     if os.path.exists(p):
         print(f"family {fid}")
         display(Image(filename=p))
@@ -171,7 +175,7 @@ NMIN = 10                                                        # "large" famil
 big = M[(M.status.isin(["done", "done_cached"])) & (M.n >= NMIN)].sort_values("n", ascending=False)
 print(f"{len(big)} families with n >= {NMIN}")
 for fid, n in zip(big.id, big.n):
-    cfg = config.load_cluster(f"f{fid}_reuse")
+    cfg = config.load_cluster(f"f{fid}{BT}_reuse")
     print(f"================  family {fid}  (n={int(n)})  ================")
     try:
         viz.fault_sections(cfg, velmodel="kim2011", frame_from="svd", color_by="time",
@@ -206,5 +210,5 @@ md("""## 9 · Reading this
 
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
-out = os.path.join(HERE, "batch_summary.ipynb")
+out = os.path.join(HERE, f"batch_summary{BT}.ipynb")
 nbf.write(nb, out); print("wrote", out, len(C), "cells")

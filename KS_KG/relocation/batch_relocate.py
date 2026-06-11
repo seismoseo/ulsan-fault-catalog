@@ -50,18 +50,33 @@ from pipeline.core import sumio, hypodd        # noqa: E402
 sys.path.insert(0, HERE)
 from save_results import save_results_one       # noqa: E402
 
-STATION, COMP, WIN, PRIMARY, MAXLAG = "KG.HDB", "HHZ", (-0.5, 7.5), (5, 25), 0.2
+STATION, COMP, WIN, MAXLAG = "KG.HDB", "HHZ", (-0.5, 7.5), 0.2
+BAND = (5, 25)              # clustering band — overridden by --band (e.g. 5-15)
+BT = ""                     # filename/slug suffix for the band: "" for 5-25, "_b515" for 5-15
+
+
+def _bt(band_str):
+    """Slug/filename suffix that keeps each band's outputs separate. '' for the default 5-25."""
+    return "" if band_str == "5-25" else "_b" + band_str.replace("-", "")
+
+
+def slug_for(fid):
+    return f"f{fid}{BT}_reuse"
+
+
+def outdir_for(fid):
+    return os.path.join(HERE, f"family{fid}{BT}")
 
 
 # --------------------------------------------------------------------------- family enumeration
 def family_table():
-    """The 5-25 Hz single-linkage CC>=0.9 repeater table (same clustering as make_catalog.py),
+    """The BAND-Hz single-linkage CC>=0.9 repeater table (same clustering as make_catalog.py),
     sorted largest-first. Columns include 'cluster' (family id) and 'n' (member count)."""
     kept = wf.make_bands(wf.list_events(station=STATION, comp=COMP), station=STATION, comp=COMP,
-                         bands=[PRIMARY, (1, 10), (2, 8), (4, 12)], win=WIN,
+                         bands=[BAND, (1, 10), (2, 8), (4, 12)], win=WIN,
                          cache_dir=wf.CACHE_DIR, verbose=False)["kept"]
     meta = wf.load_event_meta(kept)
-    tag = (f"{STATION}_{COMP}_w{WIN[0]}_{WIN[1]}_b{PRIMARY[0]}-{PRIMARY[1]}_lag{MAXLAG}_n{len(kept)}"
+    tag = (f"{STATION}_{COMP}_w{WIN[0]}_{WIN[1]}_b{BAND[0]}-{BAND[1]}_lag{MAXLAG}_n{len(kept)}"
            .replace(".", "p"))
     cc = np.load(os.path.join(wf.CACHE_DIR, f"cc_{tag}.npy"))
     labels, _, _ = wf.ward_clusters(cc, threshold=1 - 0.9, method="single")
@@ -135,8 +150,8 @@ def _rp(slug, stage_from, through, extra=()):
 
 # --------------------------------------------------------------------------- per-family run
 def run_family(fid, n, do_boot, boot_n, prior_status=None, redo=False):
-    slug = f"f{fid}_reuse"
-    outdir = os.path.join(HERE, f"family{fid}")
+    slug = slug_for(fid)
+    outdir = outdir_for(fid)
     t0 = time.perf_counter()
 
     def res(status, **kw):
@@ -152,7 +167,8 @@ def run_family(fid, n, do_boot, boot_n, prior_status=None, redo=False):
 
     stage = "make_catalog"
     try:
-        _script("make_catalog.py", "--family", str(fid), "--outdir", f"family{fid}")
+        _script("make_catalog.py", "--family", str(fid), "--outdir", f"family{fid}{BT}",
+                "--band", f"{BAND[0]}-{BAND[1]}")
         with open(os.path.join(outdir, "scaffold_args.txt")) as f:
             parts = f.read().split()               # "--epicenter LAT,LON --region-bounds A,B,C,D"
         epi, rb = parts[1], parts[3]
@@ -218,7 +234,15 @@ def main():
     ap.add_argument("--families", help="comma-separated subset of family ids")
     ap.add_argument("--limit", type=int, help="only the first N (largest) families — smoke test")
     ap.add_argument("--redo", action="store_true", help="ignore resume guards and re-run")
+    ap.add_argument("--band", default="5-25", help="clustering band, e.g. 5-25 (default) or 5-15 — keeps "
+                    "each band's slugs/dirs/manifest separate")
     a = ap.parse_args()
+
+    global BAND, BT, MANIFEST, LOG
+    BAND = tuple(int(x) for x in a.band.split("-"))
+    BT = _bt(a.band)
+    MANIFEST = os.path.join(HERE, f"batch_manifest{BT}.csv")
+    LOG = os.path.join(HERE, f"batch{BT}.log")
 
     rep = family_table()
     fam_n = {int(r.cluster): int(r.n) for r in rep.itertuples()}
@@ -234,7 +258,7 @@ def main():
         prior = manifest.get(fid, {}).get("status")
         r = run_family(fid, n, do_boot=not a.no_bootstrap, boot_n=a.boot_n,
                        prior_status=prior, redo=a.redo)
-        manifest[fid] = dict(family_id=fid, n=n, slug=f"f{fid}_reuse", status=r["status"],
+        manifest[fid] = dict(family_id=fid, n=n, slug=slug_for(fid), status=r["status"],
                              n_relocated=r["n_relocated"], t_seconds=round(r["t"], 1),
                              stage_failed=r["stage_failed"], error_msg=r["error_msg"][:300],
                              timestamp=_stamp())
