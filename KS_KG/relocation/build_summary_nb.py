@@ -97,6 +97,58 @@ viz.animate_seismicity(cfg, velmodel=VELMODEL, frame_from="svd", fps=ANIM_FPS,
 plt.close("all")                       # the FuncAnimation leaves an extra static fig open
 display(Image(filename=gif_path))""")
 
+md(r"""### Source dimensions to scale (Eshelby circular crack, $\Delta\sigma$ = 10 MPa)
+
+Each event is drawn as a circle of its **source radius** in the fault frame, so the rupture size is
+directly comparable to the inter-event spacing. Taking the **local magnitude as the moment magnitude**
+(ML $\approx$ Mw) and **Hanks & Kanamori (1979)** with the **9.05** constant,
+
+$$M_w = \tfrac{2}{3}\,\bigl(\log_{10} M_0 - 9.05\bigr) \;\Rightarrow\; M_0 = 10^{\,1.5\,M_w + 9.05}\ \text{[N·m]},$$
+
+and the **Eshelby (1957)** circular crack at stress drop $\Delta\sigma = 10$ MPa,
+
+$$\Delta\sigma = \tfrac{7}{16}\,\frac{M_0}{r^3} \;\Rightarrow\; r = \Bigl(\tfrac{7 M_0}{16\,\Delta\sigma}\Bigr)^{1/3}\ \text{[m]}.$$""")
+co(r"""from pipeline.core import sumio
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Circle
+
+DSIGMA = 10e6                                              # stress drop, Pa
+R = sumio.read_reloc(os.path.join(config.dtcc_dir(cfg), "hypoDD.reloc")).reset_index(drop=True)
+Mw = np.asarray(viz._mag_for(cfg, R.id), float)           # catalog ML, assumed = Mw (HypoDD .reloc mag is 0)
+Mw = np.where(np.isfinite(Mw), Mw, np.nanmedian(Mw))
+M0 = 10.0**(1.5 * Mw + 9.05)                              # seismic moment, N·m  (HK79 with 9.05)
+r_src = (7.0 * M0 / (16.0 * DSIGMA)) ** (1.0 / 3.0)       # Eshelby circular-crack radius, m
+print(f"ML(=Mw) {Mw.min():.2f}-{Mw.max():.2f} | M0 {M0.min():.1e}-{M0.max():.1e} N*m | "
+      f"source radius {r_src.min():.1f}-{r_src.max():.1f} m (median {np.median(r_src):.1f} m)")
+
+# fault-frame coordinates (SVD best-fit plane), metres relative to the cluster centroid
+xyz = np.c_[R.x, R.y, R.z].astype(float)
+normal = np.linalg.svd(xyz - xyz.mean(0))[2][-1]          # plane normal (smallest singular vector)
+sv = np.cross(normal, [0.0, 0.0, 1.0]); phi = np.arctan2(sv[0], sv[1])   # strike azimuth (x=E, y=N)
+along = R.x.values * np.sin(phi) + R.y.values * np.cos(phi)
+across = R.x.values * np.cos(phi) - R.y.values * np.sin(phi)
+_t = pd.to_datetime(R.time.astype(str))                   # robust: R.time holds obspy UTCDateTime objects
+tnorm = np.asarray((_t - _t.min()) / (_t.max() - _t.min()), float)   # 0..1 origin-time, float
+
+fig, ax = plt.subplots(1, 3, figsize=(15, 5), dpi=130)
+def panel(a, hx, hy, xl, yl, ttl, invert=False):
+    pc = PatchCollection([Circle((hx[i], hy[i]), r_src[i]) for i in range(len(R))],
+                         alpha=0.55, edgecolor="k", linewidth=0.4, cmap="coolwarm")
+    pc.set_array(tnorm); pc.set_clim(0, 1); a.add_collection(pc)
+    pad = r_src.max() * 1.4
+    a.set_xlim(hx.min() - pad, hx.max() + pad); a.set_ylim(hy.min() - pad, hy.max() + pad)
+    a.set_aspect("equal"); a.set_xlabel(xl); a.set_ylabel(yl); a.set_title(ttl)
+    if invert:
+        a.invert_yaxis()
+    return pc
+panel(ax[0], along, across, "Along-strike (m)", "Across-strike (m)", "Fault-plane map view")
+panel(ax[1], along, R.z.values, "Along-strike (m)", "Depth rel. to centroid (m)", "Along-strike section", invert=True)
+pc = panel(ax[2], across, R.z.values, "Across-strike (m)", "Depth rel. to centroid (m)", "Across-strike section", invert=True)
+cb = fig.colorbar(pc, ax=ax, fraction=0.022, pad=0.02); cb.set_label("origin time (0 = first, 1 = last)")
+fig.suptitle(rf"Family 738 (reuse) source patches to scale - Eshelby $\Delta\sigma$=10 MPa, "
+             rf"ML$\approx$Mw (HK79, 9.05);  r = {r_src.min():.0f}-{r_src.max():.0f} m")
+plt.show()""")
+
 md("""### HypoDD link map — inter-event differential-time connectivity""")
 co("""viz.link_maps(cfg, velmodel=VELMODEL); plt.show()""")
 
