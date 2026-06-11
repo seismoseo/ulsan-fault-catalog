@@ -114,7 +114,7 @@ co(r"""def src_radius(mw, dsigma=10e6):                # ML assumed = Mw; HK79 (
     return (7.0 * M0 / (16.0 * dsigma)) ** (1.0 / 3.0)            # source radius, m
 
 # same viz.fault_sections style as above, but markers drawn at the source radius TO SCALE
-viz.fault_sections(cfg, velmodel=VELMODEL, frame_from="svd", color_by="time",
+viz.fault_sections(cfg, velmodel=VELMODEL, frame_from="svd", color_by="time", show_bootstrap=True,
                    source_radius=src_radius,
                    source_label=r"Eshelby $\Delta\sigma$=10 MPa, ML$\approx$Mw (HK79 9.05)")
 plt.show()""")
