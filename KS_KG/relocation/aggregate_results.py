@@ -75,12 +75,15 @@ def master_table(rep, manifest):
     rows = []
     for r in rep.itertuples():
         fid = int(r.cluster); slug = f"f{fid}_reuse"
+        mrow = manifest.get(fid, {})
         A, D = _read_sum(slug), _read_reloc(slug)
         ah, az = _spread(A); dh, dz = _spread(D)
         bh, bz = _boot_medians(slug)
         rows.append(dict(
             id=fid, n=int(r.n), n_relocated=(len(D) if D is not None else 0),
-            status=manifest.get(fid, {}).get("status", "not_run"),
+            status=mrow.get("status", "not_run"),
+            stage_failed=mrow.get("stage_failed", ""),
+            note=(mrow.get("error_msg", "") or "")[:140],
             mean_cc=round(float(r.mean_cc), 3),
             lat_c=round(float(r.lat_c), 5), lon_c=round(float(r.lon_c), 5),
             depth_med_km=round(float(r.depth_med), 2),
@@ -155,6 +158,13 @@ def main():
         print(f"  relocated: {len(rel)} | median collapse_ratio {rel.collapse_ratio.median():.2f} | "
               f"median dt.cc horiz spread {rel.dtcc_spread_horiz_m.median():.0f} m | "
               f"median boot 95% horiz {rel.boot_horiz95_m.median():.0f} m")
+    # explicit tracking of the families that did NOT fully relocate (absolute-only / failed / not-run)
+    bad = df[~df.status.isin(RELOCATED)]
+    if len(bad):
+        bad[["id", "n", "status", "stage_failed", "note"]].to_csv(os.path.join(HERE, "failures.csv"),
+                                                                  index=False)
+        print(f"\n  {len(bad)} family/ies NOT fully relocated (-> failures.csv):")
+        print("   " + bad[["id", "n", "status", "stage_failed"]].to_string(index=False).replace("\n", "\n   "))
     if not a.no_map:
         master_map(rep, manifest)
     if not a.no_thumbs:

@@ -20,6 +20,7 @@ Usage:
 import argparse
 import csv
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -38,6 +39,8 @@ LOG = os.path.join(HERE, "batch.log")
 FIELDS = ["family_id", "n", "slug", "status", "n_relocated", "t_seconds",
           "stage_failed", "error_msg", "timestamp"]
 BOOT_CORES = 48
+STEP_TIMEOUT = 600          # s per subprocess step; HypoDD occasionally hangs on ill-conditioned tiny
+                            # families — kill the whole process group and fail that family, don't block.
 
 sys.path.insert(0, HYPO)
 import uf_waveform_similarity as wf            # noqa: E402
@@ -101,15 +104,33 @@ def n_reloc(slug):
         return 0
 
 
+def _run(cmd, cwd):
+    """Like subprocess.run(check=True) but with a STEP_TIMEOUT that kills the whole process GROUP
+    (so a hung HypoDD grandchild can't survive). A timeout surfaces as CalledProcessError(124) so the
+    existing per-step error handling treats it as a normal step failure."""
+    p = subprocess.Popen(cmd, cwd=cwd, env=ENV, text=True,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = p.communicate(timeout=STEP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.communicate()
+        raise subprocess.CalledProcessError(124, cmd, "", f"TIMEOUT after {STEP_TIMEOUT}s")
+    if p.returncode != 0:
+        raise subprocess.CalledProcessError(p.returncode, cmd, out, err)
+    return out
+
+
 def _script(name, *args):
-    return subprocess.run([PY, os.path.join(HERE, name), *args], cwd=HERE, env=ENV,
-                          check=True, capture_output=True, text=True)
+    return _run([PY, os.path.join(HERE, name), *args], HERE)
 
 
 def _rp(slug, stage_from, through, extra=()):
-    cmd = [PY, "-m", "pipeline.cli.run_pipeline", "--cluster", slug,
-           "--stage-from", stage_from, "--through", through, *extra]
-    return subprocess.run(cmd, cwd=PIPE, env=ENV, check=True, capture_output=True, text=True)
+    return _run([PY, "-m", "pipeline.cli.run_pipeline", "--cluster", slug,
+                 "--stage-from", stage_from, "--through", through, *extra], PIPE)
 
 
 # --------------------------------------------------------------------------- per-family run
