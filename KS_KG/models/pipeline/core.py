@@ -54,6 +54,12 @@ def preprocess_station(code, jday, base_dir):
             return None
         if nseg > cfg.MAX_SEGMENTS:
             print(f"  . [{code}] {jday}: {nseg} fragmented records — lossless merge (slow ~{nseg//400}s)")
+        # Anti-alias BEFORE down-sampling: obspy interpolate has no lowpass, so for >100 Hz stations
+        # (e.g. 200 Hz KG) the >50 Hz energy would fold onto the onsets. Zero-phase keeps picks on time.
+        if any(tr.stats.sampling_rate > cfg.SAMPLING_RATE for tr in stream):
+            stream.detrend("demean")
+            stream.taper(max_percentage=None, max_length=1.0)
+            stream.filter("lowpass", **cfg.ANTIALIAS)
         stream.interpolate(sampling_rate=cfg.SAMPLING_RATE)
         stream.merge(**cfg.MERGE)
         t_start = max(tr.stats.starttime for tr in stream)
@@ -245,6 +251,106 @@ def _pnplus_infer(net, meta, min_prob):
                 picks=picks, events=events, meta=meta)
 
 
+def _make_antialias_dataset_cls():
+    """Subclass EQNet's SeismicTraceIterableDataset so miniSEED reading lowpasses
+    before downsampling (EQNet's read_mseed linear-interpolates 250/200 -> 100 Hz
+    with NO anti-alias filter — fine for its 100 Hz training data, aliased here).
+
+    read_mseed is copied from EQNet eqnet/data/seismic_trace.py with the marked
+    insertion; the clone itself is never edited.
+    """
+    import logging
+    from collections import defaultdict
+
+    import fsspec
+    import obspy
+    import torch
+    from eqnet.data import SeismicTraceIterableDataset
+
+    class AntialiasSeismicTraceDataset(SeismicTraceIterableDataset):
+        def read_mseed(self, fname, response_path=None, response_xml=None,
+                       highpass_filter=False, sampling_rate=100):
+            try:
+                stream = obspy.Stream()
+                for tmp in fname.split(","):
+                    with fsspec.open(tmp, "rb") as fs:
+                        meta = obspy.read(fs, format="MSEED")
+                        if response_path is not None:
+                            inv = obspy.read_inventory(
+                                os.path.join(response_path, meta[0].id[:-1]) + ".xml")
+                            meta = meta.remove_sensitivity(inv)
+                        stream += meta
+                stream = stream.merge(fill_value="latest")
+                if (response_path is None) and (response_xml is not None):
+                    response = obspy.read_inventory(response_xml)
+                    stream = stream.remove_sensitivity(response)
+            except Exception as e:
+                print(f"Error reading {fname}:\n{e}")
+                return None
+
+            tmp_stream = obspy.Stream()
+            for trace in stream:
+                if len(trace.data) < 10:
+                    continue
+                if trace.stats.sampling_rate != sampling_rate:
+                    try:
+                        # --- anti-alias before downsampling (EQNet's read_mseed does not) ---
+                        if trace.stats.sampling_rate > sampling_rate:
+                            trace = trace.detrend("demean")
+                            trace = trace.taper(max_percentage=None, max_length=1.0)
+                            trace = trace.filter("lowpass", **config.ANTIALIAS)
+                        # ------------------------------------------------------------------
+                        trace = trace.interpolate(sampling_rate, method="linear")
+                    except Exception as e:
+                        print(f"Error resampling {trace.id}:\n{e}")
+                trace = trace.detrend("demean")
+                if highpass_filter > 0.0:
+                    trace = trace.filter("highpass", freq=highpass_filter)
+                tmp_stream.append(trace)
+
+            if len(tmp_stream) == 0:
+                return None
+            stream = tmp_stream
+
+            begin_time = min([st.stats.starttime for st in stream])
+            end_time = max([st.stats.endtime for st in stream])
+            stream = stream.trim(begin_time, end_time, pad=True, fill_value=0)
+
+            comp = ["3", "2", "1", "E", "N", "Z"]
+            comp2idx = {"3": 0, "2": 1, "1": 2, "E": 0, "N": 1, "Z": 2}
+
+            station_ids = defaultdict(list)
+            for tr in stream:
+                station_ids[tr.id[:-1]].append(tr.id[-1])
+                if tr.id[-1] not in comp:
+                    print(f"Unknown component {tr.id[-1]}")
+
+            station_keys = sorted(list(station_ids.keys()))
+            nx = len(station_ids)
+            nt = len(stream[0].data)
+            data = np.zeros([3, nt, nx], dtype=np.float32)
+            for i, sta in enumerate(station_keys):
+                for c in station_ids[sta]:
+                    j = comp2idx[c]
+                    if len(stream.select(id=sta + c)) == 0:
+                        print(f"Empty trace: {sta+c} {begin_time}")
+                        continue
+                    trace = stream.select(id=sta + c)[0]
+                    if sta[-1] == "N":
+                        trace = trace.integrate().filter("highpass", freq=1.0)
+                    tmp = trace.data.astype("float32")
+                    data[j, : len(tmp), i] = tmp[:nt]
+
+            return {
+                "waveform": torch.from_numpy(data),
+                "station_id": station_keys,
+                "begin_time": begin_time.datetime.isoformat(timespec="milliseconds"),
+                "dt_s": 1 / sampling_rate,
+            }
+
+    return AntialiasSeismicTraceDataset
+
+
 def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existing=True,
                               device=None, workers=0, force=False, min_prob=None, highpass=None):
     """EQNet PhaseNet+ detection backend (in-process; no wandb, no edits to the EQNet clone).
@@ -264,7 +370,7 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
     if config.EQNET_DIR not in sys.path:
         sys.path.insert(0, config.EQNET_DIR)
     import eqnet  # noqa: F401
-    from eqnet.data import SeismicTraceIterableDataset
+    DatasetCls = _make_antialias_dataset_cls()       # anti-aliased read_mseed (200 Hz KG -> 100 Hz)
 
     min_prob = config.PNPLUS_MIN_PROB if min_prob is None else min_prob
     highpass = config.PNPLUS_HIGHPASS if highpass is None else highpass
@@ -307,7 +413,7 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
         try:
             # NOTE: build with cut_patch=False (its __init__ _count() only supports cut_patch for
             # HDF5), then enable time-tiling on the instance — sample() honors it at iteration.
-            dataset = SeismicTraceIterableDataset(
+            dataset = DatasetCls(
                 data_path="", data_list=list_path, format="mseed", dataset="seismic_trace",
                 training=False, sampling_rate=config.SAMPLING_RATE, highpass_filter=highpass,
                 cut_patch=False, nt=config.PNPLUS_NT,
@@ -365,7 +471,7 @@ def annotate_phasenet_plus(year, day, station, t0=0.0, t1=600.0, device=None, mi
     if config.EQNET_DIR not in sys.path:
         sys.path.insert(0, config.EQNET_DIR)
     import eqnet  # noqa: F401
-    from eqnet.data import SeismicTraceIterableDataset
+    DatasetCls = _make_antialias_dataset_cls()       # anti-aliased read_mseed (200 Hz KG -> 100 Hz)
 
     min_prob = config.PNPLUS_MIN_PROB if min_prob is None else min_prob
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -391,7 +497,7 @@ def annotate_phasenet_plus(year, day, station, t0=0.0, t1=600.0, device=None, mi
         tf.write(",".join(comps))
         list_path = tf.name
     try:
-        dataset = SeismicTraceIterableDataset(
+        dataset = DatasetCls(
             data_path="", data_list=list_path, format="mseed", dataset="seismic_trace",
             training=False, sampling_rate=sr, highpass_filter=config.PNPLUS_HIGHPASS,
             cut_patch=False, nt=config.PNPLUS_NT)

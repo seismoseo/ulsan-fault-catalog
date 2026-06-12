@@ -26,6 +26,9 @@ VELOCITY_CSV = os.path.join(ROOT, "velocity_model", "kim1983.csv")
 # Verified uniform across 2010-2024.
 SAMPLING_RATE = 100.0
 PAD_TIME = 10.0
+# Anti-alias lowpass applied BEFORE any down-sample to SAMPLING_RATE (e.g. 200 Hz KG stations).
+# 45 Hz = 0.9 * new Nyquist (50 Hz), leaving a guard band; zero-phase keeps onset times put.
+ANTIALIAS = dict(freq=45.0, corners=8, zerophase=True)
 BANDPASS = dict(freqmin=1.0, freqmax=40.0, corners=4, zerophase=False)
 MERGE = dict(method=1, fill_value=0)
 P_THRESHOLD = 0.2
