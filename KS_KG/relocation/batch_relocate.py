@@ -228,6 +228,7 @@ def write_manifest(m):
 
 # --------------------------------------------------------------------------- main
 def main():
+    global BAND, BT, MANIFEST, LOG, STEP_TIMEOUT
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--no-bootstrap", action="store_true", help="skip the bootstrap step")
     ap.add_argument("--boot-n", type=int, default=200, help="bootstrap replicas per family (default 200)")
@@ -236,9 +237,12 @@ def main():
     ap.add_argument("--redo", action="store_true", help="ignore resume guards and re-run")
     ap.add_argument("--band", default="5-25", help="clustering band, e.g. 5-25 (default) or 5-15 — keeps "
                     "each band's slugs/dirs/manifest separate")
+    ap.add_argument("--step-timeout", type=int, default=STEP_TIMEOUT,
+                    help="per-step subprocess timeout in s (default 600). Raise for large families whose "
+                    "dt.cc legitimately needs longer, e.g. --step-timeout 3600 --families 928 --redo")
     a = ap.parse_args()
 
-    global BAND, BT, MANIFEST, LOG
+    STEP_TIMEOUT = a.step_timeout
     BAND = tuple(int(x) for x in a.band.split("-"))
     BT = _bt(a.band)
     MANIFEST = os.path.join(HERE, f"batch_manifest{BT}.csv")

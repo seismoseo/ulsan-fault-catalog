@@ -1,5 +1,6 @@
 # generated artifacts (reproducible via run.sh / run_all.sh / build_*_nb.py)
-family*/          # per-family dirs (catalog, members, reloc tables, thumbnails) — regenerable
+# per-family dirs (catalog, members, reloc tables, thumbnails) — regenerable; aggregates force-added below
+family*/
 batch*.log
 *.ipynb
 __pycache__/
