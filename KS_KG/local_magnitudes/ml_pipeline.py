@@ -144,6 +144,7 @@ def remove_response_to_disp(stream, inventory, *,
 
 
 def wood_anderson_amp_mm(stream_disp, *,
+                         require_pick=True,
                          noise_pre_pad=1.0,
                          noise_fallback_s=20.0,
                          signal_min_after_p=0.5) -> pd.DataFrame:
@@ -152,14 +153,23 @@ def wood_anderson_amp_mm(stream_disp, *,
     **together with a pre-event noise RMS and the resulting SNR**.
 
     Windowing:
-      * **noise window** : from trace start to ``(P_pick − noise_pre_pad) s``,
-        falling back to the first ``noise_fallback_s`` seconds of the trace if
-        no P pick header (`SAC.a`) is set.
+      * **noise window** : from trace start to ``(P_pick − noise_pre_pad) s``.
       * **signal window**: from ``(P_pick + signal_min_after_p) s`` to the end
         of the trace. The peak Wood-Anderson amplitude is the max of |WA| inside
         this window — restricting the search to post-P avoids picking pre-event
         noise spikes as the "peak" (the v1.0.0 behaviour, which inflated small-
         event MLs and biased the b-value upward).
+
+    ``require_pick`` (default True, the CORRECT behaviour) skips any trace that has
+    no P-pick header (`SAC.a`). A station with no pick is one where the phase was
+    not detected (signal not above noise), so it must not contribute: without a pick
+    the noise window has no real anchor and falls back to the trace start, the SNR
+    test is meaningless, and unpicked far stations sitting at the ambient/coda
+    amplitude FLOOR leak in. Their amplitude is flat with distance, so the distance
+    term over-corrects them up to station ML ~1 and — being the majority for small
+    events — saturates small-event ML / inflates Mc (the Buan bug, commit fd7800a).
+    Pass ``require_pick=False`` ONLY to reproduce the buggy all-station result for a
+    diagnostic; the ``noise_fallback_s`` window is used only on that path.
 
     Returns one row per trace with:
         network, station, channel, peak_mm, peak_time, noise_mm, snr.
@@ -170,21 +180,19 @@ def wood_anderson_amp_mm(stream_disp, *,
     aggregation."""
     rows = []
     for tr in stream_disp:
+        # Detectability gate: the phase must have been picked HERE (SAC.a set), else
+        # the SNR test below has no real pre-P anchor — skip it (see require_pick).
+        sac = getattr(tr.stats, "sac", {}) or {}
+        p_rel = None
+        if "a" in sac and float(sac["a"]) > -1e4:                     # SAC -12345 sentinel
+            p_rel = float(sac["a"])
+        if require_pick and p_rel is None:
+            continue
         wa = tr.copy().simulate(paz_simulate=WOOD_ANDERSON_PAZ)
         data_mm = np.asarray(wa.data, dtype=float) * 1000.0          # m → mm
         if not len(data_mm):
             continue
         sr = float(wa.stats.sampling_rate)
-        # Locate the P pick (origin-relative seconds in SAC.a). Convert to a
-        # sample index inside the trace by adding the offset between trace
-        # starttime and reference time. SAC `o` is the reference offset; when
-        # the export wrote picks relative to origin while leaving o=0, the
-        # picks happen to BE relative to starttime (which is what `tr.times()`
-        # is also relative to), so we can use a directly as seconds-from-start.
-        sac = getattr(tr.stats, "sac", {}) or {}
-        p_rel = None
-        if "a" in sac and float(sac["a"]) > -1e4:                     # SAC -12345 sentinel
-            p_rel = float(sac["a"])
         # Noise window (sample indices) — pre-P, with a small pad
         if p_rel is not None and p_rel > noise_pre_pad + 0.5:
             i_noise_end = int((p_rel - noise_pre_pad) * sr)
@@ -280,9 +288,31 @@ def ml_heo2024(amp_mm, distance_km, component=None):
 
 
 # --- per-station ML aggregator ---------------------------------------------
+def _auto_pre_filt(attenuation_fn):
+    """Auto-resolve the response-removal pre_filt bandpass for the chosen attenuation
+    formula. Each tuple matches the original calibration paper's preprocessing:
+
+      * Heo 2024 §4.2 — strict 2–20 Hz cosine bandpass (micro-event spectrum).
+      * Sheen 2018 §Data and Preliminary Analysis (p. 2749) — "filtered with a
+        0.5–10 Hz, six-pole Butterworth band-pass filter to suppress microseismic
+        noise." We use a cosine-tapered (0.3, 0.5, 10.0, 12.0) pre_filt in the
+        response-removal step to approximate Sheen's 0.5–10 Hz passband; the cosine
+        taper rolloff at the band edges is gentler than a 6-pole Butterworth but
+        the in-band response is flat to within ~0.5 dB, which is well below the
+        Wood-Anderson + amplitude-measurement noise floor.
+
+    Returns a 4-tuple suitable for ``ObsPy.remove_response(pre_filt=…)``."""
+    if attenuation_fn is ml_heo2024:
+        return (1.0, 2.0, 20.0, 22.0)     # Heo 2024 §4.2: 2–20 Hz cosine bandpass
+    if attenuation_fn is ml_sheen2018:
+        return (0.3, 0.5, 10.0, 12.0)     # Sheen 2018: 0.5–10 Hz (paper §Data p.2749)
+    # Unknown formula: default to Heo's tight band (safe for micro-events)
+    return (1.0, 2.0, 20.0, 22.0)
+
+
 def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
-                   pre_filt=(1.0, 2.0, 20.0, 22.0), water_level=60.0,
-                   snr_threshold=3.0, z_only=None) -> pd.DataFrame:
+                   pre_filt=None, water_level=60.0,
+                   snr_threshold=3.0, z_only=None, require_pick=True) -> pd.DataFrame:
     """For one event directory (per the export tree), compute ML at every station-channel.
 
     Reads all `*.sac` files in `event_dir` (expected layout: one per station-channel,
@@ -305,6 +335,9 @@ def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
     # whenever the attenuation_fn is `ml_heo2024` (user can pass z_only=False to opt out).
     if z_only is None:
         z_only = (attenuation_fn is ml_heo2024)
+    # Heo 2024 vs Sheen 2018 need different bandpasses; auto-resolve if not specified.
+    if pre_filt is None:
+        pre_filt = _auto_pre_filt(attenuation_fn)
     sacs = sorted(glob.glob(os.path.join(event_dir, "*.sac")))
     if not sacs:
         return pd.DataFrame()
@@ -323,7 +356,7 @@ def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
     disp = remove_response_to_disp(st, inventory, pre_filt=pre_filt, water_level=water_level)
     if not len(disp):
         return pd.DataFrame()
-    amps = wood_anderson_amp_mm(disp)
+    amps = wood_anderson_amp_mm(disp, require_pick=require_pick)
     if not len(amps):
         return pd.DataFrame()
     amps["dist_km"] = [dist_for.get((r.network, r.station, r.channel), np.nan)
@@ -384,8 +417,10 @@ def _event_dir_for(time_str, event_roots) -> str | None:
 
 def export_ml_catalog(catalog_df, event_roots, inventory, *,
                       attenuation_fn=None, restrict_to_z=None,
-                      snr_threshold=3.0,
+                      pre_filt=None,
+                      snr_threshold=3.0, require_pick=True,
                       workers=1, skip_existing=True, out_path=None,
+                      per_station_csv_path=None,
                       progress=True) -> pd.DataFrame:
     """Compute event-level ML for every row of ``catalog_df`` and return the catalog
     with four new columns:
@@ -445,6 +480,9 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
     # Auto-resolve Z-only based on the attenuation formula (Heo 2024 → Z-only).
     if restrict_to_z is None:
         restrict_to_z = (attenuation_fn is ml_heo2024)
+    # Auto-resolve pre_filt bandpass for the chosen attenuation formula.
+    if pre_filt is None:
+        pre_filt = _auto_pre_filt(attenuation_fn)
 
     out = catalog_df.copy()
     for col, default in (("magnitude", np.nan), ("magnitude_std", np.nan),
@@ -473,6 +511,13 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
     else:
         todo_iter = todo_idx
 
+    # Per-station rows accumulator (one row per event-station-channel) — flushed
+    # periodically to per_station_csv_path when set, so a kill leaves a valid CSV.
+    # Kept thread-safe via a lock; workers append, the flusher reads.
+    from threading import Lock
+    _ps_rows: list[dict] = []
+    _ps_lock = Lock()
+
     def _compute_one(i):
         ev_dir = _event_dir_for(out.at[i, "time"], event_roots)
         if ev_dir is None:
@@ -480,8 +525,18 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
         try:
             per_sta = per_station_ml(ev_dir, inventory,
                                      attenuation_fn=attenuation_fn,
+                                     pre_filt=pre_filt,
                                      snr_threshold=snr_threshold,
-                                     z_only=restrict_to_z)
+                                     z_only=restrict_to_z,
+                                     require_pick=require_pick)
+            # Persist per-station rows when requested. The ML column is the post-SNR
+            # value (NaN when SNR < threshold); downstream consumers can compute the
+            # correction from any non-NaN subset.
+            if per_station_csv_path is not None and len(per_sta):
+                ev_time = str(out.at[i, "time"])
+                rows = per_sta.assign(event_idx=int(i), event_time=ev_time).to_dict("records")
+                with _ps_lock:
+                    _ps_rows.extend(rows)
             agg = aggregate_ml(per_sta)
             if agg["n_used"] == 0:
                 status = "no_picks" if agg["n_total"] == 0 else "low_snr"
@@ -494,6 +549,16 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
     def _flush():
         if out_path:
             out.to_csv(out_path, index=False)
+        # Stream the per-station accumulator to the side CSV (append-mode after
+        # the first flush so we don't re-write 1M+ rows every chunk).
+        if per_station_csv_path is not None:
+            with _ps_lock:
+                if _ps_rows:
+                    first = not os.path.exists(per_station_csv_path)
+                    pd.DataFrame(_ps_rows).to_csv(per_station_csv_path,
+                                                  mode="a" if not first else "w",
+                                                  header=first, index=False)
+                    _ps_rows.clear()
 
     def _apply(idx, ml, std, n, n_tot, snr_med, st):
         out.at[idx, "magnitude"]     = ml
@@ -523,3 +588,92 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
     if hasattr(todo_iter, "close"):
         todo_iter.close()
     return out
+
+
+# --- station-correction helpers (Heo 2024 §4.2 S term, estimated from this catalog) ----
+def estimate_station_corrections(per_station_csv: str, *, min_events: int = 30,
+                                 use_z_only: bool | None = None) -> pd.DataFrame:
+    """Estimate per-station magnitude corrections **S_j** from a per-station ML CSV
+    produced by ``export_ml_catalog(..., per_station_csv_path=...)``.
+
+    Method (matches Heo et al. 2024 § 4.2): for each event ``i`` and station-channel
+    ``j``, compute the residual ``r_{i,j} = ML_{i,j} − median_j(ML_{i,j})`` (the
+    deviation of the station's ML from the event-median). The station correction is
+    then ``S_j = median_i(r_{i,j})`` — the systematic bias of station j across all
+    events it observed. Stations with fewer than ``min_events`` contributing events
+    get ``S_j = 0`` (insufficient stats; keep neutral so we don't introduce noise).
+
+    Parameters
+    ----------
+    per_station_csv : str
+        Path to the per-station ML CSV written by ``export_ml_catalog``. Must have
+        columns ``event_idx, network, station, channel, ML``.
+    min_events : int, default 30
+        Stations with fewer than this many event-contributions get S_j = 0.
+    use_z_only : bool | None
+        Filter to Z-only channels (``channel.endswith('Z')``) before estimation.
+        ``None`` (default) keeps whatever channels the CSV already has — appropriate
+        when the upstream ``per_station_ml`` already filtered (Heo's ``z_only=True``).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``station_key`` (NET.STA.CHAN), ``S_j``, ``n_events`` — one row per
+        unique station-channel that contributed to any event. Sorted by ``S_j``.
+    """
+    psm = pd.read_csv(per_station_csv)
+    if "ML" not in psm.columns:
+        raise ValueError(f"per_station_csv {per_station_csv} missing 'ML' column")
+    psm = psm.dropna(subset=["ML"]).copy()
+    if use_z_only:
+        psm = psm[psm["channel"].str.endswith("Z")]
+    # Event-median ML (over all stations contributing to event i)
+    ev_med = psm.groupby("event_idx")["ML"].transform("median")
+    psm["residual"] = psm["ML"] - ev_med
+    # Station-key: NET.STA.CHAN to disambiguate same-name stations across networks
+    psm["station_key"] = (psm["network"].astype(str) + "." +
+                          psm["station"].astype(str) + "." +
+                          psm["channel"].astype(str))
+    out = (psm.groupby("station_key")
+              .agg(S_j=("residual", "median"), n_events=("residual", "size"))
+              .reset_index())
+    # Stations with too few observations → neutral correction (don't add noise)
+    out.loc[out["n_events"] < min_events, "S_j"] = 0.0
+    return out.sort_values("S_j").reset_index(drop=True)
+
+
+def apply_station_corrections(per_station_csv: str,
+                              station_corrections: pd.DataFrame) -> pd.DataFrame:
+    """Re-aggregate event MLs after subtracting per-station S_j corrections.
+
+    Produces a per-event DataFrame with ``magnitude_corr``, ``magnitude_std_corr``,
+    ``n_used_corr`` columns. Combine with the original catalog by ``event_idx``.
+
+    Parameters
+    ----------
+    per_station_csv : str
+        Same CSV as for ``estimate_station_corrections``.
+    station_corrections : pd.DataFrame
+        Output of ``estimate_station_corrections`` — must have ``station_key`` and
+        ``S_j`` columns. Missing stations get S_j = 0.
+
+    Returns
+    -------
+    pd.DataFrame
+        Per-event aggregates with the corrected magnitudes. Index = event_idx.
+    """
+    psm = pd.read_csv(per_station_csv).dropna(subset=["ML"]).copy()
+    psm["station_key"] = (psm["network"].astype(str) + "." +
+                          psm["station"].astype(str) + "." +
+                          psm["channel"].astype(str))
+    corr_map = dict(zip(station_corrections["station_key"],
+                        station_corrections["S_j"]))
+    psm["S_j"] = psm["station_key"].map(corr_map).fillna(0.0)
+    psm["ML_corr"] = psm["ML"] - psm["S_j"]
+    # Per-event aggregation
+    grp = psm.groupby("event_idx")["ML_corr"]
+    return pd.DataFrame({
+        "magnitude_corr": grp.median(),
+        "magnitude_std_corr": grp.std(),
+        "n_used_corr": grp.size(),
+    })
