@@ -275,51 +275,62 @@ correlate too but separate by hour-of-day + location).
   curve (§3b) + **per-year subregion small-multiples** (`uf.annual_maps`, depth-coloured epicenters + density
   normalised **per-year** so quiet years aren't washed out — colorbar = fraction of that year's peak; edge-only
   ticks). Single equal-aspect maps height-match their colorbar via `uf._match_cbar`.
-- **#1 gap**: HYPOINVERSE `.sum` `MAG` column is empty → no magnitudes ⇒ no FMD/Mc/b-value yet. Top TODO:
-  compute **Md** (coda duration via HYPOINVERSE) or **ML** (Wood–Anderson amplitudes + station corrections).
+- ~~**#1 gap**: no magnitudes~~ → **DONE**: local magnitudes computed (Wood–Anderson ML, Heo 2024 +
+  Sheen 2018) with the `require_pick` detectability gate; FMD / Mc / b-value + temporal evolution in
+  `local_magnitudes/` (see the Local-magnitudes section). Heo 2024 is the representative ML.
 - Later: 3-picker comparison once re-runs finish; **HypoDD** relative relocation.
 
-## Local magnitudes — Heo 2024 + Sheen 2018 (added 2026-06-02)
+## Local magnitudes — Heo 2024 + Sheen 2018 (require_pick fix + strict recompute, 2026-06-16)
 
 `KS_KG/local_magnitudes/ml_pipeline.py` deconvolves each event's response, simulates Wood-Anderson
-(paz_wa sensitivity 2080, Uhrhammer & Collins 1990), measures peak amplitude post-P with SNR ≥ 3
-filtering, and converts to ML via two attenuation laws:
+(sensitivity 2080, Uhrhammer & Collins 1990), measures peak post-P amplitude with SNR ≥ 3, and
+converts to ML via two attenuation laws.
 
-- **Heo 2024** (GHBSN micro-event calibration, 2–20 Hz bandpass via `pre_filt=(1.0, 2.0, 20.0, 22.0)`,
-  Z-component only, R=17 km reference): `ml_pipeline.ml_heo2024`.
-- **Sheen 2018** (S. Korea broader-network calibration, **0.5–10 Hz** bandpass via
-  `pre_filt=(0.3, 0.5, 10.0, 12.0)`, all 3 components with separate Z vs N/E coefficients,
-  R=100 km reference): `ml_pipeline.ml_sheen2018`.
+**Detectability gate `require_pick=True` (the key bug fix).** Earlier ML had no gate, so a station
+with **no P pick** fell back to a 20 s trace-start noise window → meaningless SNR → far unpicked KS/KG
+stations (60–100 km) at the ambient/coda amplitude **floor** leaked into the event median. Their
+amplitude is flat with distance, so the −logA₀(R) term over-corrected them up to station ML ≈ 1,
+**saturating small-event ML and inflating b** (the same bug found + fixed in the 2024 Buan project).
+`wood_anderson_amp_mm` / `per_station_ml` / `export_ml_catalog` now skip traces with no detected phase
+(picks are written to all 3 components, so a picked station keeps its horizontals, an unpicked one drops).
 
-**Headline result (15,762 blast-clean events 2010–2024)**:
+**Strict per paper, NO station-correction term:**
+- **Heo 2024** — **vertical only** (paper calibration), hypocentral R, 17 km ref, +2.0: `ml_heo2024`.
+- **Sheen 2018** — all 3 components (geom-mean horizontals + Z), epicentral R, 100 km ref, +3.0: `ml_sheen2018`.
+- Bulk driver: **`run_bulk_ml_both.py`** (both scales, strict) → `catalog_…_with_ml_heo.csv` + `…_with_ml_sheen.csv`.
 
-| Scale | Mc_MAXC / Mc_KS | _b_ (MAXC) | _b_ (KS) | 2016-09 step | Gyeongju M5.8 |
-|---|---|---|---|---|---|
-| Heo 2024 raw | 0.90 / 1.4 | 1.15 ± 0.02 | — | **+0.296 ML** | 5.3 (Δ = −0.5) |
-| Sheen 2018 raw | 1.50 / 1.9 | 1.51 ± 0.03 | **0.79 ± 0.03** | **+0.000 ML** | **5.7 (Δ = −0.1)** |
+**Heo 2024 is the representative ML** for this vertical-dominated dense micro-earthquake catalogue.
 
-**Sheen 2018 is the production ML scale**: time-stable across the 2016-09 KG-network densification
-(median ML 1.30 pre- and post-, +0.000 ML step) and recovers KMA's Gyeongju M5.8 mainshock to within
-0.1 ML without any station corrections. Heo 2024's +0.296 ML step is the close-station inflation
-that Sheen's 100-km reference distance + broader bandpass naturally avoids. Sheen's higher Mc (1.50
-vs Heo's 0.90) reflects that the 0.5–10 Hz bandpass loses sub-M1 detection relative to Heo's
-2–20 Hz micro-tuned passband.
+**Result (14,775 events with ML — the SAME set for both scales)**:
+
+| Scale | median ML | Mc (MAXC) | _b_ ± SE | Gyeongju M5.8 |
+|---|---|---|---|---|
+| **Heo (Z-only)**  | **0.34** | **0.50** | **0.77** | 5.40 (Δ ≈ −0.4) |
+| Sheen (3-comp)    | 1.14 | 1.30 | 1.31 | cross-check |
+
+The fix de-saturated the FMD (Heo: median 0.71→0.34, Mc 0.80→0.50, **b 1.03→0.77**); large events are
+pick-rich and unchanged. **Heo vs Sheen** (`07`): same events, related by **Sheen ≈ 0.96 + 0.59·Heo** —
+the +0.8 level is the **component basis** (horizontal-dominated 3-comp median vs vertical-only), **not**
+the distance law (formula ΔML(R) ≈ 0); the **0.59 slope** (Heo's steeper distance term) **sets the
+b-value ratio** `b_Sheen = b_Heo / 0.59 ≈ 1.7×`.
 
 The notebook chain:
-- `02.Compute_ML_all_events.ipynb` — bulk ML pass (per-station + event-level CSVs)
-- `03.Magnitude_summary.ipynb` — Heo 2024 + per-station S-term corrections (§12)
-- `04.Catalog_quality_audit.ipynb` — **uses PyOcto assignments + HypoInverse arc residuals**
-  (NOT the time-window pick CSV — see Gotchas below)
-- `05.Magnitude_summary_corrected.ipynb` — Heo + corrections branch (deprecated in favour of Sheen)
-- `06.Magnitude_summary_sheen.ipynb` — **the production Sheen 2018 summary** (FMD with both MAXC + KS
-  Mc, sliding-window Mc overlay on magnitude-vs-time, Gyeongju benchmarks vs KMA, n_used stratification,
-  shallow/deep _b_-value split, PyGMT map, Heo-vs-Sheen cross-check)
+- `02.Compute_ML_all_events.ipynb` — bulk pass (strict Heo Z-only config; superseded operationally by `run_bulk_ml_both.py`).
+- `03.Magnitude_summary.ipynb` — **the Heo summary**: FMD / Mc / b per subregion, size-scaled PyGMT maps,
+  and **§11 temporal completeness & b-value evolution** (sliding-window MAXC `Mc(t)` + Aki–Utsu `b(t)` ±
+  Shi–Bolt SE, SeismoStats), for the **full catalog and the Ulsan-Fault subregion**.
+- `04.Catalog_quality_audit.ipynb` — duplicates / pick consistency / mislocations (**uses PyOcto
+  assignments + HypoInverse arc residuals**, NOT the time-window pick CSV — see Gotchas).
+- `06.Magnitude_summary_sheen.ipynb` — Sheen 2018 cross-check (FMD, temporal Mc, Gyeongju benchmarks).
+- `07.Heo_vs_Sheen_comparison.ipynb` — event-by-event Heo vs Sheen (why they differ; the b-value link).
 
-**Per-station correction caveat**: the Heo S-term correction (`ml_pipeline.estimate_station_corrections`,
-`apply_station_corrections`) is calibrated against the network consensus, which itself drifts when
-the network composition changes. Pre-2017 events get over-corrected (+0.2 ML lift) because the
-S_j is dominated by post-2017 KS+KG-mixed residuals. **Don't use Heo+corrections as the
-production scale**; use Sheen 2018 raw instead, which is intrinsically time-invariant.
+(Removed in the strict cleanup: notebook `05.Magnitude_summary_corrected.ipynb` and the experimental
+trial catalogs `…_heo_corrected / _deduped / _v3_heo_no_corrections / _NO_SNR / _SNR3_legacyfilt`.)
+
+**Station corrections** (`ml_pipeline.estimate_station_corrections` / `apply_station_corrections`) are
+**kept but dormant** — the strict published scales use no S term. They were dropped because the S_j is
+calibrated against a network consensus that itself drifts across the 2016-09 KG densification, over-
+correcting pre-2017 events.
 
 ## Catalog quality audit + SAC-export refactor (2026-06-02)
 
