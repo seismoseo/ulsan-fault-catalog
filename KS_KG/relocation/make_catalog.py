@@ -26,8 +26,7 @@ ML_CSV = ("/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/local_magnitudes/"
           "catalog_phasenet_plus_2010_2024_blastclean_with_ml.csv")
 KST_OFFSET_H = 9.0
 STATION, COMP, WIN, PRIMARY, MAXLAG = "KG.HDB", "HHZ", (-0.5, 7.5), (5, 25), 0.2
-sys.path.insert(0, HYPO)
-import uf_waveform_similarity as wf   # noqa: E402
+from uflib import uf_waveform_similarity as wf   # noqa: E402
 
 
 def family_members(family="largest", band=(5, 25)):

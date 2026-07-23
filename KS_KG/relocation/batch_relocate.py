@@ -42,8 +42,7 @@ BOOT_CORES = 48
 STEP_TIMEOUT = 600          # s per subprocess step; HypoDD occasionally hangs on ill-conditioned tiny
                             # families — kill the whole process group and fail that family, don't block.
 
-sys.path.insert(0, HYPO)
-import uf_waveform_similarity as wf            # noqa: E402
+from uflib import uf_waveform_similarity as wf            # noqa: E402
 sys.path.insert(0, PQ); sys.path.insert(0, PIPE)
 from pipeline import config                    # noqa: E402
 from pipeline.core import sumio, hypodd        # noqa: E402

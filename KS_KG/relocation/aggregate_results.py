@@ -24,8 +24,7 @@ import pygmt_reloc_map as PM                            # noqa: E402  (_ufc, _pl
 sys.path.insert(0, B.PQ); sys.path.insert(0, B.PIPE)
 from pipeline.core import sumio                          # noqa: E402
 from obspy.geodetics.base import gps2dist_azimuth        # noqa: E402
-sys.path.insert(0, B.HYPO)
-import uf_waveform_similarity as wf                      # noqa: E402
+from uflib import uf_waveform_similarity as wf                      # noqa: E402
 
 MASTER = os.path.join(HERE, "master_metrics.csv")        # reassigned per band in main()
 MASTER_MAP = os.path.join(HERE, "master_map_relocated.png")

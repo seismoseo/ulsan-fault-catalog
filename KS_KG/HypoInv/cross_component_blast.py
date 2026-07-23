@@ -12,7 +12,7 @@ import os
 import numpy as np
 import pandas as pd
 
-import uf_waveform_similarity as wf
+from uflib import uf_waveform_similarity as wf
 
 STATION   = "KG.HDB"
 WIN       = (-0.5, 7.5)

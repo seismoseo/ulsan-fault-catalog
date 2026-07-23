@@ -41,8 +41,7 @@ def _square(clat, clon, half_km):
 
 def _ufc():
     """Lazy import of the Ulsan-fault helper (SUBREGION extent + fault traces + plot_faults)."""
-    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "HypoInv"))
-    import uf_cluster as ufc
+    from uflib import uf_cluster as ufc
     return ufc
 
 
