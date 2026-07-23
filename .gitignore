@@ -84,3 +84,23 @@ build/
 *.cpt
 gmt.history
 **/gmt.history
+
+# ---- tidy-up (2026-07): moved locations ----
+archive/00.Summary_figures_Zhigang.ipynb
+notebooks/02.Multi-station_detection.ipynb
+docs/planning/gyeongju_catalog/**/*.ipynb  # planning-run notebooks
+
+# ---- analysis/local_magnitudes large regenerable outputs (were gitignored under KS_KG/*) ----
+analysis/local_magnitudes/responses/master/
+analysis/local_magnitudes/*per_station*.csv
+analysis/local_magnitudes/*.npz
+**/*.epicentral_bak
+
+# ---- HypoDD residuals + SVD-volume outputs (regenerable, large) ----
+analysis/uf_subregion_hypodd/**/hypoDD.res
+analysis/uf_subregion_hypodd/svd_volumes*/
+analysis/**/*.gif
+
+# ---- metadata: keep small station tables; the big external StationXML/PDF are data ----
+data/metadata/KIGAM_metadata/*.xml
+data/metadata/GHBSN_catalog_Heoetal/*.pdf

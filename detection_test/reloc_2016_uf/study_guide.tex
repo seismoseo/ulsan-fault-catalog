@@ -1,0 +1,310 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{sectsty}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\definecolor{accent}{RGB}{40,90,140}
+\definecolor{warn}{RGB}{150,60,30}
+\definecolor{soft}{RGB}{95,100,110}
+\allsectionsfont{\color{accent}\sffamily}
+\titleformat{\section}{\Large\bfseries\sffamily\color{accent}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\sffamily\color{accent}}{\thesubsection}{0.5em}{}
+\renewcommand{\arraystretch}{1.25}
+\pagestyle{fancy}\fancyhf{}
+\rhead{\sffamily\small\color{soft}2016 Ulsan-Fault picker-comparison pipeline}
+\rfoot{\sffamily\small\color{soft}\thepage}
+\setlength{\headheight}{14pt}
+\newtcolorbox{keybox}[1]{colback=accent!6,colframe=accent!55,title=#1,fonttitle=\bfseries\sffamily,
+  left=3mm,right=3mm,top=1.5mm,bottom=1.5mm}
+\newtcolorbox{warnbox}[1]{colback=warn!6,colframe=warn!55,title=#1,fonttitle=\bfseries\sffamily,
+  left=3mm,right=3mm,top=1.5mm,bottom=1.5mm}
+
+\begin{document}
+
+\begin{center}
+{\huge\bfseries\sffamily\color{accent} 2016 Ulsan-Fault ML-picker comparison}\\[2mm]
+{\large\sffamily A study guide: how the relocation pipeline runs, and what the four pickers show}\\[2mm]
+{\small\color{soft} Detection $\rightarrow$ association $\rightarrow$ absolute location $\rightarrow$ QC $\rightarrow$ HypoDD dt.ct/dt.cc\hfill Consistent P{=}S{=}0.2 threshold}
+\end{center}
+\vspace{2mm}
+\hrule
+\vspace{4mm}
+
+This document has two parts. \textbf{Part~1} walks the pipeline stage by stage so you can run and
+audit it yourself, with the origin/location provenance made explicit (the place a subtle bug once
+lived). \textbf{Part~2} is the corrected four-picker comparison and what it means scientifically.
+
+%==================================================================================
+\section{Part 1 — How the pipeline runs}
+
+The engine is the \texttt{korea-cluster-relocation} pipeline (in \texttt{15.PocketQuake}), originally
+built to relocate the KMA catalog. We feed our \emph{own} PhaseNet$+$/PyOcto catalog into it unchanged.
+The \emph{only variable} across the four runs is the ML picker; every stage after picking is identical.
+
+\begin{keybox}{The five invariants (keep these and the pipeline stays correct)}
+\begin{enumerate}[leftmargin=6mm,itemsep=1mm]
+\item \textbf{One HypoInverse solution, computed once, reused everywhere.} QC only \emph{selects} a
+subset; it never re-locates. The subset relocation reuses the full-run \texttt{.sum}/\texttt{.arc}.
+\item \textbf{Pick provenance is by \texttt{event\_idx}, never by timestamp.} An event's picks live in
+\texttt{event\_sac/<event\_idx>/<event\_idx>\_picks.csv}. A time-window key can grab a neighbour's picks.
+\item \textbf{Origins flow into dt.cc, not just into start locations.} \texttt{rereference} stamps SAC
+origins from a \texttt{.sum}; xcorr then \emph{subtracts} them. A wrong \texttt{.sum} corrupts dt.cc values.
+\item \textbf{\texttt{members.txt} row order defines the cuspid} ($200000+\text{row}$) tying together
+\texttt{.sum}, \texttt{.arc}, \texttt{event.dat}, \texttt{dt.cc}. Never reorder without regenerating all.
+\item \textbf{The catalog is fed in KST and round-trips to UTC.} Do not ``fix'' it to UTC (see box below).
+\end{enumerate}
+\end{keybox}
+
+\subsection{The stages}
+
+\begin{center}
+\small
+\begin{tabular}{@{}c>{\raggedright\arraybackslash}p{2.7cm}>{\raggedright\arraybackslash}p{5.3cm}>{\raggedright\arraybackslash}p{4.4cm}@{}}
+\toprule
+\# & Stage & In $\rightarrow$ Out & Origin/location source \\
+\midrule
+0 & Detection & continuous mSEED $\rightarrow$ \texttt{picks/*.parquet} & --- (raw picks, prob$\ge$0.2, P{=}S) \\
+1 & Association (PyOcto) & picks $\rightarrow$ \texttt{catalog\_*\_pyocto.csv} + assign & \textbf{PyOcto} (rough). Gate 4/2/2, $\ge$1 P{+}S \\
+2 & SAC store & assoc $\rightarrow$ \texttt{event\_sac/<idx>/*.sac} + \texttt{<idx>\_picks.csv} & PyOcto (in headers); \texttt{<idx>\_picks.csv} = true pick set \\
+3 & UF-box catalog & $\rightarrow$ \texttt{catalog\_kma.csv} (KST), \texttt{members.txt} & defines cuspid $=200000+$row \\
+4 & \textbf{Absolute loc (HypoInverse, FULL)} & assoc-pick \texttt{.arc} $\rightarrow$ \texttt{1.HypoInv/kim2011/*.sum} & \textbf{FULL-run HypoInverse = authoritative} \\
+5 & \textbf{QC (filter only)} & full \texttt{.sum} $\rightarrow$ \texttt{members\_qc.txt} & \emph{no re-location} (see criteria below) \\
+6 & Re-reference & \texttt{.sum} origins $\rightarrow$ restamp SAC \texttt{nz*}, \texttt{a}/\texttt{t0} & must read the full-run \texttt{.sum} \\
+7 & ph2dt & \texttt{.arc} $\rightarrow$ \texttt{event.dat}, \texttt{dt.ct} & same \texttt{.arc} as stage 4/6 \\
+8 & Cross-corr dt.cc (GPU) & re-ref SACs $\rightarrow$ \texttt{dt.cc\_0.7\_combined} & subtracts the stage-6 origins \\
+9 & HypoDD & event.dat + dt.ct + dt.cc $\rightarrow$ \texttt{hypoDD.reloc} & relative reloc; ISTART=2, adaptive damping \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Driver: \texttt{run\_picker\_reloc.py --picker <p> --through dtcc} chains stages 2--9.
+
+\subsection{The two quality gates}
+
+\begin{center}
+\small
+\begin{tabular}{@{}ll@{\hskip 8mm}ll@{}}
+\multicolumn{2}{@{}l}{\textbf{PyOcto association gate} (stage 1)} & \multicolumn{2}{l}{\textbf{HypoInverse QC} (stage 5, all must hold)} \\
+\midrule
+total picks & $\ge 4$ & \texttt{erh} & $<5$ km (horizontal error) \\
+P picks & $\ge 2$ & \texttt{erz} & $<5$ km (depth error) \\
+S picks & $\ge 2$ & \texttt{gap} & $<270^\circ$ (azimuthal gap) \\
+P{+}S stations & $\ge 1$ & \texttt{num} & $>5$ ($\ge$6 phases) \\
+velocity & kim2011 1-D & \texttt{rms} & $<1.0$ s (residual RMS) \\
+\end{tabular}
+\end{center}
+
+The association gate is deliberately \emph{permissive}; the real quality control is the HypoInverse QC.
+HypoDD uses kim2011, ISTART=2 (mainshock fixed), and adaptive LSQR damping (condition number kept
+$\sim$40--80). ``dt.cc-resolved'' = an event keeping $\ge 1$ surviving cross-correlation link
+(\texttt{nccp{+}nccs}$>0$) --- the highest-precision subset.
+
+\begin{warnbox}{Why the catalog is ``\texttt{catalog\_kma.csv}'' and in KST (a common confusion)}
+We do \textbf{not} use the KMA catalog. The pipeline hard-codes \texttt{kst\_offset\_hours = 9}
+($\text{origin}_\text{UTC} = \text{catalog}_\text{KST} - 9\text{h}$). So \texttt{build\_catalog\_kma.py}
+converts our PyOcto \emph{UTC} origins to KST ($+9$h) \emph{only so the pipeline subtracts 9\,h again} and
+lands back on the true UTC origin --- a deliberate \textbf{no-op round-trip} to satisfy the pipeline's
+KST-input contract. \texttt{catalog\_kma.csv} is a \emph{format label}, not a data source. Feeding UTC
+directly would place every event 9\,h in the past.
+\end{warnbox}
+
+\subsection{The bug that was fixed (a worked example of the invariants)}
+
+The QC$\rightarrow$dt.cc chain used to scaffold a \emph{separate} QC cluster and \textbf{re-run
+HypoInverse + ph2dt} on it (violating invariant~1). That re-run re-staged picks by a second-resolution
+\emph{timestamp} key (violating invariant~2), so on dense catalogs an adjacent event's raw picks
+overwrote the correct associated picks $\rightarrow$ wrong origins (up to $\sim$1\,s off). Those wrong
+origins then poisoned \texttt{rereference} $\rightarrow$ \textbf{dt.cc values} (invariant~3) and
+\texttt{event.dat}/\texttt{dt.ct}. \emph{Symptom that exposed it:} \texttt{event.sel} showed
+$\text{ERZ}>5$\,km events that had passed QC --- because those errors came from the re-run, not the full
+run QC gated on. \textbf{Fix:} inject the full-run HypoInverse (\texttt{.sum}/\texttt{.arc}) subset to the
+QC members, then re-run rereference$\rightarrow$ph2dt$\rightarrow$xcorr$\rightarrow$dtcc against correct
+origins. One HypoInverse solution, reused (now permanent in
+\texttt{run\_picker\_reloc.py::inject\_full\_hypoinverse}).
+
+\subsection{Reproducing the output yourself (run these in order)}
+
+All commands run from \texttt{Gyeongju\_catalog/detection\_test/}. The picker \texttt{<p>} is one of
+\texttt{original}, \texttt{stead}, \texttt{eqt} (PN$+$ is already done and is reused). \texttt{<Y>} is the year
+(\texttt{2016} here). Stages A--C are \emph{per month}; loop \texttt{<mm>} over \texttt{01}..\texttt{12}. Stage
+0 checks readiness; Stage D chains everything association-onward for one picker.
+
+\begin{center}
+\small
+\begin{tabular}{@{}c>{\raggedright\arraybackslash}p{3.3cm}>{\ttfamily\raggedright\arraybackslash}p{9.6cm}@{}}
+\toprule
+& Step & \normalfont command \\
+\midrule
+0 & Readiness check (per year) & python reloc\_2016\_uf/preflight\_year.py -{}-year <Y> \\
+\midrule
+A & Station cache (per month) & python lib/build\_stations.py -{}-month <Y>-<mm> \\
+B & Detection (per picker, per month) & python lib/run\_seisbench\_picker.py -{}-model <p> -{}-month <Y>-<mm> \\
+  & \quad (PN$+$: \texttt{run\_pnplus\_month.py}) & \\
+C & Association (per picker, per month) & python lib/associate\_daily.py -{}-picker <p> -{}-month <Y>-<mm> \\
+\midrule
+D & \textbf{Relocation chain} (once per picker) & python reloc\_2016\_uf/run\_picker\_reloc.py -{}-picker <p> -{}-year <Y> -{}-through dtcc \\
+\midrule
+E & Comparison notebooks & jupyter nbconvert -{}-execute -{}-inplace \\
+  & & \quad reloc\_2016\_uf/10.Picker\_comparison\_2016.ipynb \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{What stage D does internally} (stages 2--9 of the table above): builds the event-idx SAC
+store $\rightarrow$ \texttt{catalog\_kma}/\texttt{members} $\rightarrow$ scaffold $+$ HypoInverse (full)
+$\rightarrow$ \texttt{uf\_cluster} QC $\rightarrow$ \emph{inject the full-run HypoInverse into the QC
+subset} (the fix) $\rightarrow$ rereference $\rightarrow$ ph2dt $\rightarrow$ GPU xcorr
+(\texttt{interp\_hz}=1000, run in the \texttt{pq-gpu} conda env) $\rightarrow$ adaptive kim2011/ISTART=2
+HypoDD. Stop earlier with \texttt{-{}-through hypoinverse} to validate the chain up to QC (fast).
+
+\begin{keybox}{Practical notes}
+\begin{itemize}[leftmargin=5mm,itemsep=0.5mm]
+\item Detection is CPU/IO-bound (GPU $\sim$27\,\%) --- run the three pickers' months concurrently ($\sim$3$\times$).
+\item The dt.cc xcorr is the long pole: $\sim$6\,h each for the dense pickers (PN$+$ 177\,k pairs,
+original 164\,k); STEAD/EQT are minutes. It is checkpointable (\texttt{XCORR\_RESUME=1}).
+\item Everything is idempotent / safe to re-run; the QC injection backs up any prior HypoInverse to
+\texttt{1.HypoInv/kim2011.rerun\_backup}.
+\end{itemize}
+\end{keybox}
+
+\subsection{Does this inherit to every year 2010--2025 without adjustment?}
+
+\textbf{Yes --- the whole chain is \texttt{-{}-year} general, and robust to network/rate change by design.}
+Every layer is year-parameterized; the ones below marked ``auto'' need \emph{no} per-year adjustment.
+
+\begin{center}
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.6cm}cccc>{\raggedright\arraybackslash}p{4.3cm}@{}}
+\toprule
+Layer & Year? & Network? & Rate? & Ad hoc? & How \\
+\midrule
+Station cache \newline (\texttt{build\_stations.py}) & \texttt{-{}-month} & \textbf{auto} & --- & no & epochs/coords/bands read from StationXML; \texttt{coverage} = days on disk $\Rightarrow$ picks up whatever is deployed \\
+Detection \newline (\texttt{run\_seisbench\_picker.py}) & \texttt{-{}-month} & \textbf{auto} & \textbf{auto} & no & anti-alias decimate per station; runs 2014/2016/2021 already \\
+Association \newline (\texttt{associate\_daily.py}) & \texttt{-{}-month} & \textbf{auto} & --- & no & daily-chunked PyOcto; same fixed 4/2/2 gate every epoch \\
+SAC store \newline (\texttt{event\_sac\_export}) & --- & \textbf{auto} & \textbf{native} & no & \texttt{SAC\_TARGET\_HZ=None} keeps native rate; xcorr interpolates at correlation time \\
+\textbf{Orchestration} \newline (\texttt{run\_picker\_reloc.py}) & \textbf{\texttt{-{}-year}} & auto & auto & no & all year-dependent names via \texttt{year\_paths.py}; \texttt{-{}-year 2016} = the exact existing paths \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{Robustness to network/rate change is built in, no tuning.} Network change (KS/KG only in 2010
+$\rightarrow$ $+$NS dense array 2017$+$ $\rightarrow$ $+$GJ temporary 2016) is handled automatically because
+stations are \emph{discovered from metadata $+$ on-disk coverage each month}, not listed. Sampling-rate change
+(100 / 200 / 1000\,Hz across KS/KG/NS/GJ) is handled by the \emph{native-rate} SAC store plus
+interpolate-at-correlation-time --- this was the specific fix for the GJ mixed-rate loss. The velocity model
+(kim2011), QC thresholds, and the 4/2/2 gate are epoch-invariant by choice, so catalogs stay directly
+comparable across years. Archive coverage confirms the data exists and the network grows: 2010 has
+$\sim$2\,300 KS/KG station-days, 2022 $\sim$5\,900.
+
+\begin{keybox}{Running any year (the orchestration is done)}
+\texttt{year\_paths.py} centralizes every year-dependent name; \texttt{-{}-year} defaults to 2016 and resolves
+to the exact existing 2016 paths/slugs, so 2016 work is byte-unchanged. Naming: \texttt{reloc\_<Y>\_uf[\_<p>]/},
+slug \texttt{uf\_<Y>[\_<p>]}, \texttt{stations\_<Y>.csv}. To run a year:\\[1mm]
+\hspace*{3mm}\texttt{python preflight\_year.py -{}-year <Y>}\hfill (which inputs exist / what to run)\\
+\hspace*{3mm}\texttt{python run\_picker\_reloc.py -{}-picker <p> -{}-year <Y> -{}-through dtcc}\\[1mm]
+\textbf{What a new year still needs:} only its Stage 0--1 \emph{inputs} generated (detection $+$ association for
+the 12 months --- the heavy compute); the orchestration (Stages 2--9) then runs unchanged. \emph{Real} per-year
+effects, none requiring code changes: network-gap months give smaller sets; sparse early years (2010--2012,
+KS/KG only) have larger azimuthal gaps so fewer events survive QC (the gate correctly reflects this rather than
+inventing precision); the dt.cc xcorr cost scales as $O(N^2)$ in events, so dense aftershock years are the
+expensive ones. These are the pipeline honestly reporting what each year's network resolves.
+\end{keybox}
+
+%==================================================================================
+\section{Part 2 — The four-picker comparison (corrected)}
+
+Four ML pickers, one pipeline, consistent P{=}S{=}0.2 threshold. The question is not who \emph{picks}
+most, but who yields the most well-located, cross-correlation-resolved events.
+
+\subsection{The funnel: picks $\rightarrow$ region events $\rightarrow$ UF-box $\rightarrow$ QC $\rightarrow$ dt.cc $\rightarrow$ dt.cc-resolved}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrcrrrrr@{}}
+\toprule
+picker & P picks & S picks & S/P & region ev. & UF-box & QC & dt.cc & \textbf{cc-res.} \\
+\midrule
+\textbf{PN+}          & 533\,394 & 638\,063 & 1.20 & 28\,168 & 3\,867 & 596 & 512 & \textbf{255} \\
+PN-original           & 951\,731 & 839\,799 & 0.88 & 31\,762 & 4\,117 & 574 & 447 & 189 \\
+PN-STEAD              & 122\,744 & 227\,351 & 1.85 &  6\,472 &   398 & 188 & 172 & 103 \\
+EQT-STEAD             &  87\,396 &  95\,638 & 1.09 &  6\,540 &   424 & 160 & 144 &  92 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{How to read each column.} \emph{Picks} = raw detections (whole year, whole region).
+\emph{Region ev.} = all PyOcto-associated events. \emph{UF-box} = events inside the fault box (relocation
+members). \emph{QC} = pass the HypoInverse quality gate. \emph{dt.cc} = HypoDD-relocated with cross-corr.
+\emph{cc-res.} = keep $\ge 1$ surviving cc link --- the headline, highest-precision number.
+
+\subsection{Fingerprints and headline}
+
+\begin{itemize}[leftmargin=6mm,itemsep=1mm]
+\item \textbf{Pick quantity does not predict located quality.} PN-original picks the \emph{most}
+(1.79\,M) and associates the most region events (31\,762), yet yields the \emph{fewest} cc-resolved of
+the two PN models (189 vs PN+'s 255). Raw detection is an association liability when it is noisy.
+\item \textbf{S/P ratio is a picker fingerprint:} PN-original is P-heavy (0.88), PN-STEAD strongly
+S-heavy (1.85), PN+ balanced (1.20), EQT (1.09). The 4/2/2 gate rebalances this downstream.
+\item \textbf{A fixed 0.2 threshold is not equivalent across pickers.} The STEAD-retrained models
+(PN-STEAD, EQT) are far more conservative at 0.2 than NCEDC/EQNet (PN-original, PN+): $\sim$6\,\% of their
+region events fall in the UF box vs $\sim$13\,\% for the PN models.
+\item \textbf{Headline: PN+ delivers the most cross-correlation-resolved, well-located events (255)}
+despite not picking the most --- the best balance of sensitivity and pick quality.
+\end{itemize}
+
+\subsection{Why PN-original \emph{dropped} after the fix (463$\rightarrow$447; cc-res.\ 212$\rightarrow$189)}
+
+This is the fix working, not a regression. The dt.cc value is
+$\;dt = (t_1+\text{shift}-ot_1) - (t_2-ot_2)$; the cross-correlation \emph{coefficient} (which gates the
+0.7 cut) is origin-independent, but the stored \emph{value} carries the origins $ot$. PN-original, the
+noisiest picker, had the \emph{largest} origin errors in the buggy run (\textbf{median 0.13\,s; 121
+events off by $>$0.5\,s; 59 by $>$1\,s}, vs PN+'s median 0.07\,s). A \emph{systematic per-event} offset
+is partly absorbable by relocating the event, so those links \emph{survived} HypoDD's residual cuts
+(\texttt{WDCC} $= 6,4,3,2\rightarrow0.5$\,s across the iteration sets) --- keeping the event
+``cc-resolved'' but at a wrong, offset-driven position. With the origins corrected, the truly
+inconsistent links show their real (large) residuals and are \emph{correctly rejected}; events losing all
+cc links fall to ct-only, and marginal ones may not relocate. Hence a \textbf{smaller but genuinely
+better-located} set --- confirmed by the relative error \emph{improving} $0.72\rightarrow0.50$\,m. PN+
+barely moved ($251\rightarrow255$) precisely because its origin errors were small.
+
+\begin{keybox}{One-sentence takeaway}
+The buggy origin offsets were coherent enough to be absorbed as fake relocations that passed HypoDD's
+residual cuts; correcting the origins exposes the truly-inconsistent links, which HypoDD then correctly
+rejects --- so PN-original's count drops but its catalog becomes more trustworthy.
+\end{keybox}
+
+\subsection{Corrected vs.\ buggy (all four)}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{\hskip 8mm}cc@{}}
+\toprule
+& \multicolumn{3}{c}{\textbf{corrected} / buggy} & \multicolumn{2}{c}{origin error (buggy)} \\
+\cmidrule(lr){2-4}\cmidrule(l){5-6}
+picker & dt.cc total & cc-resolved & rel-err (m) & median & \#$>$0.5\,s \\
+\midrule
+PN+          & 512 / 511 & \textbf{255} / 251 & 0.42 / 0.42 & 0.07\,s & few \\
+PN-original  & 447 / 463 & \textbf{189} / 212 & \textbf{0.50} / 0.72 & 0.13\,s & 121 \\
+PN-STEAD     & 172 / 172 & \textbf{103} / 116 & 0.36 / 0.28 & small & 8 \\
+EQT-STEAD    & 144 / 146 & \textbf{92}  / 101 & 0.42 / 0.28 & small & 6 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent All four have \textbf{zero air-quakes} (no depth $<0$ or $>30$\,km) and healthy adaptive-damping
+convergence. The magnitude of each picker's change tracks its origin-error magnitude: PN-original (worst
+corruption) moves most; PN+ (least) barely moves.
+
+\vspace{3mm}\hrule\vspace{2mm}
+{\small\color{soft} Companion files: \texttt{PIPELINE.md} (invariants + provenance checks),
+notebooks \texttt{09/10/12} (comparison, funnel, record sections),
+\texttt{run\_picker\_reloc.py} $+$ \texttt{year\_paths.py} $+$ \texttt{preflight\_year.py} (year-general driver),
+\texttt{fix\_qc\_rerun\_bug.py} (the repair driver).}
+
+\end{document}

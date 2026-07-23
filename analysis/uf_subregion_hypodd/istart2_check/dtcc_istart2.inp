@@ -1,0 +1,44 @@
+* RELOC.INP
+*--- input file selection
+* cross correlation diff times:
+dt.cc_0.7_combined
+* catalog P diff times:
+dt.ct
+* event file:
+event.dat
+* station file:
+station.dat
+*--- output file selection
+* original locations:
+hypoDD.loc
+* relocations:
+hypoDD.reloc
+* station information:
+hypoDD.sta
+* residual information:
+hypoDD.res
+* source parameter information:
+*hypoDD.src
+
+*--- data type selection: IDAT IPHA DIST
+    3     3     500
+*--- event clustering: OBSCC OBSCT
+    4      0
+*--- solution control: ISTART ISOLV NSET
+    2  2  7
+*--- data weighting: NITER WTCCP WTCCS WRCC WDCC WTCTP WTCTS WRCT WDCT DAMP
+    4  0.01  0.005  -9  -9  1.0  0.8  -9  -9  858
+    4  0.01  0.005  -9  -9  1.0  0.8  8  6  925
+    4  0.01  0.005  -9  -9  1.0  0.8  6  4  900
+    4  1.0  0.8  6  4  0.01  0.005  -9  -9  710
+    4  1.0  0.8  4  2  0.01  0.005  -9  -9  654
+    4  1.0  0.8  3  1  0.01  0.005  -9  -9  607
+    4  1.0  0.8  2  0.5  0.01  0.005  -9  -9  595
+*--- 1D model: NLAY RATIO  (kim2011, Kim et al. 2011 SE-Korea; single Vp/Vs ratio per hypoDD 1.x)
+   4     1.73
+* TOP
+0.0  7.29  20.7  31.3
+* VEL
+5.63  6.17  6.58  7.77
+*--- event selection: CID / ID
+    0

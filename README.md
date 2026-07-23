@@ -2,79 +2,98 @@
 
 An automated, reproducible pipeline to build a **long-term earthquake catalog (2010–present)**
 for the Ulsan Fault region (SE Korea) from continuous seismic waveforms, using AI phase pickers
-(SeisBench / PhaseNet). The station network grows over time, and the workflow is designed to be
-re-run as new data and new picker models become available.
+(SeisBench PhaseNet / EQNet PhaseNet+). The station network grows over time, and the workflow is
+designed to be re-run as new data and new picker models become available.
 
 ```
- Detection            Association          Absolute location      Relative relocation
- PhaseNet (SeisBench) ──► PyOcto ──────────► HYPOINVERSE ─────────► HypoDD  (planned)
- daily pick CSVs          events+assignments  located catalog        double-difference
+ Detection              Association       Absolute location   QC        Relative relocation
+ PhaseNet / PhaseNet+ ─► PyOcto ─────────► HYPOINVERSE ──────► filter ─► HypoDD dt.ct + dt.cc
+ daily pick parquet      events+assign      located catalog              double-difference
 ```
 
 ## Status
 
 | Stage | Tool | Status |
 |-------|------|--------|
-| Detection | SeisBench PhaseNet (`stead`, `original`) | ✅ automated |
+| Detection | SeisBench PhaseNet (`stead`, `original`), EQTransformer | ✅ automated |
 | Detection | EQNet **PhaseNet+** (`phasenet_plus`) | ✅ automated (needs a local EQNet clone) |
 | Association | PyOcto | ✅ automated |
 | Absolute location | HYPOINVERSE (`hyp1.40`) | ✅ automated |
-| Relative relocation | HypoDD | ⏳ planned |
-| 2nd network (`NS`, post-2018/19) | — | ⏳ deferred |
+| Relative relocation | HypoDD (dt.ct + dt.cc) | ✅ done |
+| Networks | KS/KG, GJ (Gyeongju temporary array), NS | ✅ KS/KG/GJ; NS integrating |
 
-The pipeline supports two independent dimensions: **picker model** (`--model`: `stead` / `original`
-SeisBench PhaseNet, or `phasenet_plus` from EQNet) and **velocity model** (`--velmodel`: `kim1983` /
-`kim2011`). PhaseNet-style pickers run on **raw** (demeaned) data with their own internal normalization
-— no bandpass.
+Two independent dimensions: **picker model** (`--model`: `stead` / `original` / `phasenet_plus` / `eqt`)
+and **velocity model** (`--velmodel`: `kim1983` / `kim2011`). PhaseNet-style pickers run on **raw**
+(demeaned) data with their own internal normalization — no bandpass.
+
+## Repository layout
+
+Restructured (2026-07) into a software-style tree — installable packages, code, data, and outputs
+cleanly separated. The four waveform networks are parallel top-level directories.
+
+```
+pyproject.toml  environment.yml  requirements.txt  README.md  CLAUDE.md
+src/
+  uflib/          shared analysis library  (uf_cluster, uf_waveform_similarity, event_sac_export)
+  ufpipe/         the detection→location pipeline  (was models/pipeline; renamed to avoid a name clash)
+analysis/         non-installable analysis code + notebook builders
+  relocation/  reloc_analysis/  local_magnitudes/  uf_subregion_hypodd/  repeaters/  hypoinv/
+detection_test/   the 4-picker comparison pipeline (year-general; see detection_test/reloc_2016_uf/PIPELINE.md)
+KS_KG/  GJ/  NS/  NS_100hz/     raw waveforms — station dirs at each root (~7 TB, NOT in git)
+data/
+  waveforms/      symlinks to the network dirs (browsable view; no data copied)
+  metadata/       station tables, velocity model, StationXML, external catalogs
+  hypoinv/        HYPOINVERSE control inputs (STA/*.sta, kim*/*.crh) + working data
+outputs/          regenerable pipeline products (picks, pyocto, models, …) — NOT in git
+runs/             canonical output root going forward
+docs/             documentation  ·  notebooks/  archive/  papers/  tools/
+```
+
+> **Git tracks code, docs, and small reference metadata only.** Raw waveforms (`KS_KG/`, `GJ/`, `NS/`,
+> `NS_100hz/`, ~7 TB), pipeline outputs (`outputs/`, `runs/`), generated notebooks, and large data
+> (StationXML, per-station ML CSVs, HypoDD residuals) are gitignored — the pipeline runs against these
+> local files. See [docs/directory-structure.md](docs/directory-structure.md).
+
+## Install
+
+```bash
+conda env create -f environment.yml     # or use your existing env; the code runs in `base` here
+conda activate ulsan
+pip install torch --index-url https://download.pytorch.org/whl/cu128   # match your CUDA
+pip install -e .                         # installs the uflib + ufpipe packages (editable)
+```
+
+`pip install -e .` makes `from uflib import uf_cluster` and `import ufpipe.config` work from any
+directory — no more `sys.path.insert`.
 
 ## Quickstart
 
+**Long-term catalog pipeline** (detection → association → location):
+
 ```bash
-# 1. environment (see docs/how-to-run.md for the torch/CUDA detail)
-conda env create -f environment.yml && conda activate ulsan
-pip install torch --index-url https://download.pytorch.org/whl/cu128   # match your CUDA
-
-# 2. one-time per clone: enable notebook output-stripping in git
-bash tools/setup-git-filters.sh
-
-# 3. run the full chain for one year (or a range)
-cd KS_KG/models/pipeline
-python run_pipeline.py --model original --years 2024
-python run_pipeline.py --model original --years 2010-2024
+python -m ufpipe.run_pipeline --model original --years 2024          # one year
+python -m ufpipe.run_pipeline --model original --years 2010-2024     # a range
 ```
 
-Detection is idempotent — it skips days whose picks already exist, so runs resume safely.
+**4-picker comparison / relocation** (year-general; any year whose inputs exist):
 
-## Repository layout (what's tracked)
-
-```
-CLAUDE.md  README.md  requirements.txt  environment.yml
-docs/                  documentation (see below)
-tools/                 git helpers (notebook output stripping)
-KS_KG/
-  models/
-    pipeline/          ★ the automated pipeline (config.py, core.py, *.py CLIs)
-    build_original_tree.py   regenerates the (local) models/original/ run
-    README.md
-  station_table/  velocity_model/  HypoInv/{*.crh, STA/*.sta}   reference metadata
+```bash
+python detection_test/reloc_2016_uf/preflight_year.py --year 2016                 # readiness check
+python detection_test/reloc_2016_uf/run_picker_reloc.py --picker original \
+       --year 2016 --through dtcc --clean-cache                                    # relocate
 ```
 
-> **Code, docs, and small reference metadata only.** The following live on the workstation and are
-> **not** versioned (gitignored): continuous waveforms (~7 TB) and `NS/`; **all Jupyter notebooks**
-> (the per-year `stead` reference run and the generated `models/original/` run); and large regenerable
-> outputs (picks, association tables, HYPOINVERSE `.prt/.arc/.sum`). The pipeline runs against these
-> local files; `build_original_tree.py` regenerates the `models/original/` notebooks on the workstation.
-> See [docs/directory-structure.md](docs/directory-structure.md).
+Detection is idempotent (skips days whose picks already exist) and resumable.
 
 ## Documentation
 
-- [docs/overview.md](docs/overview.md) — goal, scientific motivation, plan & roadmap
-- [docs/pipeline.md](docs/pipeline.md) — each stage: inputs, outputs, parameters, data flow
-- [docs/how-to-run.md](docs/how-to-run.md) — step-by-step commands (env, stages, orchestrator, resume)
-- [docs/directory-structure.md](docs/directory-structure.md) — layout, `models/` convention, what's in git
-- [docs/development.md](docs/development.md) — git workflow, notebook filter, extending the pipeline
-- [KS_KG/models/pipeline/README.md](KS_KG/models/pipeline/README.md) — pipeline quick reference
-- [KS_KG/models/README.md](KS_KG/models/README.md) — the `stead`/`original` model split
+- [docs/overview.md](docs/overview.md) — goal, scientific motivation, roadmap
+- [docs/pipeline.md](docs/pipeline.md) — each stage: inputs, outputs, parameters
+- [docs/how-to-run.md](docs/how-to-run.md) — step-by-step commands
+- [docs/directory-structure.md](docs/directory-structure.md) — layout & what's in git
+- [src/ufpipe/README.md](src/ufpipe/README.md) — pipeline quick reference
+- [detection_test/reloc_2016_uf/PIPELINE.md](detection_test/reloc_2016_uf/PIPELINE.md) — the relocation
+  pipeline: invariants, provenance checks, the KST/KMA convention
 
 ## License
 

@@ -1,0 +1,3 @@
+duplicates (identical size, left in source): 0
+
+CONFLICTS (different size, left in source): 0

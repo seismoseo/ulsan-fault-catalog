@@ -1,0 +1,124 @@
+
+=== phasenet_plus ===  QC members 596   (full-run HypoInverse -> QC cuspids 200000..200595)
+  full .sum coverage: 596/596 rows present, 0 with NaN origin  (want 0/0)
+  backed up /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_qc/1.HypoInv/kim2011 -> /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_qc/1.HypoInv/kim2011.rerun_backup
+  wrote corrected .sum (596 events) + .arc (596 events) from the full run
+
+$ (cwd=/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation) conda run -n pq-gpu python3 -m pipeline.cli.run_pipeline --cluster uf_2016_qc --stage-from rereference --through dtcc --velmodels kim2011 --arc-velmodel kim2011
+[uf_2016_qc] GPU xcorr: ACTIVE — cctorch_gpu_batched on NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition (torch 2.11.0+cu128)
+[rereference] kim2011: re-referenced 49893 SAC across 596 events under /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_qc/waveforms_100km
+[uf_2016_qc] rereference: 596 events -> kim2011 origins  (317.6s)
+[xcorr] 177310 pairs x 45 stations, 10 workers (backend=cctorch_gpu_batched, slide_step=0.001s, band=(5, 20)Hz)
+[xcorr] gpu_batched: pre-interpolated 49893/80460 traces on 32 workers in 175.8s (cache wf_interp_cache)
+[xcorr] gpu_batched: 2059594 tasks in 7330 batches | peak VRAM 29.3 GB | OOM retries 0 | CPU fallbacks 0
+[xcorr] wrote /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_qc/2.HypoDD/02.dt.cc/dt.cc_0.7_combined
+[uf_2016_qc] xcorr: 177310 pairs x 45 stations  (21607.8s)
+[uf_2016_qc] dtcc[default]: runs/uf_2016_qc/2.HypoDD/02.dt.cc/hypoDD.reloc  (4.1s)
+
+[uf_2016_qc] === stage timings ===
+  rereference     317.6s     1.4%
+  xcorr         21607.8s    98.5%
+  dtcc              4.1s     0.0%
+  TOTAL         21929.5s
+
+$ (cwd=/home/msseo/works/02.Ulsan_Fault_detection/Gyeongju_catalog/detection_test/reloc_2016_uf) /home/msseo/miniforge3/bin/python /home/msseo/works/02.Ulsan_Fault_detection/Gyeongju_catalog/detection_test/reloc_2016_uf/run_hypodd_kim2011_istart2.py /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_qc/2.HypoDD/02.dt.cc
+kim2011 + ISTART=2 + adaptive damping on /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_qc/2.HypoDD/02.dt.cc
+
+chosen DAMP per set: [262, 287, 252, 211, 198, 187, 183]
+per-set CND: {0: 67.7, 1: 63.6, 2: 65.8, 3: 62.6, 4: 64.0, 5: 62.5, 6: 60.8}
+relocated events: 512 -> /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_qc/2.HypoDD/02.dt.cc/hypoDD.reloc
+DONE
+  => phasenet_plus corrected dt.cc: 512 relocated in 22090s  (/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_qc/2.HypoDD/02.dt.cc/hypoDD.reloc)
+
+=== original ===  QC members 574   (full-run HypoInverse -> QC cuspids 200000..200573)
+  full .sum coverage: 574/574 rows present, 0 with NaN origin  (want 0/0)
+  backed up /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_original_qc/1.HypoInv/kim2011 -> /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_original_qc/1.HypoInv/kim2011.rerun_backup
+  wrote corrected .sum (574 events) + .arc (574 events) from the full run
+
+$ (cwd=/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation) conda run -n pq-gpu python3 -m pipeline.cli.run_pipeline --cluster uf_2016_original_qc --stage-from rereference --through dtcc --velmodels kim2011 --arc-velmodel kim2011
+[uf_2016_original_qc] GPU xcorr: ACTIVE — cctorch_gpu_batched on NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition (torch 2.11.0+cu128)
+[rereference] kim2011: re-referenced 44501 SAC across 574 events under /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_original_qc/waveforms_100km
+[uf_2016_original_qc] rereference: 574 events -> kim2011 origins  (246.7s)
+[xcorr] 164451 pairs x 45 stations, 10 workers (backend=cctorch_gpu_batched, slide_step=0.001s, band=(5, 20)Hz)
+[xcorr] gpu_batched: pre-interpolated 44501/77490 traces on 32 workers in 112.2s (cache wf_interp_cache)
+[xcorr] gpu_batched: 1894149 tasks in 6741 batches | peak VRAM 29.3 GB | OOM retries 0 | CPU fallbacks 0
+[xcorr] wrote /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_original_qc/2.HypoDD/02.dt.cc/dt.cc_0.7_combined
+[uf_2016_original_qc] xcorr: 164451 pairs x 45 stations  (16492.3s)
+[uf_2016_original_qc] dtcc[default]: runs/uf_2016_original_qc/2.HypoDD/02.dt.cc/hypoDD.reloc  (3.4s)
+
+[uf_2016_original_qc] === stage timings ===
+  rereference     246.7s     1.5%
+  xcorr         16492.3s    98.5%
+  dtcc              3.4s     0.0%
+  TOTAL         16742.4s
+
+$ (cwd=/home/msseo/works/02.Ulsan_Fault_detection/Gyeongju_catalog/detection_test/reloc_2016_uf) /home/msseo/miniforge3/bin/python /home/msseo/works/02.Ulsan_Fault_detection/Gyeongju_catalog/detection_test/reloc_2016_uf/run_hypodd_kim2011_istart2.py /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_original_qc/2.HypoDD/02.dt.cc
+kim2011 + ISTART=2 + adaptive damping on /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_original_qc/2.HypoDD/02.dt.cc
+
+chosen DAMP per set: [239, 215, 195, 167, 158, 145, 145]
+per-set CND: {0: 79.5, 1: 77.5, 2: 77.9, 3: 71.7, 4: 69.6, 5: 72.6, 6: 65.2}
+relocated events: 447 -> /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_original_qc/2.HypoDD/02.dt.cc/hypoDD.reloc
+DONE
+  => original corrected dt.cc: 447 relocated in 16849s  (/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_original_qc/2.HypoDD/02.dt.cc/hypoDD.reloc)
+
+=== stead ===  QC members 188   (full-run HypoInverse -> QC cuspids 200000..200187)
+  full .sum coverage: 188/188 rows present, 0 with NaN origin  (want 0/0)
+  backed up /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_stead_qc/1.HypoInv/kim2011 -> /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_stead_qc/1.HypoInv/kim2011.rerun_backup
+  wrote corrected .sum (188 events) + .arc (188 events) from the full run
+
+$ (cwd=/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation) conda run -n pq-gpu python3 -m pipeline.cli.run_pipeline --cluster uf_2016_stead_qc --stage-from rereference --through dtcc --velmodels kim2011 --arc-velmodel kim2011
+[uf_2016_stead_qc] GPU xcorr: ACTIVE — cctorch_gpu_batched on NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition (torch 2.11.0+cu128)
+[rereference] kim2011: re-referenced 16279 SAC across 188 events under /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_stead_qc/waveforms_100km
+[uf_2016_stead_qc] rereference: 188 events -> kim2011 origins  (129.4s)
+[xcorr] 17578 pairs x 45 stations, 10 workers (backend=cctorch_gpu_batched, slide_step=0.001s, band=(5, 20)Hz)
+[xcorr] gpu_batched: pre-interpolated 16279/25380 traces on 32 workers in 43.0s (cache wf_interp_cache)
+[xcorr] gpu_batched: 434815 tasks in 1548 batches | peak VRAM 29.3 GB | OOM retries 0 | CPU fallbacks 0
+[xcorr] wrote /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_stead_qc/2.HypoDD/02.dt.cc/dt.cc_0.7_combined
+[uf_2016_stead_qc] xcorr: 17578 pairs x 45 stations  (2959.5s)
+[uf_2016_stead_qc] dtcc[default]: runs/uf_2016_stead_qc/2.HypoDD/02.dt.cc/hypoDD.reloc  (0.7s)
+
+[uf_2016_stead_qc] === stage timings ===
+  rereference     129.4s     4.2%
+  xcorr          2959.5s    95.8%
+  dtcc              0.7s     0.0%
+  TOTAL          3089.6s
+
+$ (cwd=/home/msseo/works/02.Ulsan_Fault_detection/Gyeongju_catalog/detection_test/reloc_2016_uf) /home/msseo/miniforge3/bin/python /home/msseo/works/02.Ulsan_Fault_detection/Gyeongju_catalog/detection_test/reloc_2016_uf/run_hypodd_kim2011_istart2.py /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_stead_qc/2.HypoDD/02.dt.cc
+kim2011 + ISTART=2 + adaptive damping on /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_stead_qc/2.HypoDD/02.dt.cc
+
+chosen DAMP per set: [125, 134, 121, 111, 105, 103, 94]
+per-set CND: {0: 72.5, 1: 68.8, 2: 69.2, 3: 65.9, 4: 64.7, 5: 67.2, 6: 59.6}
+relocated events: 172 -> /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_stead_qc/2.HypoDD/02.dt.cc/hypoDD.reloc
+DONE
+  => stead corrected dt.cc: 172 relocated in 3118s  (/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_stead_qc/2.HypoDD/02.dt.cc/hypoDD.reloc)
+
+=== eqt ===  QC members 160   (full-run HypoInverse -> QC cuspids 200000..200159)
+  full .sum coverage: 160/160 rows present, 0 with NaN origin  (want 0/0)
+  backed up /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_eqt_qc/1.HypoInv/kim2011 -> /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_eqt_qc/1.HypoInv/kim2011.rerun_backup
+  wrote corrected .sum (160 events) + .arc (160 events) from the full run
+
+$ (cwd=/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation) conda run -n pq-gpu python3 -m pipeline.cli.run_pipeline --cluster uf_2016_eqt_qc --stage-from rereference --through dtcc --velmodels kim2011 --arc-velmodel kim2011
+[uf_2016_eqt_qc] GPU xcorr: ACTIVE — cctorch_gpu_batched on NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition (torch 2.11.0+cu128)
+[rereference] kim2011: re-referenced 14366 SAC across 160 events under /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_eqt_qc/waveforms_100km
+[uf_2016_eqt_qc] rereference: 160 events -> kim2011 origins  (103.0s)
+[xcorr] 12720 pairs x 45 stations, 10 workers (backend=cctorch_gpu_batched, slide_step=0.001s, band=(5, 20)Hz)
+[xcorr] gpu_batched: pre-interpolated 14366/21600 traces on 32 workers in 36.6s (cache wf_interp_cache)
+[xcorr] gpu_batched: 334801 tasks in 1192 batches | peak VRAM 29.3 GB | OOM retries 0 | CPU fallbacks 0
+[xcorr] wrote /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_eqt_qc/2.HypoDD/02.dt.cc/dt.cc_0.7_combined
+[uf_2016_eqt_qc] xcorr: 12720 pairs x 45 stations  (2178.7s)
+[uf_2016_eqt_qc] dtcc[default]: runs/uf_2016_eqt_qc/2.HypoDD/02.dt.cc/hypoDD.reloc  (0.9s)
+
+[uf_2016_eqt_qc] === stage timings ===
+  rereference     103.0s     4.5%
+  xcorr          2178.7s    95.5%
+  dtcc              0.9s     0.0%
+  TOTAL          2282.6s
+
+$ (cwd=/home/msseo/works/02.Ulsan_Fault_detection/Gyeongju_catalog/detection_test/reloc_2016_uf) /home/msseo/miniforge3/bin/python /home/msseo/works/02.Ulsan_Fault_detection/Gyeongju_catalog/detection_test/reloc_2016_uf/run_hypodd_kim2011_istart2.py /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_eqt_qc/2.HypoDD/02.dt.cc
+kim2011 + ISTART=2 + adaptive damping on /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_eqt_qc/2.HypoDD/02.dt.cc
+
+chosen DAMP per set: [116, 129, 117, 105, 102, 95, 92]
+per-set CND: {0: 65.3, 1: 72.0, 2: 68.6, 3: 66.7, 4: 68.0, 5: 65.1, 6: 63.2}
+relocated events: 144 -> /home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_eqt_qc/2.HypoDD/02.dt.cc/hypoDD.reloc
+DONE
+  => eqt corrected dt.cc: 144 relocated in 2310s  (/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_2016_eqt_qc/2.HypoDD/02.dt.cc/hypoDD.reloc)
