@@ -1,0 +1,30 @@
+time,latitude,longitude,depth,mag,magType,nst,gap,dmin,rms,net,id,updated,place,type,horizontalError,depthError,magError,magNst,status,locationSource,magSource
+2026-04-20T07:52:58.964Z,39.9993,142.9851,25,7.4,mww,239,23,1.665,0.52,us,us6000sri7,2026-05-29T16:39:51.121Z,"97 km ENE of Miyako, Japan",earthquake,6.09,1.799,0.036,73,reviewed,us,us
+2025-12-08T14:15:09.896Z,40.9984,142.1836,40.72,7.6,mww,170,17,0.874,0.72,us,us6000rtdt,2026-03-04T18:43:34.040Z,"2025 Aomori Prefecture, Japan Earthquake",earthquake,9.62,4.629,0.024,166,reviewed,us,us
+2025-03-28T06:20:52.715Z,22.011,95.9363,10,7.7,mww,246,24,3.474,0.89,us,us7000pn9s,2026-05-15T09:12:34.190Z,"2025 Mandalay, Burma (Myanmar) Earthquake",earthquake,7.63,1.719,0.028,121,reviewed,us,us
+2024-08-08T07:42:55.206Z,31.7599,131.5021,24,7.1,mww,252,34,5.748,0.74,us,us6000nith,2025-09-08T03:47:56.356Z,"2024 Hyuganada Sea, Japan Earthquake",earthquake,6.71,1.855,0.031,99,reviewed,us,us
+2024-04-02T23:58:12.173Z,23.8356,121.5976,40,7.4,mww,322,17,0.337,0.93,us,us7000m9g4,2026-04-08T14:41:26.707Z,"15 km S of Hualien City, Taiwan",earthquake,4.73,1.877,0.027,133,reviewed,us,us
+2024-01-01T07:10:09.476Z,37.4874,137.271,10,7.5,mww,282,36,0.957,0.55,us,us6000m0xl,2026-06-01T20:13:16.871Z,"2024 Noto Peninsula, Japan Earthquake",earthquake,4.03,1.807,0.034,82,reviewed,us,us
+2022-07-27T00:43:26.871Z,17.5207,120.8181,33.729,7,mww,152,22,5.276,0.6,us,us6000i5rd,2025-09-07T07:37:38.257Z,"11 km NE of Bantay, Philippines",earthquake,7.93,2.766,0.044,50,reviewed,us,us
+2022-03-16T14:36:30.997Z,37.7132,141.5793,41,7.3,mww,,29,2.936,0.88,us,us6000h519,2025-09-10T18:42:15.235Z,"57 km ENE of Namie, Japan",earthquake,6.9,1.9,0.054,33,reviewed,us,us
+2021-05-21T18:04:13.565Z,34.5983,98.2513,10,7.3,mww,,9,4.655,0.77,us,us7000e54r,2025-12-22T18:00:56.941Z,"Southern Qinghai, China",earthquake,3,1.7,0.037,71,reviewed,us,us
+2021-03-20T09:09:43.966Z,38.4515,141.6477,43,7,mww,,35,2.378,0.75,us,us7000dl6y,2025-12-22T18:54:51.784Z,"30 km E of Ishinomaki, Japan",earthquake,7.2,1.9,0.045,47,reviewed,us,us
+2021-02-13T14:07:49.797Z,37.7265,141.7751,43.98,7.1,mww,,11,3.085,0.94,us,us6000dher,2025-12-22T18:50:06.812Z,"73 km ENE of Namie, Japan",earthquake,7,2.8,0.036,74,reviewed,us,us
+2020-03-25T02:49:21.160Z,48.9638,157.6955,57.8,7.5,mww,,12,4.109,0.66,us,us70008fi4,2025-12-22T18:31:40.721Z,"221 km SSE of Severo-Kuril’sk, Russia",earthquake,5.6,2.7,0.02,239,reviewed,us,us
+2020-02-13T10:33:44.406Z,45.6161,148.959,143,7,mww,,25,4.501,0.83,us,us70007pa9,2025-12-22T18:29:00.530Z,"95 km ENE of Kuril’sk, Russia",earthquake,7.3,1.9,0.027,131,reviewed,us,us
+2016-07-29T21:18:24.740Z,18.5429,145.5073,196,7.7,mww,,14,3.294,1.38,us,us100068jg,2022-05-03T18:53:40.050Z,"Pagan region, Northern Mariana Islands",earthquake,7.5,1.8,,,reviewed,us,us
+2016-04-15T16:25:06.220Z,32.7906,130.7543,10,7,mww,,32,0.349,0.85,us,us20005iis,2025-12-23T23:52:26.947Z,"6 km ESE of Kumamoto, Japan",earthquake,4.9,1.7,,,reviewed,us,us
+2015-05-30T11:23:02.110Z,27.8386,140.4931,664,7.8,mww,,12,1.675,1.12,us,us20002ki3,2026-05-07T09:32:29.555Z,"Bonin Islands, Japan region",earthquake,9.2,1.9,,,reviewed,us,us
+2013-10-25T17:10:19.710Z,37.1557,144.6611,35,7.1,mww,,10,3.968,1.01,us,usc000kn4n,2022-08-06T18:34:02.167Z,"off the east coast of Honshu, Japan",earthquake,,1.8,,,reviewed,us,us
+2013-05-24T05:44:48.980Z,54.892,153.221,598.1,8.3,mww,385,10,,1.02,us,usb000h4jh,2025-11-26T18:46:54.263Z,"2013 Sea of Okhotsk Earthquake",earthquake,,4.1,,,reviewed,us,us
+2013-04-19T03:05:52.650Z,46.221,150.788,110,7.2,mww,770,10.1,,0.86,us,usb000gbf8,2022-07-25T00:00:35.463Z,"252 km ENE of Kuril’sk, Russia",earthquake,,,,,reviewed,us,us
+2012-12-07T08:18:23.130Z,37.89,143.949,31,7.3,mww,918,14.8,,0.91,us,usp000jwjn,2026-02-17T22:06:23.752Z,"234 km SE of ?funato, Japan",earthquake,,,,,reviewed,us,us
+2012-08-14T02:59:38.460Z,49.8,145.064,583.2,7.7,mww,862,13.8,,0.83,us,usp000jq9h,2024-06-17T19:57:44.940Z,"156 km ENE of Poronaysk, Russia",earthquake,,2.6,,,reviewed,us,us
+2011-07-10T00:57:10.800Z,38.034,143.264,23,7,mww,531,12.4,,1.04,us,usp000j4gp,2022-09-06T12:45:53.236Z,"177 km ESE of Ishinomaki, Japan",earthquake,,,,,reviewed,us,us
+2011-04-07T14:32:43.290Z,38.276,141.588,42,7.1,mww,446,17.7,,0.94,us,usp000hzf6,2025-09-13T19:51:20.598Z,"29 km ESE of Ishinomaki, Japan",earthquake,,,,,reviewed,us,us
+2011-03-11T06:25:50.300Z,38.058,144.59,18.6,7.7,mwc,507,10.8,,0.85,us,usp000hvpg,2022-07-19T08:04:51.126Z,"272 km ESE of Kamaishi, Japan",earthquake,,8,,,reviewed,us,us
+2011-03-11T06:15:40.280Z,36.281,141.111,42.6,7.9,mwc,163,48.4,,1.44,us,usp000hvpa,2023-06-14T18:07:38.583Z,"47 km E of ?arai, Japan",earthquake,,9.6,,,reviewed,us,us
+2011-03-11T05:46:24.120Z,38.297,142.373,29,9.1,mww,541,9.5,,1.16,official,official20110311054624120_30,2026-04-13T17:42:14.045Z,"2011 Great Tohoku Earthquake, Japan",earthquake,,,,,reviewed,us,official
+2011-03-09T02:45:20.330Z,38.435,142.842,32,7.3,mww,550,17.4,,0.98,us,usp000hvhj,2022-07-19T07:40:29.766Z,"120 km SE of ?funato, Japan",earthquake,,,,,reviewed,us,us
+2010-12-21T17:19:40.660Z,26.901,143.698,14,7.4,mwc,603,13,,0.99,us,usp000hr97,2022-07-19T01:39:35.861Z,"Bonin Islands, Japan region",earthquake,,,,,reviewed,us,us
+2010-02-26T20:31:26.970Z,25.93,128.425,25,7,mwc,487,15.7,,1.05,us,usp000h7qu,2022-07-16T03:26:49.601Z,"70 km SE of Katsuren-haebaru, Japan",earthquake,,,,,reviewed,us,us

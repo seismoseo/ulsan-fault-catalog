@@ -87,6 +87,6 @@ code("""wf.plot_clusters_spacetime(Xhp, labels, kept, meta, reg=reg, win=WIN, st
 
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
-out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/05_cluster_spacetime_{NB_COMP}_phasenet_plus.ipynb"
+out = f"/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv/05_cluster_spacetime_{NB_COMP}_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")

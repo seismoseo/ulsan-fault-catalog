@@ -179,6 +179,6 @@ display(pd.DataFrame([ctl]))""")
 
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
-out = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/repeaters/09_antirepeater_multistation_1-25Hz_phasenet_plus.ipynb"
+out = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv/repeaters/09_antirepeater_multistation_1-25Hz_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")

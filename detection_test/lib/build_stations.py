@@ -11,7 +11,7 @@ Writes (relative to detection_test/):
 
 Station sources (disclosed):
   * KS + KG: epochs/coords/bands from KS_KG_metadata_1.0.2.xml (seismometer-window rule, same as 2014);
-             waveform archive = KS_KG/continuous/<STA>/<BAND>?.D/
+             waveform archive = KS_KG/<STA>/<BAND>?.D/
   * NS      : coords/epochs from GHBSN_station_list_240220_modified_code.csv (dense local Gyeongju array,
              deployed 2017+); band = HH (200 Hz, decimated at pick time); archive = NS/<STA>/HH?.D/
 Region = 100 km around the Gyeongju reference point (same as the KS/KG stage-1 work). A station is kept if its
@@ -25,7 +25,7 @@ from collections import defaultdict
 ROOT = "/home/msseo/works/02.Ulsan_Fault_detection"
 HERE = f"{ROOT}/detection_test"
 P_XML = f"{ROOT}/analysis/local_magnitudes/responses/master/KS_KG_metadata_1.0.2.xml"
-ARCH_KSKG = f"{ROOT}/KS_KG/continuous"
+ARCH_KSKG = f"{ROOT}/KS_KG"
 ARCH_NS = f"{ROOT}/NS"
 P_NS = f"{ROOT}/GHBSN_metadata/20231227/GHBSN_station_list_240220_modified_code.csv"
 ARCH_GJ = f"{ROOT}/GJ"

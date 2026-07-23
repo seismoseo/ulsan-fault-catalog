@@ -13,7 +13,7 @@ event metadata / picks / station geometry.
 from __future__ import annotations
 import os, sys, glob, math, itertools, pickle, warnings
 warnings.filterwarnings("ignore")
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 sys.path.insert(0, os.path.join(HYPO, "repeaters"))   # sibling uf_vpvs (not uflib)
 sys.path.insert(0, "/home/msseo/works/16.kma_absolute_location")
 import numpy as np

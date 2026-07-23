@@ -19,7 +19,7 @@ import pandas as pd
 
 from pocketquake.scaffold import ClusterSpec, register_cluster, write_cluster_module
 
-ULSAN_STA = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/station_table"
+ULSAN_STA = "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/ks_kg_station_table"
 
 
 def main():

@@ -32,7 +32,7 @@ from obspy import UTCDateTime, read
 from uflib import uf_cluster as ufc
 
 # --------------------------------------------------------------------- defaults
-HYPO_DIR   = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO_DIR   = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 WF_ROOT    = os.path.join(HYPO_DIR, "event_waveforms_ulsanfault")
 BLASTCLEAN = os.path.join(HYPO_DIR, "catalog_phasenet_plus_2010_2024_blastclean.csv")
 CLUSTER_SUMMARY = os.path.join(HYPO_DIR, "cluster_summary_phasenet_plus_2010_2024.csv")

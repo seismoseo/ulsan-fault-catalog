@@ -1,6 +1,6 @@
 """ufpipe — Ulsan-Fault seismicity-catalog pipeline (detection -> association -> PHS -> HYPOINVERSE).
 
-Renamed from the former KS_KG/models/pipeline (avoids the `pipeline` name collision with the external
+Renamed from the former outputs/models/pipeline (avoids the `pipeline` name collision with the external
 korea-cluster-relocation package). Installable: `pip install -e .` (env base), then:
 
     from ufpipe import core, config

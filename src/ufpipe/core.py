@@ -693,7 +693,7 @@ def write_phs(model, year, force=False):
 
 
 # ============================================================ HYPOINVERSE (4)
-# Control template, faithfully reproduced from KS_KG/HypoInv/UF<year>.sh.
+# Control template, faithfully reproduced from data/hypoinv/UF<year>.sh.
 # __REGION__ -> 'UF<year>', __MODEL__ -> velocity model (kim1983 / kim2011).
 HYP_TEMPLATE = """
 REP T T
@@ -734,7 +734,7 @@ STO
 
 def ensure_sta(model):
     """Ensure models/<model>/HypoInv/STA exists. The repo ships the per-year HYPOINVERSE
-    station files in KS_KG/HypoInv/STA as shared, picker-INDEPENDENT metadata; every model
+    station files in data/hypoinv/STA as shared, picker-INDEPENDENT metadata; every model
     symlinks them (cf. build_original_tree.py). If a model is set up without this link (as
     phasenet_plus was), HYPOINVERSE finds no stations, rejects every phase as 'UNKNOWN
     STATION', and locates ~0 events. Idempotent: never overwrites an existing (real or
@@ -753,7 +753,7 @@ def ensure_crh(model, velmodel):
     """Ensure models/<model>/HypoInv/<velmodel>/ holds the crustal-model files
     `<velmodel>_p.crh` / `<velmodel>_s.crh`. The HYPOINVERSE control reads them at the RELATIVE
     path '<velmodel>/<velmodel>_p.crh' (cwd = models/<model>/HypoInv), so they must sit beside the
-    located outputs. For `stead` the <velmodel> dir is a symlink to the shared KS_KG/HypoInv/<velmodel>
+    located outputs. For `stead` the <velmodel> dir is a symlink to the shared data/hypoinv/<velmodel>
     (which contains the .crh); for a model with a REAL <velmodel> output dir (original / phasenet_plus)
     the .crh are picker-independent and must be copied in — otherwise hyp1.40 prints
     '*** ERROR - CRUST FILE DOES NOT EXIST' and silently locates every event with its built-in DEFAULT

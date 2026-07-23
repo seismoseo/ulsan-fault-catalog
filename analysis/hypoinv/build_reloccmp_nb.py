@@ -362,6 +362,6 @@ md(r"""## 8  Summary
 
 nb["cells"]=C
 import os
-os.chdir("/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv")
+os.chdir("/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv")
 nbf.write(nb,"21.UF_relocation_dtcc_comparison.ipynb")
 print("wrote 21.UF_relocation_dtcc_comparison.ipynb with",len(C),"cells")

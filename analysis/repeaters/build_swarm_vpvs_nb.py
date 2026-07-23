@@ -8,7 +8,7 @@ Build + execute:  python build_swarm_vpvs_nb.py
 import os
 import nbformat as nbf
 
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 OUT = os.path.join(HYPO, "repeaters", "12_vpvs_swarm2021_KGHDB.ipynb")
 
 

@@ -23,7 +23,7 @@ import pandas as pd
 
 from pipeline import config
 
-ULSAN_WF = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/event_waveforms_ulsanfault"
+ULSAN_WF = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv/event_waveforms_ulsanfault"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 

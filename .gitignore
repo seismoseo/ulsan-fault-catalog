@@ -4,15 +4,16 @@
 # Restructured 2026-07 into src/ (packages) + analysis/ + detection_test/ + data/.
 # ==========================================================================
 
-# ---- Raw waveform data (TBs) — networks + the data/ symlink layer ----
+# ---- Raw waveform data (TBs) — the four networks (now parallel: station dirs at each root) ----
 /NS/
 /NS_100hz/
 /GJ/
-KS_KG/continuous/
+/KS_KG/
 /data/waveforms/
 
-# ---- Canonical output root going forward ----
+# ---- Regenerable output roots (pipeline products, generated scaffolds) ----
 /runs/
+/outputs/
 
 # ---- Oversized / exploratory root notebooks ----
 /01.PhaseNet_detection_test.ipynb
@@ -27,14 +28,11 @@ notebooks/01.PhaseNet_detection_test.ipynb
 **/pyocto/
 **/vel_model
 
-# ---- ufpipe generated model scaffolds (recreated by build_original_tree.py) ----
-KS_KG/models/
-
-# ---- HYPOINVERSE outputs (keep *.crh / *.sh / *.sta control inputs; drop big outputs) ----
-#      HypoInv control data stays under KS_KG/HypoInv/ ; its analysis code moved to analysis/hypoinv/.
-KS_KG/HypoInv/**/*.prt
-KS_KG/HypoInv/**/*.arc
-KS_KG/HypoInv/**/*.sum
+# ---- HYPOINVERSE (data/hypoinv): keep *.crh / *.sh / *.sta control inputs; drop the big outputs ----
+#      HypoInv is now data/hypoinv/ ; its analysis code moved to analysis/hypoinv/.
+data/hypoinv/**/*.prt
+data/hypoinv/**/*.arc
+data/hypoinv/**/*.sum
 **/*.phs
 **/event_waveforms/
 **/event_waveforms_*/
@@ -43,15 +41,14 @@ KS_KG/HypoInv/**/*.sum
 **/wf_similarity_*figs/
 
 # ---- HypoInv working data (notebooks, catalogs, map html, logs, drivers) ----
-KS_KG/HypoInv/**/*.ipynb
-KS_KG/HypoInv/**/*.csv
-KS_KG/HypoInv/**/*.html
-KS_KG/HypoInv/UF*.sh
-KS_KG/HypoInv/STA/hypoinverse/
-KS_KG/HypoInv/logs/
-KS_KG/HypoInv/figs/
-KS_KG/HypoInv/archive/
-KS_KG/detection_location/
+data/hypoinv/**/*.ipynb
+data/hypoinv/**/*.csv
+data/hypoinv/**/*.html
+data/hypoinv/UF*.sh
+data/hypoinv/STA/hypoinverse/
+data/hypoinv/logs/
+data/hypoinv/figs/
+data/hypoinv/archive/
 
 # ---- analysis/ generated notebooks + logs (builders are tracked; their output notebooks are not) ----
 analysis/**/*.ipynb

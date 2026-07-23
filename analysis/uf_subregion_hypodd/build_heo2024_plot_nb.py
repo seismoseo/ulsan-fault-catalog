@@ -19,7 +19,7 @@ PhaseNet+ → HypoInverse → HypoDD relocation of the same zone.""")
 co("""import os, sys
 import numpy as np, pandas as pd
 PQ   = "/home/msseo/works/15.PocketQuake"
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 for p in (PQ, PQ + "/external/korea-cluster-relocation", HYPO):
     if p not in sys.path: sys.path.insert(0, p)
 import uf_cluster as ufc

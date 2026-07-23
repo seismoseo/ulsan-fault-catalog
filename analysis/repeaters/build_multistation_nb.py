@@ -17,7 +17,7 @@ NB_COMP = sys.argv[1] if len(sys.argv) > 1 else "HHZ"
 assert NB_COMP in ("HHZ", "HHN", "HHE"), NB_COMP
 NB_BAND = sys.argv[2] if len(sys.argv) > 2 else "5-15"     # clustering/confirmation band, e.g. "5-25"
 LO, HI = (int(x) for x in NB_BAND.split("-"))
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 
 nb = nbf.v4.new_notebook()
 C = []

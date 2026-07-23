@@ -1,7 +1,7 @@
 """uflib — shared Ulsan-Fault analysis library.
 
-Three modules, formerly in KS_KG/HypoInv/ and imported everywhere via a hard-coded
-`sys.path.insert(".../KS_KG/HypoInv")`. Now a proper package: `pip install -e .` (env `ulsan`),
+Three modules, formerly in data/hypoinv/ and imported everywhere via a hard-coded
+`sys.path.insert(".../data/hypoinv")`. Now a proper package: `pip install -e .` (env `ulsan`),
 then `from uflib import uf_cluster` / `import uflib.uf_cluster` from any cwd.
 
   uf_cluster              spatial/temporal quarry-blast decluster + map helpers (QC dict, read_sum, apply_qc)

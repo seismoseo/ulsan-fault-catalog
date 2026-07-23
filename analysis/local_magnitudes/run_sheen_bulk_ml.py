@@ -21,7 +21,7 @@ import ml_pipeline as mlp
 import pandas as pd
 
 HERE = os.path.abspath(os.path.dirname(__file__))
-HYP = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYP = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 
 ATT_FN = mlp.ml_sheen2018
 RESTRICT_Z = False  # Sheen uses all 3 components per the paper's coefficients

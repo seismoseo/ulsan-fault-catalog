@@ -25,7 +25,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 PQ = "/home/msseo/works/15.PocketQuake"
 PIPE = os.path.join(PQ, "external", "korea-cluster-relocation")
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 RELOC = "/home/msseo/works/02.Ulsan_Fault_detection/analysis/relocation"   # scaffold_offline.py / stage.py
 RUNS = os.path.join(PIPE, "pipeline", "runs")
 SLUG = "uf_subregion_reuse"

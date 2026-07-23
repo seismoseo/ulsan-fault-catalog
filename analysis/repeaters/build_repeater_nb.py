@@ -284,6 +284,6 @@ md(f"""## 9 · How to read this
 nb["cells"] = C
 nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
 _suffix = "" if IS_DEFAULT_BAND else f"_{BAND_TAG}"
-out = f"/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv/repeaters/07_repeaters_KGHDB_{NB_COMP}{_suffix}{LINKAGE_TAG}_phasenet_plus.ipynb"
+out = f"/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv/repeaters/07_repeaters_KGHDB_{NB_COMP}{_suffix}{LINKAGE_TAG}_phasenet_plus.ipynb"
 nbf.write(nb, out)
 print("wrote", out, "with", len(C), "cells")

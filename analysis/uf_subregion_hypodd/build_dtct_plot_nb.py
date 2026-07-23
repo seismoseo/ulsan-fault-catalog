@@ -24,7 +24,7 @@ import matplotlib as mpl, matplotlib.font_manager as fm
 
 PQ   = "/home/msseo/works/15.PocketQuake"
 PIPE = os.path.join(PQ, "external", "korea-cluster-relocation")
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 for p in (PQ, PIPE, HYPO):
     if p not in sys.path: sys.path.insert(0, p)
 from pipeline.core import sumio

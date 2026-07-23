@@ -30,7 +30,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 PQ = "/home/msseo/works/15.PocketQuake"
 PIPE = os.path.join(PQ, "external", "korea-cluster-relocation")
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 RUNS = os.path.join(PIPE, "pipeline", "runs")
 PY = sys.executable
 ENV = {**os.environ, "PYTHONPATH": f"{PQ}:{PIPE}:{HYPO}"}

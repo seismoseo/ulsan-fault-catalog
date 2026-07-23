@@ -133,6 +133,6 @@ md(r"""## 4 · Summary
 
 nb["cells"]=C
 import os
-os.chdir("/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv")
+os.chdir("/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv")
 nbf.write(nb,"23.UF_istart2_dimension_check.ipynb")
 print("wrote 23.UF_istart2_dimension_check.ipynb",len(C),"cells")

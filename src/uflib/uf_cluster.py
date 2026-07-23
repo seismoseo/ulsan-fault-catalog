@@ -29,7 +29,7 @@ import pandas as pd
 
 # --------------------------------------------------------------------- defaults
 FAULT_TRACE = "/home/msseo/from_PAGO/21.230822_SRC_Workshop/map-fig2/Map2/ss.txt"
-DEFAULT_STA = ("/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/models/stead/"
+DEFAULT_STA = ("/home/msseo/works/02.Ulsan_Fault_detection/outputs/models/stead/"
                "HypoInv/STA/UF2024.sta")
 REGION    = [128.5, 130.0, 35.3, 36.5]      # full study area [lon0, lon1, lat0, lat1]
 SUBREGION = [129.25, 129.55, 35.6, 35.9]    # Ulsan Fault zone (east-of-fault box)

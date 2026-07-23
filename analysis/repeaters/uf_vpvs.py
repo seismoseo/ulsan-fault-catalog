@@ -29,7 +29,7 @@ import warnings
 
 import numpy as np
 
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 sys.path.insert(0, "/home/msseo/works/16.kma_absolute_location")
 from obspy import read                                          # noqa: E402
 from obspy.signal.cross_correlation import correlate            # noqa: E402

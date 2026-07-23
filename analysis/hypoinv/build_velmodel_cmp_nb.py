@@ -358,6 +358,6 @@ print("   general clustering (clustering.run_hdbscan).")""")
 
 nb["cells"]=C
 import os
-os.chdir("/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv")
+os.chdir("/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv")
 nbf.write(nb,"22.UF_reloc_velmodel_comparison.ipynb")
 print("wrote 22.UF_reloc_velmodel_comparison.ipynb with",len(C),"cells")

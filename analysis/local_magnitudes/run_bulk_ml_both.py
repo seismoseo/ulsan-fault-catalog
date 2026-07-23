@@ -22,7 +22,7 @@ import pandas as pd
 warnings.filterwarnings("ignore")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HYP  = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYP  = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 
 CAT_IN = f"{HYP}/catalog_phasenet_plus_2010_2024_blastclean.csv"
 EVENT_ROOTS = (

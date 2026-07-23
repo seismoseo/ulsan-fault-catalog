@@ -11,7 +11,7 @@ Build + execute:  python build_uf_vpvs_nb.py
 import os
 import nbformat as nbf
 
-HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
+HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv"
 OUT = os.path.join(HYPO, "repeaters", "11_vpvs_repeaters_KGHDB_5-25Hz.ipynb")
 
 
