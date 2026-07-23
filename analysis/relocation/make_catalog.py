@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 HYPO = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"
-ML_CSV = ("/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/local_magnitudes/"
+ML_CSV = ("/home/msseo/works/02.Ulsan_Fault_detection/analysis/local_magnitudes/"
           "catalog_phasenet_plus_2010_2024_blastclean_with_ml.csv")
 KST_OFFSET_H = 9.0
 STATION, COMP, WIN, PRIMARY, MAXLAG = "KG.HDB", "HHZ", (-0.5, 7.5), (5, 25), 0.2

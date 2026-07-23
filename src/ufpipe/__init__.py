@@ -1,11 +1,12 @@
-"""KS_KG seismicity-catalog pipeline (detection -> association -> PHS -> HYPOINVERSE).
+"""ufpipe — Ulsan-Fault seismicity-catalog pipeline (detection -> association -> PHS -> HYPOINVERSE).
 
-Importable from notebooks:
+Renamed from the former KS_KG/models/pipeline (avoids the `pipeline` name collision with the external
+korea-cluster-relocation package). Installable: `pip install -e .` (env base), then:
 
-    import sys; sys.path.insert(0, "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/models/pipeline")
-    import core, config
+    from ufpipe import core, config
     core.run_detection_year("original", 2024, days=range(1, 6))
 
-or driven from the CLIs (detection.py, association.py, make_phs.py,
-run_hypoinverse.py, run_pipeline.py).
+or driven from the CLIs:  python -m ufpipe.run_pipeline --model original --years 2024
+(the module files detection.py / association.py / make_phs.py / run_hypoinverse.py / run_pipeline.py
+also run directly, e.g. `python run_pipeline.py ...`, via their self-insert).
 """

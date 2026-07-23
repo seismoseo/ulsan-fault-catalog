@@ -1,66 +1,73 @@
 # ==========================================================================
 # Ulsan Fault catalog — version control tracks CODE + DOCS + small METADATA.
 # Waveforms (~7 TB) and regenerable outputs are deliberately NOT tracked.
+# Restructured 2026-07 into src/ (packages) + analysis/ + detection_test/ + data/.
 # ==========================================================================
 
-# ---- Raw waveform data (TBs) ----
+# ---- Raw waveform data (TBs) — networks + the data/ symlink layer ----
 /NS/
+/NS_100hz/
+/GJ/
 KS_KG/continuous/
+/data/waveforms/
 
-# ---- Oversized exploratory notebook (424 MB) ----
+# ---- Canonical output root going forward ----
+/runs/
+
+# ---- Oversized / exploratory root notebooks ----
 /01.PhaseNet_detection_test.ipynb
+/02.Multi-station_detection.ipynb
+notebooks/01.PhaseNet_detection_test.ipynb
 
 # ---- Third-party / tutorial material (large .h5, FMF package) ----
 /tuto_material/
 
-# ---- Pipeline data products (regenerable) ----
+# ---- Pipeline data products (regenerable), any location ----
 **/picks/
-KS_KG/pyocto/
-KS_KG/vel_model
+**/pyocto/
 **/vel_model
 
-# ---- models/<model> generated scaffold (recreated by build_original_tree.py) ----
-KS_KG/models/stead/
-KS_KG/models/*/pyocto/
-KS_KG/models/*/station_table/
-KS_KG/models/*/phasenet_plus_raw/
-KS_KG/models/*/HypoInv/STA
-KS_KG/models/*/HypoInv/PHS/
-KS_KG/models/*/HypoInv/kim1983/
-KS_KG/models/*/HypoInv/kim2011/
-KS_KG/models/*/hypodd/
+# ---- ufpipe generated model scaffolds (recreated by build_original_tree.py) ----
+KS_KG/models/
 
-# ---- HYPOINVERSE results (keep *.crh / *.sh / *.sta; drop the big outputs) ----
+# ---- HYPOINVERSE outputs (keep *.crh / *.sh / *.sta control inputs; drop big outputs) ----
+#      HypoInv control data stays under KS_KG/HypoInv/ ; its analysis code moved to analysis/hypoinv/.
 KS_KG/HypoInv/**/*.prt
 KS_KG/HypoInv/**/*.arc
 KS_KG/HypoInv/**/*.sum
 **/*.phs
-KS_KG/HypoInv/event_waveforms/
-KS_KG/HypoInv/filtered_waveforms/
+**/event_waveforms/
+**/event_waveforms_*/
+**/filtered_waveforms/
+**/wf_similarity_cache*/
+**/wf_similarity_*figs/
 
-# ---- Waveform-similarity blast screen: per-event SAC sets, CC/feature caches, figures, logs
-#      (regenerable / large: event_waveforms_ulsanfault ~12 GB, event_waveforms_blastclean ~57 GB,
-#       wf_similarity_cache ~0.4 GB). Tracked code = uf_waveform_similarity.py + build_wf_nb.py +
-#       cross_component_blast.py; notebooks/CSVs are covered by the HypoInv *.ipynb / *.csv rules. ----
-KS_KG/HypoInv/event_waveforms_*/
-KS_KG/HypoInv/wf_similarity_cache*/
-KS_KG/HypoInv/wf_similarity_*figs/
-KS_KG/HypoInv/logs/
-
-# ---- Pre-existing exploratory notebooks/scripts + generated copies ----
-# (kept on the workstation, deliberately NOT versioned — the repo tracks the
-#  new automated pipeline + docs + small reference metadata only)
-/02.Multi-station_detection.ipynb
-KS_KG/detection_location/
+# ---- HypoInv working data (notebooks, catalogs, map html, logs, drivers) ----
 KS_KG/HypoInv/**/*.ipynb
+KS_KG/HypoInv/**/*.csv
+KS_KG/HypoInv/**/*.html
 KS_KG/HypoInv/UF*.sh
 KS_KG/HypoInv/STA/hypoinverse/
-KS_KG/HypoInv/**/*.csv
-# notebook map outputs (e.g. cluster3d_*.html); uf_cluster.py IS tracked
-KS_KG/HypoInv/**/*.html
-KS_KG/models/original/
-KS_KG/models/pipeline/notebooks/
-KS_KG/models/*/*.log
+KS_KG/HypoInv/logs/
+KS_KG/HypoInv/figs/
+KS_KG/HypoInv/archive/
+KS_KG/detection_location/
+
+# ---- analysis/ generated notebooks + logs (builders are tracked; their output notebooks are not) ----
+analysis/**/*.ipynb
+analysis/**/*.log
+analysis/**/logs/
+analysis/local_magnitudes/responses/master/     # master StationXML copied from external (142 MB)
+
+# ---- detection_test/ pipeline data products (picks/catalogs/SAC stores/generated notebooks) ----
+detection_test/picks/
+detection_test/catalogs/
+detection_test/cache/
+detection_test/logs/
+detection_test/reloc_*_uf*/event_sac/
+detection_test/reloc_*_uf*/merged_archive/
+detection_test/reloc_*_uf*/results/           # symlinks into the external runs/ tree
+detection_test/**/*.ipynb
 
 # ---- Jupyter / Python noise ----
 **/.ipynb_checkpoints/
@@ -69,6 +76,14 @@ __pycache__/
 .DS_Store
 .virtual_documents/
 
-# ---- local_magnitudes: master StationXML copied from external source (142 MB) ----
-KS_KG/local_magnitudes/responses/master/
-KS_KG/local_magnitudes/__pycache__/
+# ---- editable-install / build artifacts ----
+*.egg-info/
+build/
+
+# ---- backup / marker cruft ----
+*.pre_*_bak
+**/.nb*_done
+**/.nb*_exec.log
+*.cpt
+gmt.history
+**/gmt.history
