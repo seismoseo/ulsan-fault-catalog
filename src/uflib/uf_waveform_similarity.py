@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 from obspy import UTCDateTime, read
 
-import uf_cluster as ufc
+from uflib import uf_cluster as ufc
 
 # --------------------------------------------------------------------- defaults
 HYPO_DIR   = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv"

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ulsan-fault-catalog"
+version = "0.1.0"
+requires-python = ">=3.11"
+# Runtime deps (obspy, torch, seisbench, pyocto, pygmt, ...) are provided by the conda env `ulsan`
+# (see environment.yml). Left empty so `pip install -e .` does NOT try to re-resolve them.
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
