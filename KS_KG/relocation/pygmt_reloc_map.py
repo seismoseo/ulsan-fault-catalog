@@ -92,7 +92,10 @@ def make_map(slug="f738_reuse", outdir=None):
         with fig.set_panel(0):
             fig.basemap(region=reg, projection=f"M{PANEL}c",
                         frame=["WSne+tRegional: UF subregion and faults", "xa0.1f0.05", "ya0.1f0.05"])
-            fig.coast(land="245", water="220/233/245", shorelines="0.4p,gray60")
+            # region+projection passed explicitly: inside fig.subplot the coast fill otherwise
+            # clips to a stale sub-rectangle (fake boundary); resolution="f" = accurate local coast
+            fig.coast(region=reg, projection=f"M{PANEL}c", land="245", water="220/233/245",
+                      shorelines="0.4p,gray60", resolution="f")
             _plot_faults(fig, ufc)
             fig.plot(x=zbx, y=zby, pen="1.2p,red")                          # zoom-area box
             fig.plot(x=[float(D.lon.mean())], y=[float(D.lat.mean())], style="a0.45c", fill="red", pen="0.5p,black")

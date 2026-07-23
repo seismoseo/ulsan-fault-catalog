@@ -12,8 +12,8 @@ picker models become available.
 ## Pipeline
 
 ```
-Detection (PhaseNet)  ->  Association (PyOcto, strict)  ->  Pick augmentation  ->  Absolute location (HYPOINVERSE)  ->  Local magnitudes (ML)  ->  Relative relocation (HypoDD, future)
-   picks CSV               events + assignments              augmented assignments    UF<year>.{sum,arc}              Heo 2024 + Sheen 2018 ML       (not yet implemented)
+Detection (PhaseNet)  ->  Association (PyOcto, strict)  ->  Pick augmentation  ->  Absolute location (HYPOINVERSE)  ->  Local magnitudes (ML)  ->  Relative relocation (HypoDD dt.cc) ✅
+   picks CSV               events + assignments              augmented assignments    UF<year>.{sum,arc}              Heo 2024 + Sheen 2018 ML       uf_subregion dt.cc reloc (§ below)
 ```
 
 **Stages** (from `models/pipeline/run_pipeline.py`): `detection` → `association` → `augment` → `phs` → `locate`.
@@ -29,6 +29,148 @@ time-window CSV.
 
 The automated implementation lives in **`KS_KG/models/pipeline/`** (shared module + thin CLIs).
 See `docs/how-to-run.md` for commands and `docs/pipeline.md` for stage details.
+
+## Relative relocation — HypoDD dt.cc + MAXDATA recompile (2026-06-25)
+
+Whole-box dt.cc relocation of the ~2,600 UF-subregion events is **DONE**. Outputs in
+`…/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/uf_subregion_reuse/2.HypoDD/02.dt.cc/`:
+`hypoDD.loc_backup` (HypoInverse absolute), `hypoDD.reloc_dtct_only` (dt.ct), `hypoDD.reloc` (dt.cc≥0.7).
+Comparison notebook: `KS_KG/HypoInv/21.UF_relocation_dtcc_comparison.ipynb`.
+
+**Result:** dt.cc tightens *local* clustering hard — median nearest-neighbour distance
+254 m (absolute) → 147 m (dt.ct) → **51 m (dt.cc≥0.7)** — and recovers absolute structure that dt.ct
+artificially shrank. 78% of events get cc links (median NCCP 6 / NCCS 14). The all-pairs CC xcorr is the
+slow part (~days incl. GPU stalls) but clearly worth it.
+
+**Two gotchas that cost real time (KEY):**
+1. **Empty dt.cc combine → silent dt.ct-only reloc.** The framework's combine step (`xcorr._filter_combine`,
+   filter CC≥0.7 → `dt.cc_0.7_combined`) iterates a `pairs` list that the kill/resume churn left EMPTY,
+   so it wrote a **0-byte** file and hypoDD relocated on `dt.ct` ALONE without error. **Always check
+   `dt.cc_0.7_combined` is non-zero** before trusting a dt.cc reloc; regenerate from the per-pair
+   `dt.cc_P/`, `dt.cc_S/` dirs (keep `line[23:34]` ≥ 0.7) if empty.
+2. **HypoDD `MAXDATA` (Fortran compile-time array).** Stock binary had `MAXDATA=3,000,000` in
+   `include/hypoDD.inc`; full all-pairs CC≥0.7 (7.3 M cc + 2.6 M ct = 9.9 M dt's) overflows it
+   ("STOP >>> Increase MAXDATA"). Recompiled Waldhauser source (`/home/msseo/Downloads/HypoDD`) with
+   `MAXDATA=15,000,000`. The >2 GB static arrays need the **large code model**:
+   `make FFLAGS="-O -I../../include -std=legacy -mcmodel=large -fno-pie"
+   CFLAGS="-O -I../../include -mcmodel=large -fno-pie" LDFLAGS="-no-pie -mcmodel=large"` (also strip the
+   macOS `LDFLAGS` line in `src/hypoDD/Makefile`). Installed: `/home/msseo/bin/hypoDD`
+   (old 3 M binary kept as `hypoDD_maxdata3M_backup`).
+
+## 2016 Gyeongju 4-picker comparison (`Gyeongju_catalog/detection_test/`, 2026-07)
+
+Controlled comparison of four ML pickers (PhaseNet+, PhaseNet-original, PhaseNet-STEAD, EQT-STEAD) on year
+2016 through one identical pipeline (detection → PyOcto → HypoInverse → QC → HypoDD dt.cc), consistent
+P=S=0.2 threshold, picker the only variable. **See `Gyeongju_catalog/detection_test/CLAUDE.md` for the full
+sub-project guide, `reloc_2016_uf/PIPELINE.md` for invariants, and `reloc_2016_uf/study_guide.pdf`.**
+Headline: PN+ yields the most cross-correlation-resolved events (255) despite not picking the most —
+pick quantity ≠ located quality. **CRITICAL bug fixed (2026-07):** the QC subset used to re-run HypoInverse
+(redundant) which mis-staged picks by timestamp → wrong origins → corrupted rereference/dt.cc (same class as
+the pyocto-vs-timewindow rule above, but it also poisons dt.cc because origins are SUBTRACTED there). Fixed by
+reusing the full-run HypoInverse (`inject_full_hypoinverse`); backups at `1.HypoInv/kim2011.rerun_backup`.
+
+## Cluster analysis + per-volume relocation (Phase 2–3, `KS_KG/reloc_analysis/` + `uf_subregion_hypodd/`, 2026-07)
+
+Downstream of the whole-box dt.cc reloc: NND declustering, cluster deep-dives, and per-volume HypoDD
+relocation of the two largest-event volumes. Builders emit notebooks (run in base): nb26 R-T density, nb27
+fractal dimension (Df=1.2), nb28 top-10 NND family deep-dive, nb29 completeness-augmented NND, nb30/31/32
+1 km³ **volume-history** cubes (decompose in-cube non-members into other-family / background / not-in-pop),
+nb33 **per-volume relocation + bootstrap** of the top-2 volumes (`build_cluster_svd_nb.py`), nb34 the SAME for
+the **next 8 largest-event clusters** (ranks 3–10; `build_cluster_svd_next8_nb.py`).
+
+- **NND**: always feed `t_year` via the canonical `kma_absolute_location.nnd.decimal_year` (exact year length).
+  A hand-rolled `(doy-1)/365.25` day-resolution formula force-linked same-day pairs (η=0) and faked km cluster
+  extents — fixed; don't re-derive it. Df=1.2 (full-pop GP dimension; dt.cc-only 1.16). link_rmax_km=1.0 for UF.
+- **Per-volume runner** (`uf_subregion_hypodd/run_svd_volumes.py`, stages select|extract|run|primary|boot|analyze):
+  pulls every relocated event in a 1 km³ cube (`svd_volumes/{m389,m373}/`), subsets dt.cc/dt.ct by cuspid
+  (streaming filter), kim2011. `stage_run` does the SVD (ISOLV=1) diagnostic → `hypoDD.reloc.svd`; `stage_primary`
+  writes the **reported** solution. `svd_volumes_catseed/` = a catalog-seeded backup.
+- **KEY solver finding — absolute depth is a DD NULL SPACE; report LSQR-CND on the whole-box seed, NOT SVD.**
+  Differential times pin *relative* positions tightly but barely constrain the *absolute centroid depth*.
+  Undamped **SVD** has no anchor, so it slides the whole cloud down that null direction to a **seed-dependent**
+  depth (m373: whole-box 11.5 → 9.5 km from a whole-box seed, but 10.4 km from a catalog seed — proves it's the
+  solver, not the data; m389 barely moves, 13.77→13.75, so it's volume-specific). **Light-damped LSQR (CND 40-80,
+  `stage_primary`)** is softly anchored to the seed and holds the **physical** whole-box centroid at *every* damping
+  level, gives the **same relative structure** as SVD (≈10 m median, identical thickness), and drops no events. So
+  the reported solver is LSQR-CND; SVD is kept only as the nb33 §1 depth-drift diagnostic. **LSQR is also ~500×
+  faster** than SVD (m389 3 s vs 26 min; dense O(params²)).
+- **Damping = PocketQuake-style PER-SET adaptive (`_adaptive_damp`, CND 40–80 per weighting set).** stage_primary
+  and the bootstrap tune EACH of the 7 weighting sets' DAMP via a feedback loop (`new = damp·(CND/60)^0.5`, ≤12
+  attempts) so every set's worst-iteration CND lands in 40–80 — vendored from `pipeline/core/hypodd.py:_exec_hypodd`.
+  **The earlier single-global-DAMP scan (floor 15, final-iteration CND only) was WRONG**: it over-damped small
+  clusters (c105 CND 8, c41 18) and under-damped nothing here, and even m389 in nb33 had 3 of 7 cc-sets at CND
+  83–94. Fix records `primary_damps` (7-tuple) + `primary_cnd_per_set` + `primary_cnd_inband` in meta; the bootstrap
+  REUSES `primary_damps` so replicas match the reported estimator. Iteration→set mapping is by ORDER (i//NITER),
+  not weighting signature (hypoDD rewrites echoed −9→−999, breaking signature matching). A uniform DAMP does NOT
+  hold CND constant across iterations — it drifts (c1 44–67) — which is why per-set adaptive is needed.
+- **Bootstrap = global resampling, LSQR-CND, seeded on the reported solution, n=200** (`--boot-solver lsqr
+  --boot-resample global`, now the defaults). `ez95` is **RELATIVE precision** (event-to-event) — honest for
+  that (stable per-set-CND-40-80 estimator, global resample captures pair selection, ~0 failed replicas). It is **NOT** the
+  absolute-depth uncertainty: every replica is seeded on one solution so the centroid is fixed by construction; the
+  true absolute-depth uncertainty is the **~1-2 km** solver spread from §1, uncaptured by any such bootstrap. (The
+  earlier "SVD bootstrap 34 m is the honest depth error" reading was wrong — that scatter was the null-space wander,
+  not relative precision.) within-pair resampling omits pair-selection variance and runs ~30% smaller.
+- **next 8 clusters (ranks 3–10 by mainshock M): `run_svd_volumes_next8.py` + nb34.** The companion runner imports
+  `run_svd_volumes.py`, points `rsv.BASE` at `svd_volumes_next8/`, and reuses every stage; only `stage_select8`
+  differs (`fammax.iloc[2:10]`, vol names `c<clusterid>`, soft nb31 count-check). Volumes c11/c4/c40/c41/c1/c105/
+  c8/c95 (n 5–86). Findings: SVD-depth wander recurs (c4 11.4→7.1 km, c95 9.9→7.7 km); c1/c8 tightly constrained
+  (ez95 ~3–7 m); tiny c105 (5 ev) / c41 (12 ev) weak (ez95 80–240 m) — disclose. All near-0 failed replicas.
+- **PCA plane fit (nb33 §3b + nb34 §4b, error-gated).** `pca_plane` = unconditional PCA (strike/dip from PC3
+  normal; length/width/thickness = full extent along PC1/PC2/PC3), events gated to **max 95% bootstrap half-width
+  < 100 m**; 95% CIs by re-fitting the same event set on every replica (strike branch-centred). m373 fit 3 ways:
+  all / before / after the Nov-2023 mainshock. KEY: **before-MS (C6 swarm) strike ~70°/dip ~83° vs after-MS
+  strike ~161°/dip ~53° differ**, so the "all" strike is unstable (CI ~72–214°) — the split is necessary. Shape
+  gate printed with every fit: top-2 stay **BLOB** (indicative only); in nb34 **c4 & c40 resolve as PLANES**
+  (c40 strike ~50°/dip ~85°) once properly damped, c11/c95/c105 linear, c1/c8 blob. Two views: (1) plane rectangle
+  on the geographic E-N/E-Z/N-Z sections; (2) **clear fault-frame read-out — map view = strike (solid line+arrow),
+  across-strike depth section = dip** (matches `KS_KG/relocation` fig_fault_strikedip/alongdip). `KS_KG/relocation`
+  already does SVD plane fits + fault_sections viz via PocketQuake — reference it for style.
+- **PRODUCTION = kim2011, ISTART=2, per-set adaptive damping (2026-07-07 FINAL). ISTART=1 was the contraction
+  bug.** The adaptive relocation looked spatially CONTRACTED vs absolute (E-N RMS 2.6 vs 3.5 km, footprint 12 vs
+  15 km) — the cause was **ISTART=1**, which initialises every event at the cluster CENTROID (collapsed), so the
+  inversion must spread them and damping resists → contraction. NOT ph2dt (MAXSEP=10 km is generous; the DAMP=600
+  run with the same ph2dt kept the extent). **`ISTART=2` (start from the catalog/absolute event.dat locations)
+  fixes it**: dt.cc E-N RMS **3.45 vs absolute 3.49**, dt.ct 3.20 vs 3.22 — extent matches in all 3 dims, cc-links
+  retained (dt.cc 2116, dt.ct 5/5 in band), all 7 dt.cc sets CN 60-68. `make_inp(...,istart=2)` sets the ISTART
+  column; `_adaptive_damp(...,istart=2)`. Production dt.cc = per-set DAMP [978,1079,1044,751,671,614,589]; dt.ct =
+  [473,569,506,460,243] (already in band at ISTART=2). Backups: dt.cc `hypoDD.reloc.istart1.bak` + `.damp600.bak`;
+  dt.ct `.istart1.bak`. **Per-volume runner also set to ISTART=2** (stage_primary + bootstrap). nb23
+  `23.UF_istart2_dimension_check.ipynb` documents the fix (maps: absolute / ISTART=1 contracted / ISTART=2
+  restored). **Lesson: never inspect `hypoDD.reloc` mid-run** — `_exec_hypodd_once` deletes it before regenerating,
+  so a mid-run read shows empty; monitor via a completion sentinel (result.json), not intermediate files, and use
+  the right pgrep pattern (`python3 run.py`, not the dir path).
+- **[superseded by the ISTART=2 bullet above] Earlier ISTART=1 adaptive relocation (2026-07-07).**
+  History: DAMP=600 (deliberate, `run_kim2011_dtcc.py:53-58`) gave final CND ~58 in band + 2157 cc-resolved; the
+  high CND 121-149 is the EARLY ct-weighted transient (sets 0-2), not the converged CN (max-per-set penalizes the
+  ct setup phase — my earlier "1/7 in band" alarm was that measurement error). The author had rejected PocketQuake
+  adaptive because it drove DAMP DOWN to 6-8 (lost cc links → 487). **The user asked for per-set adaptive CN-40-80
+  anyway, and it WORKS here because the fix is to RAISE the out-of-band ct sets, not lower them:** `_adaptive_damp`
+  converged to per-set DAMP **[1049,1149,1111,800,682,632,611]** (ct raised ~600→~1050, cc kept ~600-800), giving
+  **all 7 sets CN 61-72 AND retaining 2140/2157 cc-resolved (99.2%)**. Swapped into production (backup
+  `hypoDD.reloc.damp600.bak`); positions shift ~1 km absolute (relative structure 15-58 m, unchanged); the
+  catalog CSV was regenerated and **ML is invariant (median Δ -0.001)**. NND family labels relabeled (same physical
+  clusters, same mainshock IDs): c11→c12, c40→c38, c41→c39, c105→c101, c95→c93; nb34 + `run_svd_volumes_next8.py`
+  read `svd_volumes_next8/volumes.txt` for the current set. **`make_inp`/`_template_*` now match weighting rows
+  STRUCTURALLY (10 numeric tokens in the data-weighting section), NOT by DAMP=="600"** — else they break on the
+  new adaptive-DAMP template. `_max_cnd_per_set` groups iterations by weighting-signature change (handles the
+  whole-box 6-ct + 4-cc structure). To reproduce/adjust the whole-box damping, update `run_kim2011_dtcc.py` (it
+  still writes uniform 600; the current production reloc came from `_adaptive_damp`, not that script).
+- **dt.ct-only run (03b.dt.ct_kim2011) ALSO made adaptive + HypoInv notebooks re-run (2026-07-07).** dt.ct was
+  already per-set tuned (5 sets, DAMP [473,569,506,460,243], 4/5 in band — set 0 marginally high CN 84); adaptive →
+  [561,622,543,497,259], all 5 CN 61-65, ~563 m shift. Applied to production (backup `hypoDD.reloc.prev.bak`).
+  nb21 (HypoInv/dt.ct/dt.cc 3-way, now both cc+ct adaptive — dt.ct→dt.cc 822 m H / 141 m V) re-run; nb22 (velocity)
+  reads the kim2011 `hypoDD.reloc.damp600.bak` to stay MATCHED-DAMP600 vs generic-600 (else velocity confounds with
+  the adaptive ~1 km shift; noted in-notebook). The 7-set `_adaptive_damp` is dt.cc-specific; the dt.ct 5-set one-off
+  = scratchpad `run_dtct_adaptive.py` (generalize to N sets if reused). dt.ct inputs unchanged by the dt.cc reloc.
+- **event.dat seeding bug (fixed)**: `open(p,"w").write(seed(read(p)))` truncates before read → empty event.dat
+  → hypoDD reads 0 events, "0 s" run, and a stale `hypoDD.reloc` masks the failure. Fix = read-then-write +
+  assert non-empty + delete any stale reloc before each run.
+- **KG.HDB waveform-shape break, 2015-05-21 (found via CC in nb33 §8)**: the M3.89-volume CC matrix shows a
+  permanent similarity step at the *documented* KG.HDB sensor break 2015-05-21 (pre-vs-post CC 0.33 vs within
+  0.67, does not recover). It is **only at KG.HDB** (multi-station contrast ~0.2 vs ~0.02 elsewhere) → the
+  instrument, not the sources. DISTINCT from the ~2014-12 HDB *gain* drift (amplitude only; invisible to
+  amplitude-normalised CC — see the Local-magnitudes epoch term). General test for such transitions: recompute
+  CC at the next-closest stations with coverage in both eras — instrument artefacts are station-local.
 
 ## Directory map
 

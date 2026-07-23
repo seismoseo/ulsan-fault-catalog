@@ -583,8 +583,14 @@ def _station_pyocto(st):
     return s[["id", "longitude", "latitude", "elevation"]].copy()
 
 
-def run_association_year(model, year, force=False):
-    """Associate picks into events with PyOcto; write events + assignments + station table."""
+def run_association_year(model, year, force=False, strict=False):
+    """Associate picks into events with PyOcto; write events + assignments + station table.
+
+    `strict=True` uses `config.REGION_STRICT` (Stage-2 tighter parameters: lower
+    `pick_match_tolerance`, finer `min_node_size_location`, higher pick minimums) —
+    intended for the 2017 test pass that targets chimera associations like the
+    canonical 2017-11-15 06:09 case. Default `False` reproduces the loose baseline.
+    Output paths are unchanged (overwrites in place); back up before running with strict."""
     import datetime as dt
     import tempfile
     import pyocto
@@ -616,7 +622,12 @@ def run_association_year(model, year, force=False):
         mp = os.path.join(td, "vel_model")
         pyocto.VelocityModel1D.create_model(layers, 1.0, 100, 100, mp)
         velocity_model = pyocto.VelocityModel1D(mp, tolerance=1.0)
-        associator = pyocto.OctoAssociator.from_area(velocity_model=velocity_model, **config.REGION)
+        region = config.REGION_STRICT if strict else config.REGION
+        if strict:
+            print(f"[association] STRICT mode — pick_match_tolerance="
+                  f"{region.get('pick_match_tolerance', 1.5)} s, "
+                  f"n_picks={region['n_picks']}, n_p_and_s_picks={region['n_p_and_s_picks']}")
+        associator = pyocto.OctoAssociator.from_area(velocity_model=velocity_model, **region)
         associator.transform_stations(station_pyocto)
         picks_pyocto["time"] = picks_pyocto["time"].apply(lambda x: x.timestamp())
         events, assignments = associator.associate(picks_pyocto, station_pyocto)
@@ -631,6 +642,52 @@ def run_association_year(model, year, force=False):
     print(f"[association] {model} {year}: events={len(events)} picks={n_pk} "
           f"-> {os.path.relpath(config.pyocto_events(model, year), config.MODELS)}")
     return events, assignments
+
+
+# ============================================================ pick augmentation (2.5)
+def run_augment_year(model, year, force=False, *,
+                     radius_km=100.0, tolerance_s=1.0,
+                     min_pick_probability=0.3, tie_threshold_s=0.2):
+    """Post-PyOcto pick augmentation — scan daily picks for orphans missed by PyOcto's
+    streaming associator, add them to the assignment for each event.
+
+    Rationale + algorithm: see `pick_augmentation.py` module docstring and the
+    `notebooks/02.Pick_augmentation.ipynb` walkthrough.
+
+    Pipeline order is `association -> augment -> phs -> locate`, so HypoInverse sees the
+    full augmented pick set and computes correct GAP/DMIN/ERZ/RMS.
+
+    Idempotent: the first call writes a `<pyocto_assignment>.before_augmentation.csv`
+    backup and then overwrites the assignment in place. Re-calling reads from the
+    already-augmented file and adds nothing new (any pick previously added is already
+    in the assignment, so it's not an "orphan" any more).
+    """
+    config.assert_writable(model, force)
+    import pick_augmentation as pa
+    events_csv = config.pyocto_events(model, year)
+    assign_csv = config.pyocto_assign(model, year)
+    if not (os.path.exists(events_csv) and os.path.exists(assign_csv)):
+        raise FileNotFoundError(
+            f"augment requires PyOcto outputs at {events_csv} and {assign_csv} - "
+            "run the association stage first")
+    stations_csv = config.stations_year_csv(model, year)
+    picks_dir = config.picks_dir(model, year)
+
+    summary = pa.augment_year(
+        pyocto_events_csv=events_csv,
+        pyocto_assignment_csv=assign_csv,
+        stations_csv=stations_csv,
+        picks_dir=picks_dir,
+        year=year,
+        radius_km=radius_km,
+        tolerance_s=tolerance_s,
+        min_pick_probability=min_pick_probability,
+        tie_threshold_s=tie_threshold_s,
+    )
+    print(f"[augment] {model} {year}: +{summary['n_accepted']} picks across "
+          f"{summary['n_events']} events (rejected {summary['n_dropped_ambiguous']} as ambiguous)"
+          f" -> {os.path.relpath(summary['out_path'], config.MODELS)}")
+    return summary
 
 
 # ============================================================ PHS file (3)
