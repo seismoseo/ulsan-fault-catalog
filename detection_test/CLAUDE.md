@@ -1,6 +1,6 @@
 # 2016 Gyeongju / Ulsan-Fault ML-picker comparison — project guide
 
-Guidance for Claude Code working in `Gyeongju_catalog/detection_test/`. This is a **controlled comparison
+Guidance for Claude Code working in `detection_test/`. This is a **controlled comparison
 of four ML pickers** on year 2016, run through one identical relocation pipeline. Parent project guide:
 `../../CLAUDE.md` (the long-term UF catalog). This sub-project shares that pipeline but isolates the
 **picker as the only variable**.

@@ -1,78 +1,78 @@
 # Directory structure & conventions
 
+Restructured (2026-07) into a software-style tree: installable packages under `src/`, non-installable
+analysis code under `analysis/`, waveforms as parallel top-level network directories, and a clean
+data / code / outputs separation.
+
 ```
 02.Ulsan_Fault_detection/
-├── CLAUDE.md  README.md  requirements.txt  environment.yml
-├── docs/                         documentation (this folder)
-├── tools/                        nbstrip.py, setup-git-filters.sh
-├── KS_KG/                        main study region
-│   ├── continuous/               raw waveforms  (NOT in git, ~3.8 TB)
-│   ├── station_table/            stations.csv, station_update.dat, stations_<year>.csv
-│   ├── velocity_model/           kim1983.csv  (PyOcto layered model)
-│   ├── detection_location/<year>/   01/02/03 notebooks — "stead" REFERENCE run (NOT in git)
-│   ├── picks/  pyocto/            stead pick & association outputs (data NOT in git)
-│   ├── HypoInv/                   HYPOINVERSE control + outputs
-│   │   ├── uf_cluster.py uf_waveform_similarity.py   tracked analysis modules (blast decluster + waveform screen)
-│   │   ├── build_wf_nb.py build_seq_nb.py cross_component_blast.py   waveform-screen + space-time notebook builders + cross-component intersect
-│   │   ├── UF<year>.sh            original run scripts (NOT in git)
-│   │   ├── STA/                   *.sta station files (tracked); hypoinverse/ helper (NOT in git)
-│   │   ├── kim1983/ kim2011/      *.crh models (tracked); *.sum/.prt/.arc outputs (NOT in git)
-│   │   ├── *.ipynb               original HYPOINVERSE notebooks (NOT in git)
-│   │   └── PHS/                   *.phs (NOT in git, regenerable)
-│   └── models/                    ★ picker-model dimension — this project's working area
-│       ├── build_original_tree.py  regenerates the original scaffold (writes only under models/)
-│       ├── README.md
-│       ├── stead/                  symlinks → the reference run (NOT in git; recreated by build script)
-│       ├── original/               PhaseNet "original" run — generated locally, NOT in git
-│       │   ├── detection_location/<year>/  notebook copies + picks/ (NOT in git)
-│       │   ├── pyocto/  station_table/      outputs (NOT in git)
-│       │   └── HypoInv/  PHS/ STA/ kim*/ hypodd/   (NOT in git)
-│       └── pipeline/               ★ automated pipeline (all tracked)
-│           ├── config.py core.py
-│           ├── detection.py association.py make_phs.py run_hypoinverse.py run_pipeline.py
-│           └── README.md
-├── NS/                            2nd network, ~3.3 TB (NOT in git) — DEFERRED
-└── tuto_material/                 tutorials / third-party FMF (NOT in git)
+├── pyproject.toml  environment.yml  requirements.txt  README.md  CLAUDE.md
+├── src/                          ★ installable packages (pip install -e .)
+│   ├── uflib/                    shared analysis library
+│   │   ├── uf_cluster.py             spatial/temporal quarry-blast decluster + map helpers (QC, read_sum)
+│   │   ├── uf_waveform_similarity.py waveform-feature blast screening (imports uf_cluster)
+│   │   └── event_sac_export.py       event-idx-keyed SAC store writer (fully path-parameterized)
+│   └── ufpipe/                   the detection→association→PHS→HYPOINVERSE pipeline
+│       └── config.py core.py detection.py association.py make_phs.py run_hypoinverse.py run_pipeline.py
+├── analysis/                     non-installable analysis code + notebook builders (import uflib/ufpipe)
+│   ├── relocation/                  HypoDD relocation batch driver + family maps
+│   ├── reloc_analysis/              cluster / NND / fractal-dimension notebooks
+│   ├── local_magnitudes/            ML (Heo 2024 + Sheen 2018) pipeline + notebooks
+│   ├── uf_subregion_hypodd/         whole-box dt.cc relocation + SVD volumes
+│   ├── repeaters/                   repeating-earthquake + Vp/Vs notebooks
+│   └── hypoinv/                     HYPOINVERSE-related analysis scripts + nb builders
+├── detection_test/               4-picker comparison pipeline (year-general)
+│   ├── lib/                          detection/association per-month CLIs (build_stations, run_*, associate_daily)
+│   └── reloc_2016_uf/               the relocation driver (year_paths, run_picker_reloc, PIPELINE.md, study_guide)
+├── KS_KG/  GJ/  NS/  NS_100hz/    ★ raw waveforms — station dirs at each root (parallel; ~7 TB; NOT in git)
+├── data/
+│   ├── waveforms/                    symlinks to the four network dirs (browsable view; no data copied)
+│   ├── metadata/                     station tables, velocity model, StationXML, external catalogs
+│   │   ├── ks_kg_station_table/ velocity_model/ GHBSN_metadata/ KIGAM_metadata/ GHBSN_catalog_Heoetal/
+│   └── hypoinv/                      HYPOINVERSE control inputs (STA/*.sta, kim*/*.crh) + working data
+├── outputs/                      regenerable pipeline products (picks, pyocto, models, …) — NOT in git
+├── runs/                         canonical output root going forward — NOT in git
+├── docs/                         documentation (this folder) + docs/planning/ (design + gap-analysis notebooks)
+├── notebooks/  archive/  papers/  tools/
 ```
 
 ## Two "model" dimensions
 
 | Dimension | Flag | Values | Where it appears |
 |-----------|------|--------|------------------|
-| **Picker model** | `--model` | `stead`, `original`, … | top of `models/` (`models/<model>/…`) |
-| **Velocity model** | `--velmodel` | `kim1983`, `kim2011` | PyOcto filename + `HypoInv/<velmodel>/` |
+| **Picker model** | `--model` / `--picker` | `stead`, `original`, `phasenet_plus`, `eqt` | pipeline output paths |
+| **Velocity model** | `--velmodel` | `kim1983`, `kim2011` | PyOcto filename + `data/hypoinv/<velmodel>/` |
 
-They are orthogonal: any picker model can be located with any velocity model.
-
-## `stead` vs `original`
-
-- **`stead`** = the existing reference run (PhaseNet "stead" weights), produced by the per-year
-  notebooks in `KS_KG/detection_location/` and `KS_KG/{picks,pyocto,HypoInv}`. Treated as read-only.
-  `models/stead/` only *symlinks* these so both runs are browsable side-by-side.
-- **`original`** = the new run with PhaseNet "original" weights, under `models/original/`, generated by
-  `build_original_tree.py` and driven by `models/pipeline/`.
+Orthogonal: any picker model can be located with any velocity model.
 
 ## What is tracked in git
 
-The repo holds **code, docs, and small reference metadata only** — no notebooks, no data.
+The repo holds **code, docs, and small reference metadata only** — no waveforms, no large outputs.
 
 **Tracked**
-- code: `KS_KG/models/pipeline/**`, `KS_KG/models/build_original_tree.py`, `tools/**`
-- docs: `README.md`, `CLAUDE.md`, `docs/**`, `KS_KG/models/README.md`, `requirements.txt`, `environment.yml`
-- reference metadata: `KS_KG/station_table/*`, `KS_KG/velocity_model/kim1983.csv`,
-  `KS_KG/HypoInv/STA/*.sta`, `KS_KG/HypoInv/{kim1983,kim2011}/*.crh`
+- code: `src/**` (uflib + ufpipe packages), `analysis/**/*.py`, `detection_test/**/*.py`, `tools/**`, `pyproject.toml`
+- docs: `README.md`, `CLAUDE.md`, `docs/**`, package READMEs, `detection_test/reloc_2016_uf/PIPELINE.md`
+- reference metadata: `data/metadata/ks_kg_station_table/*`, `data/metadata/velocity_model/*`,
+  HYPOINVERSE control inputs `data/hypoinv/STA/*.sta`, `data/hypoinv/{kim1983,kim2011}/*.crh`
 
 **Not tracked** (see [`.gitignore`](../.gitignore))
-- waveforms `KS_KG/continuous/`, `NS/`; `tuto_material/`
-- **all Jupyter notebooks** — the per-year `stead` run (`KS_KG/detection_location/**`,
-  `KS_KG/HypoInv/*.ipynb`), the generated `KS_KG/models/original/**` copies, and the 424 MB
-  `01.PhaseNet_detection_test.ipynb`
-- original run scripts `KS_KG/HypoInv/UF*.sh` and the third-party helper `KS_KG/HypoInv/STA/hypoinverse/`
-- data products: `picks/`, `pyocto/`, HYPOINVERSE `*.prt/*.arc/*.sum`, `*.phs`, PyOcto `vel_model`
-- the symlinked `models/stead/` and the generated `models/<model>/HypoInv/{STA,PHS,kim*}` scaffold
-- Jupyter checkpoints, Python caches
+- waveforms: `KS_KG/`, `GJ/`, `NS/`, `NS_100hz/` (station dirs at each root, ~7 TB) + the `data/waveforms/` symlinks
+- outputs: `outputs/`, `runs/`, `**/picks/`, `**/pyocto/`, HYPOINVERSE `*.prt/*.arc/*.sum`, `*.phs`
+- large data: `data/hypoinv/event_waveforms_*/`, `analysis/local_magnitudes/responses/master/` (141 MB StationXML),
+  per-station ML CSVs, HypoDD `*.res`, SVD volumes, `.gif`
+- **generated notebooks** (`analysis/**/*.ipynb`, `detection_test/**/*.ipynb`, `data/hypoinv/**/*.ipynb`) — the
+  builders (`build_*_nb.py`) are tracked; the notebooks they emit are not
+- Jupyter checkpoints, Python caches, `*.egg-info/`
 
-Notebooks, the `models/original/` run, and data products live on the workstation and are
-**regenerable** (notebooks via `build_original_tree.py`; data via the pipeline), so the repository
-stays small and code-focused. The notebook output-stripping filter (`tools/`) is kept as a guard in
-case a notebook is ever added intentionally.
+Waveforms live on the workstation; notebooks and data products are **regenerable** (notebooks via their
+`build_*_nb.py` builders; catalogs via the pipeline), so the repository stays small and code-focused.
+
+## Install & import
+
+```bash
+conda activate ulsan        # (the code actually runs in `base` here)
+pip install -e .            # makes uflib + ufpipe importable from any directory
+```
+
+Then `from uflib import uf_cluster`, `import ufpipe.config`, or `python -m ufpipe.run_pipeline` work
+anywhere — the former `sys.path.insert(".../KS_KG/HypoInv")` pattern is gone.

@@ -16,7 +16,7 @@ Detection (PhaseNet)  ->  Association (PyOcto, strict)  ->  Pick augmentation  -
    picks CSV               events + assignments              augmented assignments    UF<year>.{sum,arc}              Heo 2024 + Sheen 2018 ML       uf_subregion dt.cc reloc (§ below)
 ```
 
-**Stages** (from `models/pipeline/run_pipeline.py`): `detection` → `association` → `augment` → `phs` → `locate`.
+**Stages** (from `src/ufpipe/run_pipeline.py`): `detection` → `association` → `augment` → `phs` → `locate`.
 
 **PyOcto assignment (after augmentation) is the source of truth for which (station, phase) tuples belong to each event.**
 The legacy time-window pick dump in `HypoInv/event_waveforms_*/*_picks.csv` was a recipe for
@@ -27,7 +27,7 @@ SAC-header writer (`event_sac_export.export_event(..., pyocto_root=...)`, the au
 should consume `models/phasenet_plus/pyocto/pyocto_assignment_kim1983_{year}.csv`, NOT the
 time-window CSV.
 
-The automated implementation lives in **`KS_KG/models/pipeline/`** (shared module + thin CLIs).
+The automated implementation lives in **`src/ufpipe/`** (shared module + thin CLIs).
 See `docs/how-to-run.md` for commands and `docs/pipeline.md` for stage details.
 
 ## Relative relocation — HypoDD dt.cc + MAXDATA recompile (2026-06-25)
@@ -57,11 +57,11 @@ slow part (~days incl. GPU stalls) but clearly worth it.
    macOS `LDFLAGS` line in `src/hypoDD/Makefile`). Installed: `/home/msseo/bin/hypoDD`
    (old 3 M binary kept as `hypoDD_maxdata3M_backup`).
 
-## 2016 Gyeongju 4-picker comparison (`Gyeongju_catalog/detection_test/`, 2026-07)
+## 2016 Gyeongju 4-picker comparison (`detection_test/`, 2026-07)
 
 Controlled comparison of four ML pickers (PhaseNet+, PhaseNet-original, PhaseNet-STEAD, EQT-STEAD) on year
 2016 through one identical pipeline (detection → PyOcto → HypoInverse → QC → HypoDD dt.cc), consistent
-P=S=0.2 threshold, picker the only variable. **See `Gyeongju_catalog/detection_test/CLAUDE.md` for the full
+P=S=0.2 threshold, picker the only variable. **See `detection_test/CLAUDE.md` for the full
 sub-project guide, `reloc_2016_uf/PIPELINE.md` for invariants, and `reloc_2016_uf/study_guide.pdf`.**
 Headline: PN+ yields the most cross-correlation-resolved events (255) despite not picking the most —
 pick quantity ≠ located quality. **CRITICAL bug fixed (2026-07):** the QC subset used to re-run HypoInverse
@@ -69,7 +69,7 @@ pick quantity ≠ located quality. **CRITICAL bug fixed (2026-07):** the QC subs
 the pyocto-vs-timewindow rule above, but it also poisons dt.cc because origins are SUBTRACTED there). Fixed by
 reusing the full-run HypoInverse (`inject_full_hypoinverse`); backups at `1.HypoInv/kim2011.rerun_backup`.
 
-## Cluster analysis + per-volume relocation (Phase 2–3, `KS_KG/reloc_analysis/` + `uf_subregion_hypodd/`, 2026-07)
+## Cluster analysis + per-volume relocation (Phase 2–3, `analysis/reloc_analysis/` + `uf_subregion_hypodd/`, 2026-07)
 
 Downstream of the whole-box dt.cc reloc: NND declustering, cluster deep-dives, and per-volume HypoDD
 relocation of the two largest-event volumes. Builders emit notebooks (run in base): nb26 R-T density, nb27
@@ -123,7 +123,7 @@ the **next 8 largest-event clusters** (ranks 3–10; `build_cluster_svd_next8_nb
   gate printed with every fit: top-2 stay **BLOB** (indicative only); in nb34 **c4 & c40 resolve as PLANES**
   (c40 strike ~50°/dip ~85°) once properly damped, c11/c95/c105 linear, c1/c8 blob. Two views: (1) plane rectangle
   on the geographic E-N/E-Z/N-Z sections; (2) **clear fault-frame read-out — map view = strike (solid line+arrow),
-  across-strike depth section = dip** (matches `KS_KG/relocation` fig_fault_strikedip/alongdip). `KS_KG/relocation`
+  across-strike depth section = dip** (matches `analysis/relocation` fig_fault_strikedip/alongdip). `analysis/relocation`
   already does SVD plane fits + fault_sections viz via PocketQuake — reference it for style.
 - **PRODUCTION = kim2011, ISTART=2, per-set adaptive damping (2026-07-07 FINAL). ISTART=1 was the contraction
   bug.** The adaptive relocation looked spatially CONTRACTED vs absolute (E-N RMS 2.6 vs 3.5 km, footprint 12 vs
@@ -210,20 +210,19 @@ SeisBench path and the `phasenet_plus` backend feed minimally-processed data.)
 - **Do not edit the `stead` reference run** (`KS_KG/detection_location/**`, `KS_KG/{picks,pyocto,HypoInv}`).
   It is the baseline to compare against. `models/stead/` only symlinks it (the scripts refuse
   `--model stead` writes unless `--force`).
-- **New work goes under `KS_KG/models/`.** The `original` notebooks and `pipeline/` code are editable.
+- **New pipeline code lives in `src/ufpipe/`.** The `original` notebooks and `pipeline/` code are editable.
 - **Canonical pick id**: detection writes `station = "NET.STA"` (e.g. `KG.BBK`); association derives the
   network from it. Do not reintroduce the old hardcoded `["KS"]*N + ["KG"]*…` split.
 - **Non-destructive scaffolding**: `models/build_original_tree.py` only ever writes under `models/`.
-- Defaults (paths, thresholds, region) live in `KS_KG/models/pipeline/config.py` — change them there.
+- Defaults (paths, thresholds, region) live in `src/ufpipe/config.py` — change them there.
 
 ## How to run (quick)
 
 ```bash
-cd KS_KG/models/pipeline
 # SHARED 64-core box: ALWAYS pin cores with taskset + set OMP_NUM_THREADS.
-OMP_NUM_THREADS=1  taskset -c 0-7  python run_pipeline.py --model original      --years 2010-2024
-OMP_NUM_THREADS=16 taskset -c 8-23 python run_pipeline.py --model phasenet_plus --years 2010-2024
-python detection.py --model original --year 2024 --days 1-5    # one stage / slice
+OMP_NUM_THREADS=1  taskset -c 0-7  python -m ufpipe.run_pipeline --model original      --years 2010-2024
+OMP_NUM_THREADS=16 taskset -c 8-23 python -m ufpipe.run_pipeline --model phasenet_plus --years 2010-2024
+python -m ufpipe.detection --model original --year 2024 --days 1-5    # one stage / slice
 ```
 Detection is idempotent (skips days whose picks already exist). Full details: `docs/how-to-run.md`.
 
@@ -267,7 +266,7 @@ Second, **waveform-feature** pass to catch quarry blasts the spatial/temporal de
 fixed station they share near-identical waveforms; tectonic events don't (repeaters/aftershocks
 correlate too but separate by hour-of-day + location).
 
-- **Files** (beside `uf_cluster.py`): `KS_KG/HypoInv/uf_waveform_similarity.py` (module, same
+- **Files** (beside `uf_cluster.py`): `src/uflib/uf_waveform_similarity.py` (module, same
   style; reuses `uf_cluster` KST/Rayleigh/maps/`SUBREGION`) + controlled notebook
   `KS_KG/HypoInv/04_waveform_similarity_hdb_phasenet_plus.ipynb` (PARAMS cell, run top-to-bottom).
 - **Data**: `KS_KG/HypoInv/event_waveforms_ulsanfault/` = 2797 dirs `YYYYMMDDHHMMSS/` with
@@ -395,8 +394,8 @@ correlate too but separate by hour-of-day + location).
 - **PhaseNet+ inspection**: `core.annotate_phasenet_plus(year, day, station, t0, t1)` returns the
   per-sample P/S/noise probability, first-motion polarity, and single-station event-detection traces
   (the PhaseNet+ analogue of SeisBench `annotate`); used by the rebuilt
-  `models/pipeline/notebooks/phasenet_plus_test.ipynb`.
-- **Post-location analysis** (`KS_KG/HypoInv/uf_cluster.py` + notebooks `03_blast_decluster_hdbscan`,
+  `outputs/models/pipeline/notebooks/phasenet_plus_test.ipynb`.
+- **Post-location analysis** (`src/uflib/uf_cluster.py` + notebooks `03_blast_decluster_hdbscan`,
   `04_subregion_seismicity`, `05_error_ellipses`; see `docs/analysis.md`): 3D HDBSCAN clustering with
   hour-of-day **quarry-blast discrimination** (writes a declustered catalog), an **east-of-fault subregion**
   long-term-seismicity study, and **95% HYPOINVERSE error ellipses** parsed from the `.prt` covariance.
@@ -424,7 +423,7 @@ correlate too but separate by hour-of-day + location).
 
 ## Local magnitudes — Heo 2024 + Sheen 2018 (require_pick fix + strict recompute, 2026-06-16)
 
-`KS_KG/local_magnitudes/ml_pipeline.py` deconvolves each event's response, simulates Wood-Anderson
+`analysis/local_magnitudes/ml_pipeline.py` deconvolves each event's response, simulates Wood-Anderson
 (sensitivity 2080, Uhrhammer & Collins 1990), measures peak post-P amplitude with SNR ≥ 3, and
 converts to ML via two attenuation laws.
 
@@ -530,7 +529,7 @@ refined hypocenter get orphaned. The tweak alone is insufficient; the augmentati
 uses PyOcto's now-correct hypocenter to scan back through the daily picks and recover the
 orphans (with strict safeguards so it never steals picks from a neighbour event).
 
-**Augmentation module: `models/pipeline/pick_augmentation.py`**. For each PyOcto event, the
+**Augmentation module: `src/ufpipe/pick_augmentation.py`**. For each PyOcto event, the
 direct-ray travel time to every station within `radius_km=100 km` is computed from
 `kim1983` (`velocity_at_depth`/`predict_arrival_offset`); any daily pick within
 `tolerance_s=1.0 s` of the predicted arrival, on a station not already in the PyOcto set
@@ -540,10 +539,10 @@ best-match-wins across competing events, (3) drop-on-tie when two candidates are
 `pyocto_assignment_kim1983_<year>.csv` so the downstream PHS/HypoInverse stages consume the
 augmented set unchanged.
 
-`run_pipeline.py` runs `augment` between `association` and `phs`. Validated on 2013-03-22
+`ufpipe/run_pipeline.py` runs `augment` between `association` and `phs`. Validated on 2013-03-22
 13:40:04: 10 picks / DMIN=42.8 / ERZ=3.9 → 14 picks / DMIN=2.1 / ERZ=0.5.
 
-## HypoInverse QC (in `KS_KG/HypoInv/uf_cluster.py`)
+## HypoInverse QC (in `src/uflib/uf_cluster.py`)
 
 `QC = dict(erh=5.0, erz=5.0, gap=270.0, num=5, rms=1.0)` — the `rms<1.0` cap was added in
 the strict-PyOcto branch (chimera events had arc-residual RMS multi-second). Don't add a
