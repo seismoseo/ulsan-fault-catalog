@@ -1,18 +1,20 @@
 #!/usr/bin/env python
-"""Stage the EXISTING Ulsan KS/KG event waveforms (and, for the 'reuse' run, the existing PhaseNet+
-picks) into a scaffolded PocketQuake **stp_sac** cluster — so the PocketQuake pipeline relocates them
-with no re-download and no custom relocation code.
+"""Stage the canonical event_idx-keyed UF waveform store into a scaffolded PocketQuake **stp_sac** cluster.
 
-The Ulsan SAC are already in STP naming (`{eid}.{NET}.{STA}.{CHAN}.sac`); the stp_sac layout just nests
-them in HH/HG/EL subdirs (STP_GLOB = `{sensor}/*{sensor}{comp}*.sac`). So we **symlink**:
-    event_waveforms_ulsanfault/{eid}/{eid}.{NET}.{STA}.{CHAN}.sac
- -> <stp_sac_root>/{eid}/{HH|HG|EL}/{eid}.{NET}.{STA}.{CHAN}.sac
+The korea-cluster-relocation pipeline is internally TIMESTAMP-keyed: `waveforms.load_catalog` derives
+`event_id = strftime((catalog KST) - 9h)` and the gather/write_phs look for `stp_sac/<timestamp>/`. So we
+bridge our canonical `event_idx` store to the pipeline's timestamp id HERE, drift-free by construction:
+for each member (event_idx) we compute the SAME timestamp the pipeline will (`floor(UTC origin)`) from the
+SINGLE current catalog (members_event_idx.csv) and stage that member's SACs under `stp_sac/<timestamp>/`,
+renaming the `<event_idx>.` prefix to `<timestamp>.`. No cross-version matching: catalog, staged dir and
+SAC origin all come from one current source.
 
-For --reuse-picks we also convert each Ulsan `{eid}_picks.csv` (Network,Code,phase,peak_time,…,
-probability) into PocketQuake's `picks/{eid}_picks.csv` (Event_ID,Network,Station,Phase,Time,
-Probability) so HypoInverse/ph2dt read the existing picks and the picking stage can be skipped.
+    event_waveforms_ufidx/<event_idx>/<event_idx>.<NET>.<STA>.<CHAN>.sac
+ -> <stp_sac_root>/<timestamp>/<HH|HG|EL>/<timestamp>.<NET>.<STA>.<CHAN>.sac
 
-Usage:  PYTHONPATH=<eq-cycle pipeline repo> python stage.py <cluster_slug> [--reuse-picks]
+Picks (probability weights) are converted to picks/<timestamp>_picks.csv.
+
+Usage: python stage.py <slug> --reuse-picks --members members.txt [--catalog members_event_idx.csv]
 """
 import argparse
 import glob
@@ -23,53 +25,70 @@ import pandas as pd
 
 from pipeline import config
 
-ULSAN_WF = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv/event_waveforms_ulsanfault"
+STORE = "/home/msseo/works/02.Ulsan_Fault_detection/data/hypoinv/event_waveforms_ufidx"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cluster")
-    ap.add_argument("--reuse-picks", action="store_true",
-                    help="also convert the existing Ulsan picks into picks/{eid}_picks.csv")
+    ap.add_argument("--reuse-picks", action="store_true")
     ap.add_argument("--members", default=os.path.join(HERE, "family738", "members.txt"))
+    ap.add_argument("--wf-root", default=STORE, help="event_idx-keyed waveform store")
+    ap.add_argument("--catalog", default=None,
+                    help="members_event_idx.csv (event_idx,time,...); default: alongside --members")
     a = ap.parse_args()
+    wf_root = a.wf_root
+    cat_path = a.catalog or os.path.join(os.path.dirname(a.members), "members_event_idx.csv")
 
     cfg = config.load_cluster(a.cluster)
     stp_root = cfg.stp_sac_root
     members = [ln.strip() for ln in open(a.members) if ln.strip()]
+    # event_idx -> pipeline timestamp (floor UTC second == strftime((KST,int sec) - 9h))
+    mc = pd.read_csv(cat_path)
+    ts_of = {str(int(r.event_idx)): pd.to_datetime(r.time, utc=True).floor("s").strftime("%Y%m%d%H%M%S")
+             for r in mc.itertuples()}
+    seen_ts = {}
 
     n_wf = 0
     for eid in members:
-        src = os.path.join(ULSAN_WF, eid)
+        ts = ts_of.get(eid)
+        if ts is None:
+            print(f"  NO catalog time for member {eid}", file=sys.stderr); continue
+        if ts in seen_ts and seen_ts[ts] != eid:
+            print(f"  DOUBLET same-second {ts}: members {seen_ts[ts]} & {eid} -> pipeline keeps one", file=sys.stderr)
+        seen_ts.setdefault(ts, eid)
+        src = os.path.join(wf_root, eid)
         if not os.path.isdir(src):
             print(f"  MISSING waveforms: {eid}", file=sys.stderr); continue
         for f in glob.glob(os.path.join(src, f"{eid}.*.sac")):
-            chan = os.path.basename(f).split(".")[3]          # {eid}.{NET}.{STA}.{CHAN}.sac
-            sensor = chan[:2]
+            parts = os.path.basename(f).split(".")            # {event_idx}.{NET}.{STA}.{CHAN}.sac
+            if len(parts) < 5:
+                continue
+            chan = parts[3]; sensor = chan[:2]
             if sensor not in ("HH", "HG", "EL"):
                 continue
-            d = os.path.join(stp_root, eid, sensor)
-            os.makedirs(d, exist_ok=True)
-            dst = os.path.join(d, os.path.basename(f))
+            d = os.path.join(stp_root, ts, sensor); os.makedirs(d, exist_ok=True)
+            dst = os.path.join(d, ".".join([ts] + parts[1:]))  # rename prefix event_idx -> timestamp
             if not os.path.lexists(dst):
-                os.symlink(os.path.abspath(f), dst); n_wf += 1
-    print(f"staged {n_wf} SAC symlinks -> {stp_root}")
+                os.symlink(os.path.realpath(f), dst); n_wf += 1
+    print(f"staged {n_wf} SAC symlinks -> {stp_root}  ({len(seen_ts)} timestamp dirs)")
 
     if a.reuse_picks:
         pdir = config.picks_dir(cfg); os.makedirs(pdir, exist_ok=True)
         n_pk = 0
         for eid in members:
-            pc = os.path.join(ULSAN_WF, eid, f"{eid}_picks.csv")
-            if not os.path.exists(pc):
-                print(f"  MISSING picks: {eid}", file=sys.stderr); continue
+            ts = ts_of.get(eid)
+            pc = os.path.join(wf_root, eid, f"{eid}_picks.csv")
+            if ts is None or not os.path.exists(pc):
+                continue
             df = pd.read_csv(pc)
             out = pd.DataFrame({
-                "Event_ID": eid, "Network": df["Network"], "Station": df["Code"],
+                "Event_ID": ts, "Network": df["Network"], "Station": df["Code"],
                 "Phase": df["phase"], "Time": df["peak_time"], "Probability": df["probability"],
             })
-            out.to_csv(config.picks_csv(cfg, eid), index=False); n_pk += 1
-        print(f"converted {n_pk} pick CSVs -> {pdir}  (run with --stage-from hypoinverse)")
+            out.to_csv(config.picks_csv(cfg, ts), index=False); n_pk += 1
+        print(f"converted {n_pk} pick CSVs -> {pdir}")
 
 
 if __name__ == "__main__":

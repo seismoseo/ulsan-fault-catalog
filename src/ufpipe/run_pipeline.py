@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core
 import config
 
-STAGES = ["detection", "association", "phs", "locate"]
+STAGES = ["detection", "association", "augment", "phs", "locate"]
 
 
 def parse_years(s):
@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--device", default=None, choices=["cuda", "cpu"])
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--force", action="store_true", help="allow writing into model='stead'")
+    ap.add_argument("--strict", action="store_true",
+                    help="use config.REGION_STRICT for PyOcto association (Stage-2 tighter params)")
     a = ap.parse_args()
 
     stages = STAGES[STAGES.index(a.stage_from):]
@@ -68,7 +70,9 @@ def main():
                 core.run_detection_year(a.model, yr, days=days, device=a.device,
                                         workers=a.workers, force=a.force)
             if "association" in stages:
-                core.run_association_year(a.model, yr, force=a.force)
+                core.run_association_year(a.model, yr, force=a.force, strict=a.strict)
+            if "augment" in stages:
+                core.run_augment_year(a.model, yr, force=a.force)
             if "phs" in stages:
                 core.write_phs(a.model, yr, force=a.force)
             if "locate" in stages:

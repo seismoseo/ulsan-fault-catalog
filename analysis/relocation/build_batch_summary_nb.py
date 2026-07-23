@@ -57,8 +57,11 @@ ax[1].hist(RELOC.n, bins=range(3, int(RELOC.n.max()) + 2), color="0.5", edgecolo
 ax[1].set(title="Relocated family size", xlabel="Events per family", ylabel="Families")
 fig.tight_layout(); plt.show()""")
 md("""**Combined regional map** — all relocated families on the Ulsan Fault subregion (fault traces +
-coastline), one colour per family; absolute-only families are faint grey.""")
-co("""display(Image(filename=f"master_map_relocated{BT}.png"))""")
+coastline), one colour per family; absolute-only families are faint grey. **Before** = the same events
+at their absolute HypoInverse (kim2011) locations; **after** = the dt.cc relocation — the families
+collapse onto tight, fault-aligned patches.""")
+co("""display(Image(filename=f"master_map_absolute{BT}.png"))    # before — absolute HypoInverse
+display(Image(filename=f"master_map_relocated{BT}.png"))   # after  — dt.cc relocated""")
 
 md("""## 2 · Collapse — how much each family tightened under dt.cc
 
@@ -155,14 +158,16 @@ for fid in top.id:
     else:
         print(f"family {fid}: thumbnail not generated (run aggregate_results.py --topn N)")""")
 
-md("""## 8 · Fault-frame sections (SVD plane) + recurrence — large families (n ≥ 10)
+md("""## 8 · Fault-frame sections (SVD plane) + recurrence — large families (n ≥ 6)
 
 The SOTA fault-coordinate view (`viz.fault_sections`, `frame_from="svd"`) for every large family
-(n ≥ 10). The fault plane is the **true SVD best-fit of the cluster** — its orientation (strike/dip in
+(n ≥ 6). The fault plane is the **true SVD best-fit of the cluster** — its orientation (strike/dip in
 the title) is the principal plane of the relocated cloud, and the section is centred on the **cluster
 centroid** (`center_on="centroid"`), through which the SVD plane passes, so it is **not tied to any
 single event** (e.g. the mainshock). Panels: map view + along-strike (A-A') and across-strike (B-B',
 with the dip guide) depth sections + along-dip view, coloured by origin time, with 95% bootstrap bars.
+Markers are **rupture circles drawn to scale for a 10 MPa stress drop** (Eshelby circular-crack radius
+from the local magnitude, ML used as Mw proxy) — same scaling as the §8b along-dip view.
 Below each family: its **magnitude-vs-time** history (the 2016-09-12 Gyeongju M5.8 is marked).""")
 co("""import sys
 import matplotlib.dates as mdates
@@ -171,7 +176,11 @@ sys.path.insert(0, "/home/msseo/works/15.PocketQuake/external/korea-cluster-relo
 from pipeline import config, viz
 from pipeline.core import sumio
 
-NMIN = 10                                                        # "large" families
+def _srad(m, dsigma=10e6):                       # Eshelby circular-crack radius (m), ML as Mw proxy
+    M0 = 10.0 ** (1.5 * np.asarray(m, float) + 9.1)            # seismic moment (N·m)
+    return (7.0 * M0 / (16.0 * dsigma)) ** (1.0 / 3.0)
+
+NMIN = 6                                                        # "large" families
 big = M[(M.status.isin(["done", "done_cached"])) & (M.n >= NMIN)].sort_values("n", ascending=False)
 print(f"{len(big)} families with n >= {NMIN}")
 for fid, n in zip(big.id, big.n):
@@ -179,7 +188,8 @@ for fid, n in zip(big.id, big.n):
     print(f"================  family {fid}  (n={int(n)})  ================")
     try:
         viz.fault_sections(cfg, velmodel="kim2011", frame_from="svd", color_by="time",
-                           center_on="centroid", show_bootstrap=True); plt.show()   # true SVD, centroid-centred
+                           center_on="centroid", show_bootstrap=True,
+                           source_radius=_srad, source_label="10 MPa"); plt.show()   # true SVD, 10 MPa circles
     except Exception as e:                                       # noqa: BLE001
         print(f"  sections skipped: {type(e).__name__}: {e}"); continue
     try:                                                         # magnitude-vs-time recurrence below
@@ -190,12 +200,156 @@ for fid, n in zip(big.id, big.n):
         ax.vlines(t, 0, mw, color="0.75", lw=0.8, zorder=1)
         ax.scatter(t, mw, s=18 + 12 * np.nan_to_num(mw), c=mdates.date2num(t), cmap="coolwarm",
                    edgecolor="k", linewidth=0.3, zorder=3)
-        ax.axvline(pd.Timestamp("2016-09-12"), color="crimson", ls="--", lw=1.0, label="2016 Gyeongju M5.8")
         ax.set(xlabel="Origin time", ylabel="Local magnitude", ylim=(0, None),
                title=f"Family {fid} — magnitude vs time ({len(D)} events)")
-        ax.legend(fontsize=8, loc="upper left"); fig.tight_layout(); plt.show()
+        fig.tight_layout(); plt.show()
     except Exception as e:                                       # noqa: BLE001
         print(f"  recurrence skipped: {type(e).__name__}: {e}")""")
+
+md("""## 8b · Compiled fault-frame views — large families (n ≥ 6), same format as §8
+
+The §8 individual SOTA fault-frame panels (`viz.fault_sections`), **compiled** across every large family
+(n ≥ 6, i.e. the ones shown individually above) so the population is comparable at a glance. Identical
+rendering: markers **coloured by origin time**, **95 % bootstrap** error bars, the **SVD best-fit plane**
+frame, centred on each cluster centroid. Three figures —
+(A) **across-strike depth sections** (B–B'; dashed = SVD dip line),
+(B) **fault-plane map view** (solid = strike, dashed = across-strike),
+(C) **fault-plane along-dip view** with **rupture circles drawn to scale for a 10 MPa stress drop**
+(Eshelby circular-crack radius from the local magnitude, ML used as Mw proxy).
+Panel titles: `f<id> n<N> strike/dip`. Below: **strike/dip statistics** over all families **except
+poorly-planar fits** (`flat = S3/S2 > 0.5` dropped). Writes `fault_plane_fits{BT}.csv`.""")
+co("""# SVD plane fit for ALL families (cheap; for the orientation statistics below)
+from numpy.linalg import svd
+def _fit_plane(fid):
+    f = os.path.join(f"family{fid}{BT}", f"reloc_f{fid}{BT}_reuse.csv")
+    if not os.path.exists(f): return None
+    d = pd.read_csv(f)
+    if len(d) < 4: return None
+    Q = d[["x", "y", "z"]].to_numpy(float); Q = Q - Q.mean(0)
+    U, S, Vt = svd(Q, full_matrices=False); nrm = Vt[2]
+    if nrm[2] < 0: nrm = -nrm
+    dip = np.degrees(np.arccos(abs(nrm[2]))); dipdir = np.degrees(np.arctan2(nrm[0], nrm[1])) % 360
+    return dict(id=fid, n=len(Q), strike=(dipdir - 90) % 180, dip=dip, flat=(S[2] / S[1] if S[1] > 0 else 1.0))
+PF_all = pd.DataFrame([r for r in (_fit_plane(i) for i in RELOC.id) if r])
+PF_all = PF_all.merge(M[["id", "lat_c", "lon_c"]], on="id").sort_values("n", ascending=False).reset_index(drop=True)
+PF_all.to_csv(f"fault_plane_fits{BT}.csv", index=False)
+print(f"fitted {len(PF_all)} families (n>=4) | median strike {PF_all.strike.median():.0f}deg "
+      f"dip {PF_all.dip.median():.0f}deg | bad-planar (flat>0.5): {(PF_all.flat>0.5).sum()}")""")
+co("""# fault-frame projection per family (reuses the §8 viz internals -> identical rendering)
+import sys, matplotlib.dates as mdates, matplotlib.colors as mcolors
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Circle
+sys.path.insert(0, "/home/msseo/works/15.PocketQuake")
+sys.path.insert(0, "/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation")
+from pipeline import config as _cfgmod, viz as _viz
+from pipeline.core import sumio as _sumio
+
+def _srad(m, dsigma=10e6):                       # Eshelby circular-crack radius (m), ML as Mw proxy
+    M0 = 10.0 ** (1.5 * np.asarray(m, float) + 9.1)            # seismic moment (N·m)
+    return (7.0 * M0 / (16.0 * dsigma)) ** (1.0 / 3.0)
+
+def _proj(fid):
+    cfg = _cfgmod.load_cluster(f"f{fid}{BT}_reuse")
+    reloc, branch = _viz._reloc_path(cfg); d = _sumio.read_reloc(reloc).reset_index(drop=True)
+    d = d[~d.id.isin(_viz._boot_underconstrained(cfg, branch))].reset_index(drop=True)
+    if len(d) < 3: return None
+    us, ud = _viz._best_fit_plane(d.x, d.y, d.z)
+    x0, y0, z0 = float(d.x.mean()), float(d.y.mean()), float(d.z.mean())
+    rx = (d.x - x0).to_numpy(); ry = (d.y - y0).to_numpy(); th = np.deg2rad(90 - us)
+    along = (rx*np.cos(th)+ry*np.sin(th))/1000; across = (-rx*np.sin(th)+ry*np.cos(th))/1000
+    dep = (d.z.to_numpy()-z0)/1000
+    # Orient each section axis so its + (right) end points to the SE quadrant (maximise E - N):
+    # A'/B' = East/South end (right), A/B = West/North end (left). Apply to along + across.
+    aE, aN = np.sin(np.deg2rad(us)), np.cos(np.deg2rad(us))          # +along direction in (E, N)
+    s_al = 1.0 if (aE - aN) >= 0 else -1.0
+    cE, cN = -np.cos(np.deg2rad(us)), np.sin(np.deg2rad(us))         # +across direction in (E, N)
+    s_ac = 1.0 if (cE - cN) >= 0 else -1.0
+    along *= s_al; across *= s_ac
+    along_dip = -across*np.cos(np.deg2rad(ud)) + dep*np.sin(np.deg2rad(ud))
+    dipslope = -np.tan(np.deg2rad(ud)) * s_ac                        # SVD dip line in the (across, depth) panel
+    boot = _viz._load_bootstrap(cfg, branch); sig = {k: np.full(len(d), np.nan) for k in ["al","ac","dp","ad","e","n"]}
+    if boot:
+        ct, st, cd, sd = np.cos(th), np.sin(th), np.cos(np.deg2rad(ud)), np.sin(np.deg2rad(ud))
+        V = dict(al=[ct,st,0], ac=[-st,ct,0], dp=[0,0,1.], ad=[st*cd,-ct*cd,sd], e=[1.,0,0], n=[0,1.,0])
+        for i, e in enumerate(d.id.astype(int)):
+            if e in boot:
+                for k, v in V.items(): sig[k][i] = _viz._pct_hw(boot[e], np.array(v))/1000
+    mag = _viz._mag_for(cfg, d.id); sz = _viz._mag_size(mag, smin=25, smax=1500)
+    cv = np.array(mdates.date2num([t.datetime for t in d.time]))
+    norm = mcolors.Normalize(vmin=cv.min(), vmax=cv.max() if cv.max() > cv.min() else cv.min()+1)
+    rgba = plt.get_cmap("coolwarm")(norm(cv))
+    return dict(fid=fid, along=along, across=across, dep=dep, along_dip=along_dip, dipslope=dipslope,
+                rx=rx/1000, ry=ry/1000, sig=sig, boot=bool(boot), mag=mag, sz=sz, rgba=rgba, norm=norm,
+                us=us, ud=ud, n=len(d))
+
+BIG = M[(M.status.isin(["done","done_cached"])) & (M.n >= 6)].sort_values("n", ascending=False)
+PJ = [p for p in (_proj(f) for f in BIG.id) if p]
+print(f"{len(PJ)} families with n>=6 projected into fault frame")
+_NC = 4; _NR = int(np.ceil(len(PJ)/_NC))
+
+def _cbar(fig, ax, p):                                # individual per-panel origin-time colour bar
+    sm = plt.cm.ScalarMappable(norm=p["norm"], cmap="coolwarm"); sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.03)
+    tk = np.linspace(p["norm"].vmin, p["norm"].vmax, 3); cb.set_ticks(tk)
+    cb.set_ticklabels([mdates.num2date(t).strftime("%y-%m") for t in tk]); cb.ax.tick_params(labelsize=6)
+
+def _ffgrid(kind, title):
+    # constrained_layout keeps the per-panel colour bars + titles from overlapping; equal-aspect
+    # square main axes (1:1) with limits chosen so nothing (incl. 10 MPa circles) is clipped.
+    fig, axes = plt.subplots(_NR, _NC, figsize=(3.6*_NC, 3.3*_NR), dpi=120, constrained_layout=True)
+    axf = np.atleast_1d(axes).flatten()
+    for ax, p in zip(axf, PJ):
+        if kind == "across":
+            X, Y = p["across"], p["dep"]; lim = 1.12*max(np.nanmax(np.abs(X)), np.nanmax(np.abs(Y)), 1e-3)
+            if p["boot"]: ax.errorbar(X, Y, xerr=p["sig"]["ac"], yerr=p["sig"]["dp"], fmt="none", ecolor="0.55", elinewidth=0.5, capsize=1, zorder=3)
+            ax.scatter(X, Y, s=p["sz"]*0.45, facecolors="none", edgecolors=p["rgba"], linewidth=1.2, zorder=4)
+            xx = np.linspace(-lim, lim, 30); ax.plot(xx, p["dipslope"]*xx, "k--", lw=0.9, zorder=1)
+            ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.invert_yaxis()
+            ax.text(0.04, 0.06, "B", transform=ax.transAxes, fontsize=12, fontweight="bold")
+            ax.text(0.90, 0.06, "B'", transform=ax.transAxes, fontsize=12, fontweight="bold")
+            ax.set_xlabel("across-strike (km)  W/N→E/S", fontsize=7); ax.set_ylabel("depth (km)", fontsize=7)
+        elif kind == "map":
+            X, Y = p["rx"], p["ry"]; lim = 1.12*max(np.nanmax(np.abs(X)), np.nanmax(np.abs(Y)), 1e-3)
+            su, du = np.sin(np.deg2rad(p["us"])), np.cos(np.deg2rad(p["us"]))
+            if p["boot"]: ax.errorbar(X, Y, xerr=p["sig"]["e"], yerr=p["sig"]["n"], fmt="none", ecolor="0.55", elinewidth=0.5, capsize=1, zorder=3)
+            ax.scatter(X, Y, s=p["sz"]*0.45, facecolors="none", edgecolors=p["rgba"], linewidth=1.2, zorder=4)
+            ax.plot([-lim*su, lim*su], [-lim*du, lim*du], "0.35", lw=1.0); ax.plot([lim*du, -lim*du], [-lim*su, lim*su], "0.35", lw=1.0, ls="--")
+            ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
+            ax.set_xlabel("E (km)", fontsize=7); ax.set_ylabel("N (km)", fontsize=7)
+        else:  # along-dip with 10 MPa source circles (to scale, fully inside)
+            X, Y = p["along"], p["along_dip"]; rk = _srad(p["mag"])/1000.0
+            lim = 1.12*max(np.nanmax(np.abs(X)+rk), np.nanmax(np.abs(Y)+rk), 1e-3)
+            ax.add_collection(PatchCollection([Circle((X[i], Y[i]), rk[i]) for i in range(p["n"])], facecolors="none", edgecolors=p["rgba"], linewidths=1.2, zorder=4))
+            if p["boot"]: ax.errorbar(X, Y, xerr=p["sig"]["al"], yerr=p["sig"]["ad"], fmt="none", ecolor="0.55", elinewidth=0.5, capsize=1, zorder=3)
+            ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.invert_yaxis()
+            ax.text(0.04, 0.06, "A", transform=ax.transAxes, fontsize=12, fontweight="bold")
+            ax.text(0.90, 0.06, "A'", transform=ax.transAxes, fontsize=12, fontweight="bold")
+            ax.set_xlabel("along-strike (km)  W/N→E/S", fontsize=7); ax.set_ylabel("along-dip (km)", fontsize=7)
+        ax.set_aspect("equal", "box"); ax.grid(True, ls=":", alpha=0.6); ax.set_facecolor("#FAFAFA"); ax.tick_params(labelsize=7)
+        ax.set_title(f"f{p['fid']} n{p['n']} {p['us']:.0f}/{p['ud']:.0f}", fontsize=8); _cbar(fig, ax, p)
+    for ax in axf[len(PJ):]: ax.axis("off")
+    fig.suptitle(title, fontsize=13); plt.show()
+
+_ffgrid("across", "Across-strike depth sections (B-B') — n>=6 families; B=W/N (left), B'=E/S (right); color=origin time (per panel), bars=95% bootstrap, dashed=SVD dip")""")
+co("""_ffgrid("map", "Fault-plane map view — n>=6 families; solid=strike, dashed=across-strike; color=origin time, bars=95% bootstrap")""")
+co("""_ffgrid("alongdip", "Fault-plane along-dip view — circles = rupture radius at 10 MPa stress drop (to scale); color=origin time")""")
+co("""# strike/dip statistics over all families EXCEPT poorly-planar fits (flat = S3/S2 > 0.5 dropped)
+GD = PF_all[PF_all.flat <= 0.5].copy()
+print(f"statistics over {len(GD)} families (dropped {len(PF_all)-len(GD)} bad-planar with flat>0.5)")
+fig = plt.figure(figsize=(13, 4))
+ax1 = fig.add_subplot(1, 3, 1, projection="polar"); ax1.set_theta_zero_location("N"); ax1.set_theta_direction(-1)
+ax1.hist(np.radians(np.concatenate([GD.strike, GD.strike+180])), bins=np.radians(np.arange(0,361,15)),
+         color="steelblue", edgecolor="k", linewidth=0.4)
+ax1.set_title(f"Strike rose (n={len(GD)}, planar)", pad=15)
+ax2 = fig.add_subplot(1, 3, 2); ax2.hist(GD.dip, bins=np.arange(0,91,7.5), color="indianred", edgecolor="k", linewidth=0.4)
+ax2.axvline(GD.dip.median(), color="k", ls="--", label=f"median {GD.dip.median():.0f}d"); ax2.legend()
+ax2.set(xlabel="Dip (deg)", ylabel="Families", title="Dip distribution")
+ax3 = fig.add_subplot(1, 3, 3)
+sc = ax3.scatter(GD.strike, GD.dip, s=10+GD.n*2, c=GD.flat, cmap="RdYlGn_r", edgecolor="k", linewidths=0.3, vmin=0, vmax=0.5)
+ax3.set(xlabel="Strike (deg)", ylabel="Dip (deg)", title="Strike vs dip (size proportional to n)", xlim=(0,180), ylim=(0,90))
+fig.colorbar(sc, ax=ax3, label="planarity flat (0=best)")
+fig.suptitle(f"Fault-plane orientation statistics — {BAND} Hz clusters, bad planar fits excluded (n={len(GD)})", fontsize=12)
+fig.tight_layout(); plt.show()""")
 
 md("""## 9 · Reading this
 

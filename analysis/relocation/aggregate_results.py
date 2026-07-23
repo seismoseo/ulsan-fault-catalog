@@ -28,6 +28,7 @@ from uflib import uf_waveform_similarity as wf                      # noqa: E402
 
 MASTER = os.path.join(HERE, "master_metrics.csv")        # reassigned per band in main()
 MASTER_MAP = os.path.join(HERE, "master_map_relocated.png")
+MASTER_MAP_BEFORE = os.path.join(HERE, "master_map_absolute.png")   # same events, pre-relocation
 FAILURES = os.path.join(HERE, "failures.csv")
 RELOCATED = ("done", "done_cached")
 
@@ -99,12 +100,19 @@ def master_table(rep, manifest):
     return df
 
 
-def master_map(rep, manifest):
+def master_map(rep, manifest, mode="after"):
+    """Combined regional map of all relocated families, one colour per family. `mode="after"`
+    plots the dt.cc-relocated positions (-> MASTER_MAP); `mode="before"` plots the SAME families
+    /events at their absolute HypoInverse(kim2011) positions (-> MASTER_MAP_BEFORE), same colours,
+    so the before/after pair shows how dt.cc collapses each family."""
     import pygmt
     ufc = PM._ufc()
     ids = [int(r.cluster) for r in rep.itertuples()
            if manifest.get(int(r.cluster), {}).get("status") in RELOCATED]
     cols = wf.cluster_colors(ids)                       # dict id -> rgba (size order)
+    read = _read_sum if mode == "before" else _read_reloc
+    out = MASTER_MAP_BEFORE if mode == "before" else MASTER_MAP
+    tag = "absolute HypoInverse (kim2011)" if mode == "before" else "dt.cc relocated"
     sub = ufc.SUBREGION; pad = 0.02
     region = [sub[0] - pad, sub[1] + pad, sub[2] - pad, sub[3] + pad]
     fig = pygmt.Figure()
@@ -112,9 +120,9 @@ def master_map(rep, manifest):
                  FONT_TITLE="15p,Helvetica-Bold", FONT_ANNOT_PRIMARY="9p")
     bandstr = f"{B.BAND[0]}-{B.BAND[1]}"
     fig.basemap(region=region, projection="M20c",
-                frame=[f"WSne+tUlsan multiplet families - dt.cc relocated ({bandstr} Hz, {len(ids)} families)",
+                frame=[f"WSne+tUlsan multiplet families - {tag} ({bandstr} Hz, {len(ids)} families)",
                        "xa0.1f0.05", "ya0.1f0.05"])
-    fig.coast(land="245", water="220/233/245", shorelines="0.4p,gray60")
+    fig.coast(land="245", water="220/233/245", shorelines="0.4p,gray60", resolution="f")
     PM._plot_faults(fig, ufc, pen="0.8p,black")
     for r in rep.itertuples():                          # absolute-only families = faint grey context
         fid = int(r.cluster)
@@ -123,13 +131,13 @@ def master_map(rep, manifest):
             if A is not None:
                 fig.plot(x=A.lon, y=A.lat, style="c0.05c", fill="gray75")
     for fid in ids:                                     # relocated families, coloured by family
-        D = _read_reloc(B.slug_for(fid))
+        D = read(B.slug_for(fid))
         if D is not None:
             fig.plot(x=D.lon, y=D.lat, style="c0.09c", fill=wf._gmt_rgb(cols[fid]), pen="0.2p,black")
     bl, ba = ufc._subregion_box(sub)
     fig.plot(x=bl, y=ba, pen="1.2p,blue")
-    fig.savefig(MASTER_MAP, dpi=250)
-    print(f"wrote {MASTER_MAP}  ({len(ids)} relocated families)")
+    fig.savefig(out, dpi=250)
+    print(f"wrote {out}  ({len(ids)} families, {mode})")
 
 
 def thumbnails(rep, manifest, topn):
@@ -151,11 +159,12 @@ def main():
     ap.add_argument("--band", default="5-25", help="clustering band, e.g. 5-25 (default) or 5-15")
     a = ap.parse_args()
 
-    global MASTER, MASTER_MAP, FAILURES                  # band-tag every output; configure the driver too
+    global MASTER, MASTER_MAP, MASTER_MAP_BEFORE, FAILURES   # band-tag every output; configure the driver too
     B.BAND = tuple(int(x) for x in a.band.split("-")); B.BT = B._bt(a.band)
     B.MANIFEST = os.path.join(HERE, f"batch_manifest{B.BT}.csv")
     MASTER = os.path.join(HERE, f"master_metrics{B.BT}.csv")
     MASTER_MAP = os.path.join(HERE, f"master_map_relocated{B.BT}.png")
+    MASTER_MAP_BEFORE = os.path.join(HERE, f"master_map_absolute{B.BT}.png")
     FAILURES = os.path.join(HERE, f"failures{B.BT}.csv")
 
     rep = B.family_table()
@@ -175,7 +184,8 @@ def main():
         print(f"\n  {len(bad)} family/ies NOT fully relocated (-> {os.path.basename(FAILURES)}):")
         print("   " + bad[["id", "n", "status", "stage_failed"]].to_string(index=False).replace("\n", "\n   "))
     if not a.no_map:
-        master_map(rep, manifest)
+        master_map(rep, manifest, mode="before")
+        master_map(rep, manifest, mode="after")
     if not a.no_thumbs:
         thumbnails(rep, manifest, a.topn)
 

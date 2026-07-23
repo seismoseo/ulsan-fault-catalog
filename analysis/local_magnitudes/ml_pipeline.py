@@ -42,6 +42,10 @@ WOOD_ANDERSON_PAZ = {
     "gain": 1.0,                   # the sensitivity field carries the gain
 }
 
+# Dead/flatlined-channel floor (mm of Wood-Anderson displacement). A live station's WA noise/peak
+# is never below ~1e-8 mm; values ~1e-12 are dead traces that can pass the SNR ratio coincidentally.
+DEAD_TRACE_FLOOR_MM = 1e-8
+
 
 # --- inventory loaders -----------------------------------------------------
 def load_combined_inventory(master_dir, fetched_dir=None) -> obspy.Inventory:
@@ -143,33 +147,123 @@ def remove_response_to_disp(stream, inventory, *,
     return out
 
 
+def hypocentral_km(sac):
+    """Hypocentral (true source-receiver) distance in km from SAC headers.
+
+    SAC ``dist`` is the **epicentral** distance — it is populated at export with
+    ``gps2dist_azimuth`` (great-circle, depth-independent). The Sheen (2018) S-window and
+    the Heo/Sheen distance-attenuation term both require the **hypocentral** distance
+    ``R = sqrt(epicentral² + depth²)`` with the source depth ``evdp`` (km, also a SAC
+    header). For nearby stations where the epicentral distance is comparable to or smaller
+    than the focal depth, using the epicentral distance underestimates R badly: the S
+    window ``[dist/4, dist/2]`` then lands at — or before — the P arrival (fatal for the
+    near-source stations that anchor small-event ML), and the ML distance correction is
+    biased low. Returns NaN if either header is missing."""
+    epi = float(sac.get("dist", np.nan))
+    dep = float(sac.get("evdp", np.nan))
+    if not (np.isfinite(epi) and np.isfinite(dep)):
+        return np.nan
+    return float(np.hypot(epi, dep))
+
+
+_KIM2011_TAUP = None   # lazily-built TauPyModel cache
+
+
+def kim2011_taup_model():
+    """The kim2011 (location) velocity model as a TauP model, for *theoretical* P arrivals.
+
+    The Heo noise window needs a P reference. PhaseNet+ does not always pick P even when a
+    clear S exists (missed P at near or noisy stations), so for those traces we place the
+    pre-P noise window on the **theoretical first-arriving P** computed through the SAME
+    kim2011 1-D model used for HYPOINVERSE location — never on a guess. The model is the
+    4-layer kim2011 crust (Pg/Pn) spliced onto ak135 below the Moho (so TauP can build a
+    full-earth model); validated to match the actual PhaseNet+ P picks to within ±0.1 s.
+    Built once into ``taup_model/kim2011_uf.npz`` next to this module and cached."""
+    global _KIM2011_TAUP
+    if _KIM2011_TAUP is not None:
+        return _KIM2011_TAUP
+    from obspy.taup import TauPyModel
+    from obspy.taup.taup_create import build_taup_model
+    here = os.path.dirname(os.path.abspath(__file__))
+    mdir = os.path.join(here, "taup_model")
+    npz = os.path.join(mdir, "kim2011_uf.npz")
+    if not os.path.exists(npz):
+        os.makedirs(mdir, exist_ok=True)
+        tvel = os.path.join(mdir, "kim2011_uf.tvel")
+        # kim2011 crust (depth Vp Vs density), constant per layer w/ first-order
+        # discontinuities; 7.77 half-space extended to the Moho (35 km), then ak135 mantle.
+        crust = [(0.00, 5.63, 3.40, 2.70), (7.29, 5.63, 3.40, 2.70),
+                 (7.29, 6.17, 3.60, 2.75), (20.70, 6.17, 3.60, 2.75),
+                 (20.70, 6.58, 3.70, 2.85), (31.30, 6.58, 3.70, 2.85),
+                 (31.30, 7.77, 4.45, 3.00), (35.00, 7.77, 4.45, 3.00)]
+        ak = os.path.join(os.path.dirname(obspy.taup.__file__), "data", "ak135.tvel")
+        with open(tvel, "w") as f:
+            f.write("kim2011_uf - P\nkim2011_uf - S\n")
+            for z, vp, vs, rho in crust:
+                f.write(f"{z:8.3f} {vp:7.4f} {vs:7.4f} {rho:7.4f}\n")
+            f.write(f"{35.0:8.3f} {8.04:7.4f} {4.48:7.4f} {3.3198:7.4f}\n")  # Moho -> ak135
+            for ln in open(ak):
+                p = ln.split()
+                if len(p) == 4:
+                    try:
+                        z = float(p[0])
+                    except ValueError:
+                        continue
+                    if z > 35.0:
+                        f.write(ln if ln.endswith("\n") else ln + "\n")
+        build_taup_model(tvel, output_folder=mdir)
+    import obspy.taup  # noqa: F401 (ensure submodule import above resolved)
+    _KIM2011_TAUP = TauPyModel(model=npz)
+    return _KIM2011_TAUP
+
+
+def theoretical_p_rel(sac, bval, taup_model):
+    """First-arriving theoretical P from the first sample: ``tP_origin - b``.
+
+    Uses epicentral distance (SAC ``dist``) + focal depth (``evdp``) through `taup_model`.
+    Returns NaN if headers missing or TauP returns no arrival."""
+    epi = float(sac.get("dist", np.nan)); dep = float(sac.get("evdp", np.nan))
+    if not (np.isfinite(epi) and np.isfinite(dep)):
+        return np.nan
+    try:
+        arr = taup_model.get_travel_times(source_depth_in_km=max(dep, 0.0),
+                                          distance_in_degree=epi / 111.195,
+                                          phase_list=("p", "P", "Pn", "Pg"))
+    except Exception:
+        return np.nan
+    if not arr:
+        return np.nan
+    return float(min(a.time for a in arr)) - bval
+
+
 def wood_anderson_amp_mm(stream_disp, *,
                          require_pick=True,
+                         taup_model=None,
                          noise_pre_pad=1.0,
-                         noise_fallback_s=20.0,
-                         signal_min_after_p=0.5) -> pd.DataFrame:
+                         noise_window_s=5.0,
+                         sig_div_start=4.0,
+                         sig_div_end=2.0) -> pd.DataFrame:
     """Simulate the standard Wood-Anderson seismograph from a displacement stream
     (output of `remove_response_to_disp`) and return peak amplitude in mm
     **together with a pre-event noise RMS and the resulting SNR**.
 
-    Windowing:
-      * **noise window** : from trace start to ``(P_pick − noise_pre_pad) s``.
-      * **signal window**: from ``(P_pick + signal_min_after_p) s`` to the end
-        of the trace. The peak Wood-Anderson amplitude is the max of |WA| inside
-        this window — restricting the search to post-P avoids picking pre-event
-        noise spikes as the "peak" (the v1.0.0 behaviour, which inflated small-
-        event MLs and biased the b-value upward).
+    Windowing — transparent, distance-based, NO fallbacks (a reading with no P pick or
+    no hypocentral distance is skipped, never patched):
+      * **noise window** : ``[P − noise_pre_pad − noise_window_s, P − noise_pre_pad]``
+        (default [P−6, P−1] s) — a short LOCAL pre-P window (RMS → SNR denominator). Not
+        the full pre-event segment, which would sweep up a prior event's coda in dense
+        sequences and wrongly reject aftershocks.
+      * **signal window**: the **Sheen (2018) distance window** ``[dist/sig_div_start,
+        dist/sig_div_end]`` seconds after origin (default ``[dist/4, dist/2]``). It brackets
+        the S/Lg train from hypocentral distance alone, so ML is always the **S-phase
+        amplitude** (a consistent phase, never a close-in P peak) and **no S pick is needed**.
+        The peak Wood-Anderson amplitude is the max |WA| inside this window.
 
-    ``require_pick`` (default True, the CORRECT behaviour) skips any trace that has
-    no P-pick header (`SAC.a`). A station with no pick is one where the phase was
-    not detected (signal not above noise), so it must not contribute: without a pick
-    the noise window has no real anchor and falls back to the trace start, the SNR
-    test is meaningless, and unpicked far stations sitting at the ambient/coda
-    amplitude FLOOR leak in. Their amplitude is flat with distance, so the distance
-    term over-corrects them up to station ML ~1 and — being the majority for small
-    events — saturates small-event ML / inflates Mc (the Buan bug, commit fd7800a).
-    Pass ``require_pick=False`` ONLY to reproduce the buggy all-station result for a
-    diagnostic; the ``noise_fallback_s`` window is used only on that path.
+    ``require_pick`` (default True) skips traces with no P-pick header (`SAC.a`); the new
+    scheme also requires the SAC ``dist`` header for the signal window. SAC ``a``/``t0`` are
+    relative to the file REFERENCE (origin); the data starts at ``b`` relative to it, so the
+    P sample from the first sample is ``a − b`` and a time T-after-origin is ``(T − b)·sr``.
+    The exports use ``b = −30`` (origin at t=0, 30 s pre-event lead-in).
 
     Returns one row per trace with:
         network, station, channel, peak_mm, peak_time, noise_mm, snr.
@@ -180,45 +274,63 @@ def wood_anderson_amp_mm(stream_disp, *,
     aggregation."""
     rows = []
     for tr in stream_disp:
-        # Detectability gate: the phase must have been picked HERE (SAC.a set), else
-        # the SNR test below has no real pre-P anchor — skip it (see require_pick).
         sac = getattr(tr.stats, "sac", {}) or {}
-        p_rel = None
+        bval = float(sac.get("b", 0.0) or 0.0)
+        # P reference for the noise window. PREFER the PhaseNet+ pick (SAC.a); only when it
+        # is absent fall back to the THEORETICAL kim2011 P (taup_model) — so stations where
+        # P was missed but S is clear can still be measured. The signal window is purely
+        # distance-based (Sheen) and needs no pick. p_rel = P-from-first-sample = P_origin - b.
+        p_rel = None; p_source = None
         if "a" in sac and float(sac["a"]) > -1e4:                     # SAC -12345 sentinel
-            p_rel = float(sac["a"])
+            p_rel = float(sac["a"]) - bval; p_source = "pick"
+        elif taup_model is not None:
+            tp = theoretical_p_rel(sac, bval, taup_model)
+            if np.isfinite(tp):
+                p_rel = tp; p_source = "taup"
         if require_pick and p_rel is None:
             continue
         wa = tr.copy().simulate(paz_simulate=WOOD_ANDERSON_PAZ)
         data_mm = np.asarray(wa.data, dtype=float) * 1000.0          # m → mm
         if not len(data_mm):
             continue
-        sr = float(wa.stats.sampling_rate)
-        # Noise window (sample indices) — pre-P, with a small pad
-        if p_rel is not None and p_rel > noise_pre_pad + 0.5:
-            i_noise_end = int((p_rel - noise_pre_pad) * sr)
-        else:
-            i_noise_end = int(noise_fallback_s * sr)
-        i_noise_end = max(min(i_noise_end, len(data_mm)), 4)
-        noise_window = data_mm[:i_noise_end]
-        noise_mm = float(np.sqrt(np.mean(noise_window ** 2))) if len(noise_window) else np.nan
-        # Signal window — post-P only when we have a pick, else from end-of-noise
-        if p_rel is not None:
-            i_sig_start = max(int((p_rel + signal_min_after_p) * sr), i_noise_end)
-        else:
-            i_sig_start = i_noise_end
-        if i_sig_start >= len(data_mm) - 1:
+        sr = float(wa.stats.sampling_rate); n = len(data_mm)
+        dist = hypocentral_km(sac)   # HYPOCENTRAL (epicentral SAC.dist + focal depth evdp)
+        # Clear-cut requirements (no fallbacks): a P reference (pick or theoretical, for the
+        # noise window) and a hypocentral distance (for the Sheen S window). Otherwise skip.
+        if p_rel is None or not (np.isfinite(dist) and dist > 0.0):
             continue
-        signal_window = data_mm[i_sig_start:]
+        # NOISE: short local pre-P window  [P − noise_pre_pad − noise_window_s, P − noise_pre_pad]
+        i_noise_start = int((p_rel - noise_pre_pad - noise_window_s) * sr)
+        i_noise_end   = int((p_rel - noise_pre_pad) * sr)
+        if i_noise_start < 0 or i_noise_end <= i_noise_start:
+            continue
+        noise_window = data_mm[i_noise_start:i_noise_end]
+        noise_mm = float(np.sqrt(np.mean(noise_window ** 2)))      # RMS noise
+        noise_peak_mm = float(np.max(np.abs(noise_window)))        # zero-to-peak noise
+        # SIGNAL: Sheen (2018) distance-based S window  [dist/sig_div_start, dist/sig_div_end] s
+        # after origin -> trace indices (T − b)·sr. Peak = max |WA| of the S/Lg train.
+        i_sig_start = int((dist / sig_div_start - bval) * sr)
+        i_sig_end   = int((dist / sig_div_end   - bval) * sr)
+        if i_sig_start < 0 or i_sig_end > n or i_sig_end <= i_sig_start + 1:
+            continue
+        signal_window = data_mm[i_sig_start:i_sig_end]
         i_local = int(np.argmax(np.abs(signal_window)))
         peak_mm = float(np.abs(signal_window[i_local]))
         peak_idx = i_sig_start + i_local
-        snr = peak_mm / noise_mm if noise_mm and noise_mm > 0 else np.nan
+        # Dead/flatlined-channel guard: a non-physical WA displacement (~1e-12 mm) can pass the
+        # SNR *ratio* by coincidence (its noise floor is equally tiny), then dominate a 1-station
+        # event with an absurd ML (e.g. BUS3 -> ML -8.8). Reject below a physical floor: a live
+        # station's WA-displacement noise/peak is never below ~1e-8 mm.
+        if noise_mm < DEAD_TRACE_FLOOR_MM or peak_mm < DEAD_TRACE_FLOOR_MM:
+            continue
+        snr    = peak_mm / noise_mm      if noise_mm      and noise_mm      > 0 else np.nan  # peak / RMS-noise
+        snr_pp = peak_mm / noise_peak_mm if noise_peak_mm and noise_peak_mm > 0 else np.nan  # peak / peak-noise
         rows.append(dict(network=tr.stats.network, station=tr.stats.station,
                          channel=tr.stats.channel,
                          peak_mm=peak_mm,
                          peak_time=wa.stats.starttime + peak_idx * wa.stats.delta,
-                         noise_mm=noise_mm,
-                         snr=snr))
+                         noise_mm=noise_mm, noise_peak_mm=noise_peak_mm,
+                         snr=snr, snr_pp=snr_pp, p_source=p_source))
     return pd.DataFrame(rows)
 
 
@@ -312,22 +424,29 @@ def _auto_pre_filt(attenuation_fn):
 
 def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
                    pre_filt=None, water_level=60.0,
-                   snr_threshold=3.0, z_only=None, require_pick=True) -> pd.DataFrame:
+                   snr_threshold=2.0, snr_metric="snr_pp",
+                   use_taup_for_missing_p=True, max_dist_km=None,
+                   z_only=None, require_pick=True) -> pd.DataFrame:
     """For one event directory (per the export tree), compute ML at every station-channel.
 
     Reads all `*.sac` files in `event_dir` (expected layout: one per station-channel,
-    written by the prior export notebook). Distance comes from the SAC `dist` header
-    (km, populated at export).
+    written by the prior export notebook). The attenuation term uses the **hypocentral**
+    distance `sqrt(epicentral² + depth²)` (`hypocentral_km`: SAC `dist` is epicentral,
+    combined with the focal depth `evdp`) — NOT the raw epicentral `dist`.
 
-    SNR filtering: each trace's peak Wood-Anderson amplitude is divided by the
-    pre-P-pick RMS noise on the same trace (post-deconvolution); rows with
-    ``snr < snr_threshold`` get ``ML = NaN`` and are dropped from the event-level
-    aggregate (`aggregate_ml`). Default ``snr_threshold = 3.0`` follows Sheen et
-    al. 2018 / Heo et al. 2024 convention. Set to 0 to keep all stations
-    (legacy v1.0.0 behaviour — which inflates ML for noise-dominated traces).
+    P reference: the PhaseNet+ pick (SAC `a`) where present, otherwise — when
+    ``use_taup_for_missing_p`` (default True) — the **theoretical kim2011 P**
+    (`kim2011_taup_model`), so a station with a missed P but a clear S still counts. The
+    chosen P is recorded per row as ``p_source`` ∈ {pick, taup}.
+
+    SNR filtering: rows with ``<snr_metric> < snr_threshold`` get ``ML = NaN`` and are
+    dropped from the event aggregate (`aggregate_ml`). The locked scheme is
+    ``snr_metric='snr_pp'`` (zero-to-peak signal / peak noise) with ``snr_threshold=2.0``;
+    pass ``snr_metric='snr'`` (peak/RMS) to use the alternative metric.
 
     Returns one row per station-channel:
-        network, station, channel, dist_km, peak_mm, noise_mm, snr, peak_time, ML.
+        network, station, channel, dist_km, peak_mm, noise_mm, snr, snr_pp, p_source,
+        peak_time, ML.
 
     Tip: the calling notebook then aggregates with `df.groupby('station').ML.median()`
     to get one ML per station, and `df.ML.median()` for the event-level ML."""
@@ -351,27 +470,35 @@ def per_station_ml(event_dir, inventory, *, attenuation_fn=ml_sheen2018,
             continue
         st += tr
         sac = tr.stats.sac
-        if "dist" in sac:
-            dist_for[(tr.stats.network, tr.stats.station, tr.stats.channel)] = float(sac.dist)
+        rh = hypocentral_km(sac)     # HYPOCENTRAL distance for the attenuation term (was epicentral)
+        if np.isfinite(rh):
+            dist_for[(tr.stats.network, tr.stats.station, tr.stats.channel)] = rh
     disp = remove_response_to_disp(st, inventory, pre_filt=pre_filt, water_level=water_level)
     if not len(disp):
         return pd.DataFrame()
-    amps = wood_anderson_amp_mm(disp, require_pick=require_pick)
+    tm = kim2011_taup_model() if use_taup_for_missing_p else None
+    amps = wood_anderson_amp_mm(disp, require_pick=require_pick, taup_model=tm)
     if not len(amps):
         return pd.DataFrame()
     amps["dist_km"] = [dist_for.get((r.network, r.station, r.channel), np.nan)
                        for r in amps.itertuples()]
     # Use only the channel orientation code (last character) for attenuation_fn.
-    # Skip ML when SNR is below the threshold (returns NaN; aggregate_ml drops NaNs).
+    # Skip ML when SNR (chosen metric) is below threshold (returns NaN; aggregate_ml drops NaNs).
     def _ml_one(r):
         if r.peak_mm <= 0 or not np.isfinite(r.dist_km):
             return np.nan
-        if snr_threshold > 0 and (not np.isfinite(r.snr) or r.snr < snr_threshold):
+        # Distance cap: beyond max_dist_km the new (far) stations carry a path-attenuation bias
+        # that grows with distance and inflates the network-median ML as the network expands.
+        # Excluding them keeps the magnitude scale temporally stationary (see FINAL_SUMMARY).
+        if max_dist_km is not None and r.dist_km > max_dist_km:
+            return np.nan
+        gate = getattr(r, snr_metric)
+        if snr_threshold > 0 and (not np.isfinite(gate) or gate < snr_threshold):
             return np.nan
         return attenuation_fn(r.peak_mm, r.dist_km, r.channel[-1])
     amps["ML"] = [_ml_one(r) for r in amps.itertuples()]
     return amps[["network", "station", "channel", "dist_km",
-                 "peak_mm", "noise_mm", "snr", "peak_time", "ML"]]
+                 "peak_mm", "noise_mm", "snr", "snr_pp", "p_source", "peak_time", "ML"]]
 
 
 def aggregate_ml(per_station_df) -> dict:
@@ -418,7 +545,8 @@ def _event_dir_for(time_str, event_roots) -> str | None:
 def export_ml_catalog(catalog_df, event_roots, inventory, *,
                       attenuation_fn=None, restrict_to_z=None,
                       pre_filt=None,
-                      snr_threshold=3.0, require_pick=True,
+                      snr_threshold=2.0, snr_metric="snr_pp",
+                      use_taup_for_missing_p=True, max_dist_km=None, require_pick=True,
                       workers=1, skip_existing=True, out_path=None,
                       per_station_csv_path=None,
                       progress=True) -> pd.DataFrame:
@@ -527,6 +655,9 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
                                      attenuation_fn=attenuation_fn,
                                      pre_filt=pre_filt,
                                      snr_threshold=snr_threshold,
+                                     snr_metric=snr_metric,
+                                     use_taup_for_missing_p=use_taup_for_missing_p,
+                                     max_dist_km=max_dist_km,
                                      z_only=restrict_to_z,
                                      require_pick=require_pick)
             # Persist per-station rows when requested. The ML column is the post-SNR
@@ -534,7 +665,10 @@ def export_ml_catalog(catalog_df, event_roots, inventory, *,
             # correction from any non-NaN subset.
             if per_station_csv_path is not None and len(per_sta):
                 ev_time = str(out.at[i, "time"])
-                rows = per_sta.assign(event_idx=int(i), event_time=ev_time).to_dict("records")
+                # canonical id = the catalog's frozen event_idx column when present (master row id);
+                # fall back to positional index for legacy catalogs without the column.
+                eidx = int(out.at[i, "event_idx"]) if "event_idx" in out.columns else int(i)
+                rows = per_sta.assign(event_idx=eidx, event_time=ev_time).to_dict("records")
                 with _ps_lock:
                     _ps_rows.extend(rows)
             agg = aggregate_ml(per_sta)

@@ -39,13 +39,13 @@ UTM52N = "EPSG:32652"                        # Korea ~ UTM zone 52N (metres)
 
 
 # --------------------------------------------------------------- catalog loading
-# HYPOINVERSE .sum quality filter — the confirmed legacy criterion that produced stead's
-# UF{year}_filtered.sum (from the per-year 03.Draw_HypInv_Epicenters_*.ipynb notebooks):
-#     (ERH < 5) & (ERZ < 5) & (GAP < 270) & (NUM > 5)
-# i.e. strict `<` on the error/gap and num>5 (>= 6 picks). Applied identically to every picker
-# model (stead / original / phasenet_plus) so the catalogs are directly comparable, and computed
-# in-pandas from the raw .sum so no precomputed _filtered.sum is needed.
-QC = dict(erh=5.0, erz=5.0, gap=270.0, num=5)
+# HYPOINVERSE .sum quality filter. Extends the legacy criterion (ERH<5, ERZ<5, GAP<270, NUM>5)
+# with `RMS < 1.0 s` — added under Stage-2 to drop poorly-converged HypoInverse fits that pass
+# the geometric/error gates but still have large arrival-time residuals. 1.0 s is generous for
+# a good fit (typical good RMS 0.05–0.3 s); the cap mainly removes runaway non-convergent rows.
+# Applied identically to every picker model (stead / original / phasenet_plus) so catalogs stay
+# directly comparable, and computed in-pandas from the raw .sum so no `_filtered.sum` is needed.
+QC = dict(erh=5.0, erz=5.0, gap=270.0, num=5, rms=1.0)
 
 _SUM_COLMAP = [("LAT", "lat"), ("LON", "lon"), ("DEPTH", "depth"), ("NUM", "num"),
                ("GAP", "gap"), ("RMS", "rms"), ("ERH", "erh"), ("ERZ", "erz"), ("QASR", "qual")]
@@ -81,11 +81,12 @@ def read_sum(path):
 
 
 def apply_qc(df, qc=QC):
-    """Filter a catalog by the legacy quality criterion (`QC`): erh<5, erz<5, gap<270, num>5 (strict
-    `<`; num>5 == >= 6 picks). NaN rows (overflow / unlocated errors) fail every comparison and drop
-    out, which is what we want. Returns a re-indexed copy."""
+    """Filter a catalog by the quality criterion (`QC`): erh<5, erz<5, gap<270, num>5, rms<1.0
+    (strict `<` on each; num>5 == >= 6 picks). NaN rows (overflow / unlocated errors) fail every
+    comparison and drop out, which is what we want. Returns a re-indexed copy."""
     m = ((df["erh"] < qc["erh"]) & (df["erz"] < qc["erz"])
-         & (df["gap"] < qc["gap"]) & (df["num"] > qc["num"]))
+         & (df["gap"] < qc["gap"]) & (df["num"] > qc["num"])
+         & (df["rms"] < qc["rms"]))
     return df[m].reset_index(drop=True)
 
 

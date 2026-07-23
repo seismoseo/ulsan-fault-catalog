@@ -59,6 +59,37 @@ REGION = dict(
     n_s_picks=2,
     n_p_and_s_picks=1,
 )
+# Stage-2 tightened defaults — opt-in via `association.py --strict` (default off so
+# the loose baseline is reproducible). PyOcto's default `pick_match_tolerance=1.5 s`
+# admits hypocenters within ±5–10 km of the true location at typical 5–8 km/s
+# wavespeeds, which produces the 2017-11-15 06:09-style chimera associations
+# (HypoInverse max|residual| up to 4.86 s). The tightened set rejects them.
+REGION_STRICT = dict(
+    lat=(34.5, 37.0),
+    lon=(128.5, 130.0),
+    zlim=(0, 40),
+    time_before=300,
+    n_picks=6,                  # was 4 — avoid trivial events
+    n_p_picks=3,                # was 2 — stronger origin-time constraint
+    n_s_picks=3,                # was 2 — symmetric with P; demands genuine S coverage
+    n_p_and_s_picks=2,          # was 1 — two stations with both P+S for depth
+    pick_match_tolerance=1.0,   # default 1.5 — THE primary residual cap (middle ground)
+    min_node_size=2.0,          # default 10.0 km — finer initial octree; reduces wrong-basin
+                                # convergences on one-sided station coverage (the 2013-03-22
+                                # 13:40:04 case where PyOcto's coarse search landed at a phantom
+                                # 36.66°N hypocenter 110 km north of the true location).
+    min_node_size_location=0.5, # default 1.5 km — finer hypocenter refinement
+    refinement_iterations=8,    # default 3 — more localise+pick-rematch cycles to escape
+                                # local minima. NOTE: tweak alone is insufficient — PyOcto's
+                                # streaming associator truncates at threshold so FARTHER
+                                # stations get dropped. Paired with the post-locate
+                                # pick-augmentation stage (uses PyOcto's now-correct hypocenter
+                                # to scan for picks PyOcto missed at threshold).
+    min_interevent_time=2.0,    # default 3.0 s — allows real doublets
+    n_threads=16,               # default = all available cores. Be polite on a shared 64-core box:
+                                # 16 threads is enough to make progress without crowding out
+                                # other users. Bump up only if the box is dedicated.
+)
 # label embedded in pyocto_<label>_<year>.csv (the PyOcto layered velocity model)
 PYOCTO_VELMODEL = "kim1983"
 
