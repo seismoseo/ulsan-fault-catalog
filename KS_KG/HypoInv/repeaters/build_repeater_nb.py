@@ -96,9 +96,8 @@ CACHE      = "wf_similarity_cache"
 )
 
 code("""import os, sys, numpy as np, pandas as pd, matplotlib.pyplot as plt
-sys.path.insert(0, "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv")  # run from repeaters/ or anywhere
-import uf_waveform_similarity as wf
-import uf_cluster as ufc
+from uflib import uf_waveform_similarity as wf
+from uflib import uf_cluster as ufc
 wf.use_helvetica()
 CACHE = wf.CACHE_DIR          # absolute cache dir (overrides the relative default; cwd-independent)
 os.makedirs(CACHE, exist_ok=True)

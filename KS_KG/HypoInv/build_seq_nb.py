@@ -46,8 +46,8 @@ CACHE      = "wf_similarity_cache"
 """)
 
 code("""import os, numpy as np, pandas as pd, matplotlib.pyplot as plt
-import uf_waveform_similarity as wf
-import uf_cluster as ufc
+from uflib import uf_waveform_similarity as wf
+from uflib import uf_cluster as ufc
 wf.use_helvetica()
 plt.rcParams["figure.max_open_warning"] = 0
 os.makedirs(CACHE, exist_ok=True)

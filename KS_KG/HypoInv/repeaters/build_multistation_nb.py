@@ -65,9 +65,8 @@ MIN_CONF   = 2                 # >= this many confirming stations => network-con
 CACHE      = "wf_similarity_cache\"""")
 
 code(f"""import os, sys, numpy as np, pandas as pd, matplotlib.pyplot as plt
-sys.path.insert(0, "{HYPO}")   # run from repeaters/ or anywhere
-import uf_waveform_similarity as wf
-import uf_cluster as ufc
+from uflib import uf_waveform_similarity as wf
+from uflib import uf_cluster as ufc
 wf.use_helvetica()
 CACHE = wf.CACHE_DIR           # absolute cache dir (cwd-independent)
 pd.set_option("display.width", 220); pd.set_option("display.max_columns", 40)""")

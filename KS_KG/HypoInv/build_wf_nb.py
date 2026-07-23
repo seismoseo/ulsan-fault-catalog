@@ -58,8 +58,8 @@ CACHE      = "wf_similarity_cache"
 """)
 
 code("""import os, numpy as np, pandas as pd, matplotlib.pyplot as plt
-import uf_waveform_similarity as wf
-import uf_cluster as ufc
+from uflib import uf_waveform_similarity as wf
+from uflib import uf_cluster as ufc
 wf.use_helvetica()
 os.makedirs(CACHE, exist_ok=True)
 pd.set_option("display.width", 160); pd.set_option("display.max_columns", 30)

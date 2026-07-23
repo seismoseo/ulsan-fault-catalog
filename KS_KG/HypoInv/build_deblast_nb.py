@@ -68,8 +68,8 @@ CACHE      = "wf_similarity_cache"
 DEBLAST_CSV = "catalog_phasenet_plus_2010_2024_deblasted_rough.csv\"""")
 
 code("""import os, numpy as np, pandas as pd, matplotlib.pyplot as plt
-import uf_waveform_similarity as wf
-import uf_cluster as ufc
+from uflib import uf_waveform_similarity as wf
+from uflib import uf_cluster as ufc
 wf.use_helvetica()
 pd.set_option("display.width", 200); pd.set_option("display.max_columns", 40)""")
 
