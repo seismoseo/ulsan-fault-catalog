@@ -52,7 +52,7 @@ mpl.rcParams.update({"figure.dpi":130,"font.size":9.5,"legend.framealpha":1.0,
 # windowing parameters (final scheme = ml_pipeline defaults)
 NOISE_WIN, NOISE_PAD, SIG_DIV_START, SIG_DIV_END, SNR_THR = 5.0, 1.0, 4.0, 2.0, 2.0
 EVT="../HypoInv"; UF=(129.25,129.55,35.60,35.90)
-inv=mp.load_combined_inventory("responses/master")
+inv=mp.load_combined_inventory("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master")
 TAUP=mp.kim2011_taup_model()       # theoretical kim2011 P for stations with no PhaseNet+ pick
 cat=pd.read_csv("catalog_phasenet_plus_2010_2024_blastclean_with_ml_heo_clean.csv")
 uf=cat[(cat.lon.between(UF[0],UF[1]))&(cat.lat.between(UF[2],UF[3]))&(cat.mag_status=='ok')].copy()

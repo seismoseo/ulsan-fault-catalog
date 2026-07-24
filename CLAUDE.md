@@ -179,25 +179,27 @@ the **next 8 largest-event clusters** (ranks 3–10; `build_cluster_svd_next8_nb
 
 ## Directory map
 
+Software (src/), data (data/), outputs (outputs/), and per-network raw waveforms (KS_KG/ GJ/ NS/ NS_100hz/)
+are separated. Restructured 2026-07; metadata consolidated by kind under data/metadata/ (2026-07).
+
 ```
-KS_KG/
-  continuous/            raw waveforms (NOT in git; ~3.8 TB)
-  station_table/         station metadata (stations.csv, station_update.dat)
-  velocity_model/        kim1983.csv (PyOcto layered model)
-  detection_location/    per-year notebooks 01/02/03 — the "stead" REFERENCE run
-  picks/ pyocto/ HypoInv/ existing stead outputs (data mostly NOT in git)
-    HypoInv/uf_cluster.py              spatial/temporal blast decluster + map helpers
-    HypoInv/uf_waveform_similarity.py  WAVEFORM-similarity blast screening (KG.HDB; 2026-06-07)
-    HypoInv/04_waveform_similarity_hdb_phasenet_plus.ipynb   its controlled notebook
-  models/                picker-model dimension (this project's working area)
-    stead/               symlinks to the reference run (read-only view; not in git)
-    original/            PhaseNet "original" run (copies of notebooks, switched)
-    pipeline/            *** automated pipeline: config.py, core.py, *.py CLIs ***
-    build_original_tree.py
-NS/                      second network, ~3.3 TB, mostly post-2018/19 — DEFERRED
-tuto_material/           tutorials / third-party (NOT in git)
-docs/                    documentation
-tools/                   git helpers (nbstrip.py)
+src/            installable packages — ufpipe/ (the 6-stage pipeline) + uflib/ (pip install -e .)
+KS_KG/          KS+KG raw waveforms (station dirs at root; NOT in git; ~3.8 TB) — pure waveform dir
+GJ/  NS/  NS_100hz/   the other network waveform dirs (pure waveforms; NOT in git)
+data/
+  metadata/     *** single home for all metadata, organized BY KIND ***
+    stations/     ks_kg/  gj/  ns/  kigam/     — per-network station tables
+    responses/    master/ (148 MB KS_KG StationXML, gitignored) + fetched/ + small RESP.* text (tracked)
+    velocity/     kim1983.csv (PyOcto layered model)
+    catalogs/     ghbsn_heo/ (Heo et al.), USGS_M7_event_catalog.csv
+  waveforms/    symlinks to the network dirs
+  hypoinv/      HYPOINVERSE station files (STA/), PHS/, per-year catalogs + location notebooks
+outputs/
+  models/       picker-model dimension: stead/ (reference), original/, phasenet_plus/ — detection→location
+analysis/       local_magnitudes/ (ML + responses consumers), uf_subregion_hypodd/, reloc_analysis/, ...
+detection_test/ picker-comparison pilot + the reloc feeder (lib/) + reloc driver (reloc_2016_uf/)
+docs/           documentation (+ ufpipe_reference_manual.pdf)
+tools/          git helpers (nbstrip.py)
 ```
 
 ## Two independent "model" dimensions — keep them straight
@@ -212,10 +214,9 @@ SeisBench path and the `phasenet_plus` backend feed minimally-processed data.)
 
 ## Conventions / rules
 
-- **Do not edit the `stead` reference run** (`KS_KG/detection_location/**`, `KS_KG/{picks,pyocto,HypoInv}`).
-  It is the baseline to compare against. `models/stead/` only symlinks it (the scripts refuse
-  `--model stead` writes unless `--force`).
-- **New pipeline code lives in `src/ufpipe/`.** The `original` notebooks and `pipeline/` code are editable.
+- **Do not edit the `stead` reference run** (`outputs/models/stead/**`). It is the baseline to compare
+  against; `outputs/models/stead/` symlinks it (the scripts refuse `--model stead` writes unless `--force`).
+- **New pipeline code lives in `src/ufpipe/`** (installed via `pip install -e .`). The `original` outputs are editable.
 - **Canonical pick id**: detection writes `station = "NET.STA"` (e.g. `KG.BBK`); association derives the
   network from it. Do not reintroduce the old hardcoded `["KS"]*N + ["KG"]*…` split.
 - **Non-destructive scaffolding**: `models/build_original_tree.py` only ever writes under `models/`.

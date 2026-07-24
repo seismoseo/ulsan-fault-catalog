@@ -17,7 +17,7 @@ mpl.rcParams.update({"figure.dpi":130,"font.size":11,"axes.grid":True,"grid.alph
     "legend.framealpha":1.0,"legend.facecolor":"white","legend.edgecolor":"0.6"})
 D="/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/"
 CONT=D+"continuous/HDB/HHZ.D/"
-SXML=D+"local_magnitudes/responses/master/KS_KG_metadata_1.0.2.xml"
+SXML="/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master/KS_KG_metadata_1.0.2.xml"
 CAT=D+"local_magnitudes/catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo.csv"
 FS=100.0; NPS=8192
 FAIL_ON=pd.Timestamp("2014-11-01"); FAIL_OFF=pd.Timestamp("2015-05-21")

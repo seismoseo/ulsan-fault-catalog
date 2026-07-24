@@ -41,8 +41,8 @@ for _f in ("Helvetica","Arial","Nimbus Sans","TeX Gyre Heros","DejaVu Sans"):
 mpl.rcParams.update({"figure.dpi":130,"axes.grid":True,"grid.alpha":0.25,"font.size":11,
     "legend.framealpha":1.0,"legend.facecolor":"white","legend.edgecolor":"0.6"})  # opaque legend box, drawn above data
 PS="catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo.csv"
-SXML="responses/master/KS_KG_metadata_1.0.2.xml"          # station-response metadata (KS + KG)
-CACHE="responses/sensor_breaks_master.json"; MIN_EPOCH_N=50
+SXML="/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master/KS_KG_metadata_1.0.2.xml"          # station-response metadata (KS + KG)
+CACHE="/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/sensor_breaks_master.json"; MIN_EPOCH_N=50
 
 d=pd.read_csv(PS); d=d[(d.snr>=3)&d.ML.notna()].copy()
 d["t"]=pd.to_datetime(d.event_time,utc=True,errors="coerce"); d=d.dropna(subset=["t"])

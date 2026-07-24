@@ -40,7 +40,7 @@ for _f in ("Helvetica","Arial","Nimbus Sans","TeX Gyre Heros","DejaVu Sans"):
 mpl.rcParams.update({"figure.dpi":120,"axes.grid":True,"grid.alpha":0.3,"font.size":11})
 
 PS="catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo.csv"
-XML="responses/master/KS_KG_metadata_1.0.2.xml"
+XML="/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master/KS_KG_metadata_1.0.2.xml"
 DM=0.1; UF=(129.25,129.55,35.60,35.90)
 MAINSHOCKS={"Gyeongju 2016":pd.Timestamp("2016-09-12",tz="UTC"),"Pohang 2017":pd.Timestamp("2017-11-15",tz="UTC")}
 

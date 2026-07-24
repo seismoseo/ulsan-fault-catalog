@@ -75,7 +75,7 @@ def hav_km(a1, o1, a2, o2):
 
 
 def ns_stations():
-    ns = pd.read_csv("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/GHBSN_metadata/20240715/GHBSN_info_ver202312_modified.csv")
+    ns = pd.read_csv("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/stations/ns/20240715/GHBSN_info_ver202312_modified.csv")
     ns = ns.rename(columns={"station": "sta", "stla": "lat", "stlo": "lon"}).drop_duplicates("sta")
     return ns[~ns.sta.astype(str).str.startswith(("U", "Y"))]
 

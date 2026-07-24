@@ -30,7 +30,7 @@ import os, json, numpy as np, pandas as pd
 
 ANCHORS = ["KG.MKL.HHZ", "KG.HDB.HHZ", "KG.YSB.HHZ", "KG.CGD.ELZ", "KG.CHS.HHZ"]
 PS   = "catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo_uncapped.csv"  # anchors all <50km: cap irrelevant
-CACHE = "responses/sensor_breaks_master.json"      # the canonical, previously-defined epochs (nb17/nb18)
+CACHE = "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/sensor_breaks_master.json"      # the canonical, previously-defined epochs (nb17/nb18)
 SNR_PP_MIN = 2.0; MIN_EPOCH_N = 50
 
 # ----- load, restrict to the constant network, apply current quality gate -----

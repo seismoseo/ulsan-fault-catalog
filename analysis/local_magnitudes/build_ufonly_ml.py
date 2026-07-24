@@ -20,7 +20,7 @@ import json, numpy as np, pandas as pd
 UF = [129.25, 129.55, 35.60, 35.90]; SNR_PP_MIN = 2.0; MIN_EPOCH_N = 50
 CLEAN = "catalog_phasenet_plus_2010_2024_blastclean_with_ml_heo_homogenised_clean.csv"
 PS    = "catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo_uncapped.csv"
-CACHE = "responses/sensor_breaks_master.json"
+CACHE = "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/sensor_breaks_master.json"
 
 clean = pd.read_csv(CLEAN); clean["time"] = pd.to_datetime(clean.time, utc=True, errors="coerce")
 clean = clean.dropna(subset=["time"])

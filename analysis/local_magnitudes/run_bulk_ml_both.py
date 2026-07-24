@@ -29,8 +29,8 @@ EVENT_ROOTS = (
     f"{HYP}/event_waveforms_blastclean",
     f"{HYP}/event_waveforms_ulsanfault",
 )
-MASTER_XML  = f"{HERE}/responses/master"
-FETCHED_XML = f"{HERE}/responses/fetched"
+MASTER_XML  = "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master"
+FETCHED_XML = "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/fetched"
 
 cat = pd.read_csv(CAT_IN)
 print(f"catalog: {len(cat):,} events ({cat.time.iloc[0]} ... {cat.time.iloc[-1]})")

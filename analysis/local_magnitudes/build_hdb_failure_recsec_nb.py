@@ -36,7 +36,7 @@ for _f in ("Helvetica","Arial","Nimbus Sans","TeX Gyre Heros","DejaVu Sans"):
 mpl.rcParams.update({"figure.dpi":130,"font.size":9.5,"legend.framealpha":1.0,"legend.facecolor":"white","legend.edgecolor":"0.6"})
 NOISE_WIN,NOISE_PAD,SIG_DIV_START,SIG_DIV_END,SNR_THR = 5.0,1.0,4.0,2.0,2.0
 EVT="../HypoInv"
-inv=mp.load_combined_inventory("responses/master")
+inv=mp.load_combined_inventory("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master")
 TAUP=mp.kim2011_taup_model()
 # the 7 HDB failure-window events (event_time, HDB ML, HDB residual vs event median)
 FAIL=[("2014-12-06 20:10:01", 0.07,-2.22),("2014-12-11 00:30:57",-0.54,-2.19),

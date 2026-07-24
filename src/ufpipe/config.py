@@ -21,10 +21,10 @@ REPO = "/home/msseo/works/02.Ulsan_Fault_detection"
 ROOT = os.path.join(REPO, "KS_KG")                                   # KS/KG waveforms (network dir)
 MODELS = os.path.join(REPO, "outputs", "models")                     # generated picker-model scaffolds
 CONTINUOUS = ROOT                                                    # station dirs live directly under KS_KG/
-_META = os.path.join(REPO, "data", "metadata")
-STATION_UPDATE = os.path.join(_META, "ks_kg_station_table", "station_update.dat")
-STATIONS_CSV = os.path.join(_META, "ks_kg_station_table", "stations.csv")
-VELOCITY_CSV = os.path.join(_META, "velocity_model", "kim1983.csv")
+_META = os.path.join(REPO, "data", "metadata")                       # single home for all metadata (by kind)
+STATION_UPDATE = os.path.join(_META, "stations", "ks_kg", "station_update.dat")
+STATIONS_CSV = os.path.join(_META, "stations", "ks_kg", "stations.csv")
+VELOCITY_CSV = os.path.join(_META, "velocity", "kim1983.csv")
 
 # --------------------------------------------- detection (PhaseNet) defaults
 # Verified uniform across 2010-2024.

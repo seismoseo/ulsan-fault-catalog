@@ -27,8 +27,11 @@ data / code / outputs separation.
 ├── KS_KG/  GJ/  NS/  NS_100hz/    ★ raw waveforms — station dirs at each root (parallel; ~7 TB; NOT in git)
 ├── data/
 │   ├── waveforms/                    symlinks to the four network dirs (browsable view; no data copied)
-│   ├── metadata/                     station tables, velocity model, StationXML, external catalogs
-│   │   ├── ks_kg_station_table/ velocity_model/ GHBSN_metadata/ KIGAM_metadata/ GHBSN_catalog_Heoetal/
+│   ├── metadata/                     ★ single metadata home, organized BY KIND
+│   │   ├── stations/                 ks_kg/  gj/  ns/  kigam/   (per-network station tables)
+│   │   ├── responses/                master/ (148 MB StationXML, gitignored) + fetched/ + RESP.* text
+│   │   ├── velocity/                 kim1983.csv
+│   │   └── catalogs/                 ghbsn_heo/ (Heo et al.), USGS_M7_event_catalog.csv
 │   └── hypoinv/                      HYPOINVERSE control inputs (STA/*.sta, kim*/*.crh) + working data
 ├── outputs/                      regenerable pipeline products (picks, pyocto, models, …) — NOT in git
 ├── runs/                         canonical output root going forward — NOT in git
@@ -52,14 +55,15 @@ The repo holds **code, docs, and small reference metadata only** — no waveform
 **Tracked**
 - code: `src/**` (uflib + ufpipe packages), `analysis/**/*.py`, `detection_test/**/*.py`, `tools/**`, `pyproject.toml`
 - docs: `README.md`, `CLAUDE.md`, `docs/**`, package READMEs, `detection_test/reloc_2016_uf/PIPELINE.md`
-- reference metadata: `data/metadata/ks_kg_station_table/*`, `data/metadata/velocity_model/*`,
+- reference metadata: `data/metadata/stations/**` (all networks), `data/metadata/velocity/*`,
+  `data/metadata/catalogs/*.csv`, small text responses `data/metadata/responses/**/RESP.*`,
   HYPOINVERSE control inputs `data/hypoinv/STA/*.sta`, `data/hypoinv/{kim1983,kim2011}/*.crh`
 
 **Not tracked** (see [`.gitignore`](../.gitignore))
 - waveforms: `KS_KG/`, `GJ/`, `NS/`, `NS_100hz/` (station dirs at each root, ~7 TB) + the `data/waveforms/` symlinks
 - outputs: `outputs/`, `runs/`, `**/picks/`, `**/pyocto/`, HYPOINVERSE `*.prt/*.arc/*.sum`, `*.phs`
-- large data: `data/hypoinv/event_waveforms_*/`, `analysis/local_magnitudes/responses/master/` (141 MB StationXML),
-  per-station ML CSVs, HypoDD `*.res`, SVD volumes, `.gif`
+- large data: `data/hypoinv/event_waveforms_*/`, `data/metadata/responses/master/` (148 MB StationXML) +
+  `responses/fetched/zips/`, per-station ML CSVs, HypoDD `*.res`, SVD volumes, `.gif`
 - **generated notebooks** (`analysis/**/*.ipynb`, `detection_test/**/*.ipynb`, `data/hypoinv/**/*.ipynb`) — the
   builders (`build_*_nb.py`) are tracked; the notebooks they emit are not
 - Jupyter checkpoints, Python caches, `*.egg-info/`

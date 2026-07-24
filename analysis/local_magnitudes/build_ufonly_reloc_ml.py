@@ -38,7 +38,7 @@ from ml_pipeline import ml_heo2024   # exact Heo 2024 formula (vertical componen
 SNR_PP_MIN = 2.0
 PS    = "catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo_uncapped.csv"
 UFCAT = "catalog_ml_heo_ufonly.csv"
-CACHE = "responses/sensor_breaks_master.json"
+CACHE = "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/sensor_breaks_master.json"
 RUN   = ("/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/"
          "runs/uf_subregion_reuse")
 RELOC = os.environ.get("UF_RELOC",                        # kim2011 dt.cc primary product (override for QC)

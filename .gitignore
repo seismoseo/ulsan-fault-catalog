@@ -54,7 +54,6 @@ data/hypoinv/archive/
 analysis/**/*.ipynb
 analysis/**/*.log
 analysis/**/logs/
-analysis/local_magnitudes/responses/master/     # master StationXML copied from external (142 MB)
 
 # ---- detection_test/ pipeline data products (picks/catalogs/SAC stores/generated notebooks) ----
 detection_test/picks/
@@ -91,7 +90,6 @@ notebooks/02.Multi-station_detection.ipynb
 docs/planning/gyeongju_catalog/**/*.ipynb  # planning-run notebooks
 
 # ---- analysis/local_magnitudes large regenerable outputs (were gitignored under KS_KG/*) ----
-analysis/local_magnitudes/responses/master/
 analysis/local_magnitudes/*per_station*.csv
 analysis/local_magnitudes/*.npz
 **/*.epicentral_bak
@@ -101,6 +99,9 @@ analysis/uf_subregion_hypodd/**/hypoDD.res
 analysis/uf_subregion_hypodd/svd_volumes*/
 analysis/**/*.gif
 
-# ---- metadata: keep small station tables; the big external StationXML/PDF are data ----
-data/metadata/KIGAM_metadata/*.xml
-data/metadata/GHBSN_catalog_Heoetal/*.pdf
+# ---- metadata (by kind): keep small station tables + small text RESP; big binaries are data ----
+# responses: the 148 MB master StationXML and the fetched zips are local-only; small extracted RESP.* text stays tracked.
+data/metadata/responses/master/
+data/metadata/responses/fetched/zips/
+data/metadata/stations/kigam/*.xml
+data/metadata/catalogs/ghbsn_heo/*.pdf

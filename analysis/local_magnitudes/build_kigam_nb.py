@@ -62,7 +62,7 @@ mpl.rcParams.update({"figure.dpi":120,"axes.grid":True,"grid.alpha":0.3,"font.si
     "legend.framealpha":1.0,"legend.facecolor":"white","legend.edgecolor":"0.6"})  # opaque legend, above data
 
 PS="catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo.csv"
-SXML="responses/master/KS_KG_metadata_1.0.2.xml"   # station-response StationXML (covers BOTH KS and KG)
+SXML="/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master/KS_KG_metadata_1.0.2.xml"   # station-response StationXML (covers BOTH KS and KG)
 DM=0.1; UF=(129.25,129.55,35.60,35.90); MIN_EPOCH_N=50
 
 d=pd.read_csv(PS); d=d[(d.snr>=3)&d.ML.notna()].copy()

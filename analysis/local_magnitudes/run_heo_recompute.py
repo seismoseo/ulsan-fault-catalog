@@ -29,7 +29,7 @@ for p in (CAT_OUT, PER_OUT):
 
 cat = pd.read_csv(CAT_IN)
 print(f"catalog: {len(cat):,} events ({cat.time.iloc[0]} ... {cat.time.iloc[-1]})")
-inv = mlp.load_combined_inventory(f"{HERE}/responses/master", f"{HERE}/responses/fetched")
+inv = mlp.load_combined_inventory("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master", "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/fetched")
 print(f"inventory: {sum(len(n) for n in inv)} stations | workers={WORKERS}")
 print("scheme: Heo2024 Z-only, HYPOCENTRAL dist, snr_pp>=2.0, TauP theoretical-P for missing picks")
 

@@ -50,7 +50,7 @@ mpl.rcParams.update({"figure.dpi":130,"axes.grid":True,"grid.alpha":0.25,"font.s
     "legend.framealpha":1.0,"legend.facecolor":"white","legend.edgecolor":"0.6"})  # opaque legend, above data
 
 PS="catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo.csv"
-SXML="responses/master/KS_KG_metadata_1.0.2.xml"
+SXML="/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master/KS_KG_metadata_1.0.2.xml"
 CONT="../continuous"; EVT="../HypoInv/event_waveforms_ulsanfault"
 SC="KG.HDB.HHZ"
 # documented HDB hardware history (from the StationXML)
@@ -318,7 +318,7 @@ e_few=ufc[(ufc.magnitude<-0.5)&ufc.has&(ufc.n_used==2)].sort_values("magnitude")
 e_mid=ufc[(ufc.magnitude<-0.5)&ufc.has&(ufc.n_used.between(4,5))].sort_values("magnitude").iloc[0]
 e_big=ufc[(ufc.magnitude.between(0.3,0.7))&ufc.has&(ufc.n_used>=8)].sort_values("magnitude").iloc[0]
 events=[e_few,e_mid,e_big]; T0,T1=-4.0,14.0
-invF=mp.load_combined_inventory("responses/master")
+invF=mp.load_combined_inventory("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master")
 def rows_for(ev):
     st=obspy.Stream()
     for f in sorted(glob.glob(ev.dir+"/*.sac")):

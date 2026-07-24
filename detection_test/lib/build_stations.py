@@ -24,12 +24,13 @@ from collections import defaultdict
 
 ROOT = "/home/msseo/works/02.Ulsan_Fault_detection"
 HERE = f"{ROOT}/detection_test"
-P_XML = f"{ROOT}/analysis/local_magnitudes/responses/master/KS_KG_metadata_1.0.2.xml"
+_META = f"{ROOT}/data/metadata"                 # single metadata home (by kind): stations/, responses/, velocity/, catalogs/
+P_XML = f"{_META}/responses/master/KS_KG_metadata_1.0.2.xml"
 ARCH_KSKG = f"{ROOT}/KS_KG"
 ARCH_NS = f"{ROOT}/NS"
-P_NS = f"{ROOT}/GHBSN_metadata/20231227/GHBSN_station_list_240220_modified_code.csv"
+P_NS = f"{_META}/stations/ns/20231227/GHBSN_station_list_240220_modified_code.csv"
 ARCH_GJ = f"{ROOT}/GJ"
-P_GJ = f"{ROOT}/GJ/station_table/gj_temporary_station_list.csv"
+P_GJ = f"{_META}/stations/gj/gj_temporary_station_list.csv"
 P_KMA = "/home/msseo/works/16.kma_absolute_location/runs/kma_batch/results_final.csv"
 P_UF = f"{ROOT}/analysis/local_magnitudes/catalog_ml_heo_ufonly_reloc.csv"
 import gj_config as C                        # single disclosed source of all parameters

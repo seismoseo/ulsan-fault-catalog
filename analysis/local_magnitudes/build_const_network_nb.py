@@ -112,7 +112,7 @@ Each station-channel is split into eras (`sc@epoch`); epochs with < 50 readings 
 epoch** and corrected (offset ≈ −1.9 ML) — kept, not excluded. With HDB 1-of-5 and the failure ≈ 7
 readings, the event ML is identical either way (b, slope, n all unchanged); this just keeps the data.""")
 co(r"""import json
-breaks_str=json.load(open("responses/sensor_breaks_master.json"))
+breaks_str=json.load(open("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/sensor_breaks_master.json"))
 breaks={k:[pd.Timestamp(x).date() for x in v] for k,v in breaks_str.items() if k in ANCHORS}
 print("documented epoch breaks:")
 for s in ANCHORS: print(f"  {s:14} {breaks.get(s,[])}")
@@ -412,7 +412,7 @@ yrs=np.arange(2012,2025)
 infl=[(bz[bz.year==y].ml_full-bz[bz.year==y].ml_near).median() for y in yrs]
 farf=[(d[d.year==y].dist_km>45).mean() for y in yrs]
 # (c) UF-only correction
-breaks=json.load(open("responses/sensor_breaks_master.json")); breaks={k:[pd.Timestamp(x).date() for x in v] for k,v in breaks.items()}
+breaks=json.load(open("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/sensor_breaks_master.json")); breaks={k:[pd.Timestamp(x).date() for x in v] for k,v in breaks.items()}
 def _eu(r):
     s=r.sc; return s if s not in breaks else f"{s}@e{sum(r.t.date()>=b for b in breaks[s])}"
 u=d.apply(_eu,axis=1); uc=u.value_counts(); d["unit"]=u.where(~u.isin(set(uc[uc<50].index)),d.sc)

@@ -33,8 +33,8 @@ EVENT_ROOTS = (
     f"{HYP}/event_waveforms_blastclean",
     f"{HYP}/event_waveforms_ulsanfault",
 )
-MASTER_XML = f"{HERE}/responses/master"
-FETCHED_XML = f"{HERE}/responses/fetched"
+MASTER_XML = "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master"
+FETCHED_XML = "/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/fetched"
 
 inv = mlp.load_combined_inventory(MASTER_XML, FETCHED_XML)
 cat = pd.read_csv(CAT_IN)

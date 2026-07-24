@@ -46,8 +46,8 @@ models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
 - **Tool**: PyOcto `OctoAssociator.from_area`.
 - **Region/params** (in `config.REGION`): lat (34.5, 37.0), lon (128.5, 130.0), depth (0, 40) km,
   `time_before=300`, `n_picks=4`, `n_p_picks=2`, `n_s_picks=2`, `n_p_and_s_picks=1`.
-- **Velocity model**: layered from `data/metadata/velocity_model/kim1983.csv`.
-- **Stations**: coordinates from `data/metadata/ks_kg_station_table/station_update.dat`; the **network (KS/KG) is
+- **Velocity model**: layered from `data/metadata/velocity/kim1983.csv`.
+- **Stations**: coordinates from `data/metadata/stations/ks_kg/station_update.dat`; the **network (KS/KG) is
   taken from the picks themselves** (not a hardcoded count).
 - **Output**: `pyocto_kim1983_<year>.csv` (events) + `pyocto_assignment_kim1983_<year>.csv`
   (pick→event), plus `stations_<year>.csv` under the model's `station_table/`.

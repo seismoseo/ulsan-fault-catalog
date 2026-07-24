@@ -91,7 +91,7 @@ ps=ps[(ps.snr_pp>=2)&ps.ML.notna()&ps.dist_km.notna()].copy()
 ps["t"]=pd.to_datetime(ps.event_time,utc=True,errors="coerce"); ps=ps.dropna(subset=["t"]); ps["sc"]=ps.network+"."+ps.station+"."+ps.channel
 ukey=set(np.round(uf.event_time.astype("int64")/1e9).astype(int))
 d=ps[np.round(ps.t.astype("int64")/1e9).astype(int).isin(ukey)].copy()
-breaks={k:[pd.Timestamp(x).date() for x in v] for k,v in json.load(open("responses/sensor_breaks_master.json")).items()}
+breaks={k:[pd.Timestamp(x).date() for x in v] for k,v in json.load(open("/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/sensor_breaks_master.json")).items()}
 # HDB sensor-FAILURE window -> its own epoch (corrected, ~ -2 ML). Onset DATA-DRIVEN (monthly HDB station
 # residual < -1.0 ML before 2015-06; threshold = -1.0, the only data-driven break); end 2015-05-21 documented.
 _r=d.ML.values-d.groupby("event_idx").ML.transform("median").values
