@@ -16,7 +16,7 @@ writing `detection_test/{cache,picks,catalogs}/`.
 
 The `relocate` stage (`ufpipe/relocate.py`) builds its inputs from ufpipe's own per-year detection +
 association via `ufpipe.reloc_inputs`, then hands off to the downstream driver
-`reloc_2016_uf/run_picker_reloc.py --skip-build` (scaffold → HYPOINVERSE → QC → xcorr → HypoDD; the
+`src/ufpipe/reloc_driver/run_picker_reloc.py --skip-build` (scaffold → HYPOINVERSE → QC → xcorr → HypoDD; the
 external 15.PocketQuake engine). Only that driver and the PocketQuake engine remain live in
 `detection_test/`; everything in this `lib/` folder is kept for reference/reproducibility of the original
 4-picker comparison pilot but is not part of the pipeline.

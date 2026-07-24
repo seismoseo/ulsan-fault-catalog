@@ -138,7 +138,7 @@ def main():
     ap = argparse.ArgumentParser(description="Build relocation inputs from ufpipe's own detection+association.")
     ap.add_argument("--model", default="phasenet_plus")
     ap.add_argument("--year", type=int, required=True)
-    ap.add_argument("--out-root", required=True, help="reloc working dir (e.g. detection_test/reloc_<year>_uf[_<model>])")
+    ap.add_argument("--out-root", required=True, help="reloc working dir (e.g. outputs/reloc/reloc_<year>_uf[_<model>])")
     a = ap.parse_args()
     build_reloc_inputs(a.model, a.year, a.out_root)
 

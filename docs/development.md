@@ -56,7 +56,7 @@ Outputs land in `outputs/models/instance/…`. Add the picker to the comparison 
 
 **HypoDD (relative relocation)**: implemented — the `relocate` stage (`src/ufpipe/relocate.py` +
 `reloc_inputs.py`) is self-fed from ufpipe's own association and drives the external PocketQuake
-HypoDD/xcorr engine via `detection_test/reloc_2016_uf/run_picker_reloc.py --skip-build`.
+HypoDD/xcorr engine via `src/ufpipe/reloc_driver/run_picker_reloc.py --skip-build`.
 
 **The NS + GJ networks**: integrated — the per-year multi-network station table
 (`src/ufpipe/stations.py`) covers KS/KG/GJ/NS; NS reads the pre-decimated `NS_100hz/` mirror.

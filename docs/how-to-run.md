@@ -122,7 +122,7 @@ outputs/models/original/detection_location/<year>/picks/picks_<year>.<doy>.csv
 outputs/models/original/pyocto/pyocto_kim2011_<year>.csv  (+ _assignment_)
 outputs/models/original/HypoInv/PHS/UF<year>.phs
 outputs/models/original/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   # .sum = located catalog
-detection_test/reloc_<year>_uf[_<model>]/results/                   # relocate stage (hypoDD.reloc.dtcc, …)
+outputs/reloc/reloc_<year>_uf[_<model>]/results/                   # relocate stage (hypoDD.reloc.dtcc, …)
 ```
 
 (Legacy `pyocto_kim1983_<year>.csv` files from the pre-2026-07 whole-year KS/KG-only association may still

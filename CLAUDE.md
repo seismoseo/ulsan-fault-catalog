@@ -20,7 +20,7 @@ Detection (PhaseNet)  ->  Association (PyOcto, strict)  ->  Pick augmentation  -
 `relocate`. ufpipe is **end-to-end through HypoDD dt.cc and fully SELF-FED**: the 6th `relocate` stage
 (`src/ufpipe/relocate.py`) builds its inputs (event-idx SAC store + per-year pyocto + multi-network station table)
 from ufpipe's OWN detection+association via `src/ufpipe/reloc_inputs.py`, then hands off to the downstream driver
-`detection_test/reloc_2016_uf/run_picker_reloc.py --skip-build` (scaffold → HYPOINVERSE → QC → GPU xcorr → HypoDD
+`src/ufpipe/reloc_driver/run_picker_reloc.py --skip-build` (scaffold → HYPOINVERSE → QC → GPU xcorr → HypoDD
 v2.1beta; the external 15.PocketQuake engine). Run: `python -m ufpipe.run_pipeline --model <p> --years <Y>
 --stage-from relocate --through dtcc`.
 
@@ -36,7 +36,7 @@ adds the dense NS array. **Association is daily-chunked** (`config.ASSOC_*`, kim
 per station-day and reads anyway (data returned, checksum unverified). **`detection_test/lib` is now DEPRECATED**
 (see `detection_test/lib/DEPRECATED.md`): ufpipe's own detection+association feed the relocate stage — the old
 per-month lib feeder + `build_sac_and_pyocto.py` are no longer used. Only the downstream reloc driver
-(`reloc_2016_uf/run_picker_reloc.py`, run with `--skip-build`) + the PocketQuake engine remain live.
+(`src/ufpipe/reloc_driver/run_picker_reloc.py`, run with `--skip-build`) + the PocketQuake engine remain live.
 
 **PyOcto assignment (after augmentation) is the source of truth for which (station, phase) tuples belong to each event.**
 The legacy time-window pick dump in `HypoInv/event_waveforms_*/*_picks.csv` was a recipe for
@@ -83,7 +83,7 @@ slow part (~days incl. GPU stalls) but clearly worth it.
 Controlled comparison of four ML pickers (PhaseNet+, PhaseNet-original, PhaseNet-STEAD, EQT-STEAD) on year
 2016 through one identical pipeline (detection → PyOcto → HypoInverse → QC → HypoDD dt.cc), consistent
 P=S=0.2 threshold, picker the only variable. **See `detection_test/CLAUDE.md` for the full
-sub-project guide, `reloc_2016_uf/PIPELINE.md` for invariants, and `reloc_2016_uf/study_guide.pdf`.**
+sub-project guide, `src/ufpipe/reloc_driver/PIPELINE.md` for invariants, and `detection_test/reloc_2016_uf/study_guide.pdf`.**
 Headline: PN+ yields the most cross-correlation-resolved events (255) despite not picking the most —
 pick quantity ≠ located quality. **CRITICAL bug fixed (2026-07):** the QC subset used to re-run HypoInverse
 (redundant) which mis-staged picks by timestamp → wrong origins → corrupted rereference/dt.cc (same class as

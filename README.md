@@ -38,7 +38,7 @@ src/
   ufpipe/         the detection→location pipeline  (was models/pipeline; renamed to avoid a name clash)
 analysis/         non-installable analysis code + notebook builders
   relocation/  reloc_analysis/  local_magnitudes/  uf_subregion_hypodd/  repeaters/  hypoinv/
-detection_test/   the 4-picker comparison pipeline (year-general; see detection_test/reloc_2016_uf/PIPELINE.md)
+detection_test/   the 4-picker comparison pipeline (year-general; see src/ufpipe/reloc_driver/PIPELINE.md)
 KS_KG/  GJ/  NS/  NS_100hz/     raw waveforms — station dirs at each root (~7 TB, NOT in git)
 data/
   waveforms/      symlinks to the network dirs (browsable view; no data copied)
@@ -83,8 +83,8 @@ python -m ufpipe.run_pipeline --model original --years 2010-2024     # a range
 **4-picker comparison / relocation** (year-general; any year whose inputs exist):
 
 ```bash
-python detection_test/reloc_2016_uf/preflight_year.py --year 2016                 # readiness check
-python detection_test/reloc_2016_uf/run_picker_reloc.py --picker original \
+python src/ufpipe/reloc_driver/preflight_year.py --year 2016                 # readiness check
+python src/ufpipe/reloc_driver/run_picker_reloc.py --picker original \
        --year 2016 --through dtcc --clean-cache                                    # relocate
 ```
 
@@ -97,7 +97,7 @@ Detection is idempotent (skips days whose picks already exist) and resumable.
 - [docs/how-to-run.md](docs/how-to-run.md) — step-by-step commands
 - [docs/directory-structure.md](docs/directory-structure.md) — layout & what's in git
 - [src/ufpipe/README.md](src/ufpipe/README.md) — pipeline quick reference
-- [detection_test/reloc_2016_uf/PIPELINE.md](detection_test/reloc_2016_uf/PIPELINE.md) — the relocation
+- [src/ufpipe/reloc_driver/PIPELINE.md](src/ufpipe/reloc_driver/PIPELINE.md) — the relocation
   pipeline: invariants, provenance checks, the KST/KMA convention
 
 ## License

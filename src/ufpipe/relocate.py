@@ -11,7 +11,7 @@ detection+association now cover KS/KG/GJ/NS with daily-chunked association, so t
 The heavy downstream orchestration (scaffold -> HYPOINVERSE -> uf_cluster QC -> inject full-run HYPOINVERSE
 [the origin-correctness fix] -> re-reference -> GPU xcorr [pq-gpu env] -> adaptive kim2011/ISTART=2 HypoDD
 v2.1beta -> link results) still runs via the validated driver
-``detection_test/reloc_2016_uf/run_picker_reloc.py`` with ``--skip-build`` (it drives the external
+``src/ufpipe/reloc_driver/run_picker_reloc.py`` with ``--skip-build`` (it drives the external
 15.PocketQuake korea-cluster-relocation engine + handles the pq-gpu shell-out). We build inputs, then hand off.
 
 ``--model`` maps identically to the reloc ``--picker`` (original/stead/eqt/phasenet_plus).
@@ -23,14 +23,16 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
 
-# The downstream reloc driver (scaffold/HypoInverse/xcorr/HypoDD) lives here (year-general).
-_RELOC_DIR = "/home/msseo/works/02.Ulsan_Fault_detection/detection_test/reloc_2016_uf"
+# The downstream reloc driver (scaffold/HypoInverse/xcorr/HypoDD orchestration) — live code in src/.
+_RELOC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reloc_driver")
 
 
 def _reloc_root(picker, year):
-    """Per-(picker, year) reloc working dir. PN+ uses the bare reloc_<year>_uf/ (back-compat)."""
-    base = f"reloc_{year}_uf" if picker == "phasenet_plus" else f"reloc_{year}_uf_{picker}"
-    return os.path.join("/home/msseo/works/02.Ulsan_Fault_detection/detection_test", base)
+    """Per-(picker, year) reloc working dir under outputs/reloc/ (single source: reloc_driver/year_paths).
+    The completed 2016 4-picker PILOT dirs remain frozen at detection_test/reloc_2016_uf*/ (archive)."""
+    sys.path.insert(0, _RELOC_DIR)
+    import year_paths as YP
+    return YP.root_dir(year, picker)
 
 
 def _preflight(model, year):

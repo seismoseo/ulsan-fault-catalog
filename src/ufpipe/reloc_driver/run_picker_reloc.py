@@ -19,7 +19,7 @@ import argparse, os, shutil, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import year_paths as YP
-DT = "/home/msseo/works/02.Ulsan_Fault_detection/detection_test"
+DT = "/home/msseo/works/02.Ulsan_Fault_detection"   # display base (working dirs live under outputs/reloc/)
 PQ = "/home/msseo/works/15.PocketQuake"
 PIPE = os.path.join(PQ, "external", "korea-cluster-relocation")
 RELOC = "/home/msseo/works/02.Ulsan_Fault_detection/analysis/relocation"
@@ -38,7 +38,7 @@ def run(cmd, cwd, conda_env=None):
 
 def link_results(year, picker, slug, qc_slug):
     """Publish the external pipeline results back into the UF working dir as SYMLINKS, so every output is
-    reachable from detection_test/reloc_<year>_uf[_<p>]/results/ without leaving the working tree. Idempotent
+    reachable from outputs/reloc/reloc_<year>_uf[_<p>]/results/ without leaving the working tree. Idempotent
     (re-creates links each run). Links point at RUNS/<slug>; nothing is copied."""
     ROOT = YP.root_dir(year, picker)
     res = os.path.join(ROOT, "results"); os.makedirs(res, exist_ok=True)

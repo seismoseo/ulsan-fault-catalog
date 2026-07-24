@@ -22,7 +22,7 @@ models/<model>/HypoInv/PHS/UF<year>.phs                    (HYPO71 fixed-width p
 models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
    │  relocate (stage 6)      reloc_inputs -> driver -> GPU xcorr -> HypoDD v2.1beta
    ▼
-detection_test/reloc_<year>_uf[_<model>]/results/          (hypoDD.reloc.dtcc — dt.cc-relocated catalog)
+outputs/reloc/reloc_<year>_uf[_<model>]/results/          (hypoDD.reloc.dtcc — dt.cc-relocated catalog)
 ```
 
 ## 1. Detection — `detection.py`
@@ -87,6 +87,6 @@ and prints a summary.
 
 `ufpipe.relocate` builds the reloc inputs (event-idx SAC store + pyocto tables + multi-network station
 table) from ufpipe's own per-year association via `src/ufpipe/reloc_inputs.py`, then hands off to the
-validated driver `detection_test/reloc_2016_uf/run_picker_reloc.py --skip-build` (scaffold → HYPOINVERSE →
+validated driver `src/ufpipe/reloc_driver/run_picker_reloc.py --skip-build` (scaffold → HYPOINVERSE →
 QC → rereference → GPU xcorr → HypoDD v2.1beta; external 15.PocketQuake engine). Results are symlinked
-under `detection_test/reloc_<year>_uf[_<model>]/results/`. See the reference manual §7.
+under `outputs/reloc/reloc_<year>_uf[_<model>]/results/`. See the reference manual §7.

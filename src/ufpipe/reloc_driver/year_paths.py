@@ -17,7 +17,9 @@ Naming scheme (year-general):
 """
 import os
 
-HERE = "/home/msseo/works/02.Ulsan_Fault_detection/detection_test"
+REPO = "/home/msseo/works/02.Ulsan_Fault_detection"
+HERE = os.path.join(REPO, "detection_test")        # historical pilot home (frozen archive; deprecated helpers only)
+RELOC_OUT = os.path.join(REPO, "outputs", "reloc")  # production reloc working dirs (ufpipe convention, 2026-07)
 PQ = "/home/msseo/works/15.PocketQuake"
 PIPE = os.path.join(PQ, "external", "korea-cluster-relocation")
 RUNS = os.path.join(PIPE, "pipeline", "runs")
@@ -25,14 +27,17 @@ VELMODEL = "kim2011"
 
 
 def root_dir(year, picker):
-    """Per-(year,picker) working dir under detection_test/. PN+ uses the bare reloc_<year>_uf/."""
-    base = os.path.join(HERE, f"reloc_{year}_uf")
-    return base if picker == "phasenet_plus" else os.path.join(HERE, f"reloc_{year}_uf_{picker}")
+    """Per-(year,picker) reloc working dir under outputs/reloc/ (the ufpipe convention, 2026-07).
+    PN+ uses the bare reloc_<year>_uf/. NOTE: the completed 2016 4-picker PILOT dirs remain frozen at
+    detection_test/reloc_2016_uf*/ as the pilot archive — a ufpipe re-run of any year (2016 included)
+    builds a fresh dir here and never touches the pilot archive."""
+    base = os.path.join(RELOC_OUT, f"reloc_{year}_uf")
+    return base if picker == "phasenet_plus" else os.path.join(RELOC_OUT, f"reloc_{year}_uf_{picker}")
 
 
 def shared_dir(year):
     """Picker-independent dir (station_table + merged_archive live here) = the PN+ root for that year."""
-    return os.path.join(HERE, f"reloc_{year}_uf")
+    return os.path.join(RELOC_OUT, f"reloc_{year}_uf")
 
 
 def slug(year, picker):
@@ -75,24 +80,23 @@ def add_year_arg(ap):
     return ap
 
 
-# ---- self-check: year=2016 must resolve to the EXACT existing paths ------------------------------
+# ---- self-check: paths resolve to the ufpipe convention (outputs/reloc); pilot dirs stay frozen ---
 if __name__ == "__main__":
     import sys
     y = 2016
     checks = {
-        "root PN+":      (root_dir(y, "phasenet_plus"), f"{HERE}/reloc_2016_uf"),
-        "root original": (root_dir(y, "original"),      f"{HERE}/reloc_2016_uf_original"),
+        "root PN+":      (root_dir(y, "phasenet_plus"), f"{RELOC_OUT}/reloc_2016_uf"),
+        "root original": (root_dir(y, "original"),      f"{RELOC_OUT}/reloc_2016_uf_original"),
         "slug PN+":      (slug(y, "phasenet_plus"),     "uf_2016"),
         "slug_qc orig":  (slug_qc(y, "original"),       "uf_2016_original_qc"),
-        "sta cache m1":  (station_cache(1, y),          f"{HERE}/cache/stations_2016_01.csv"),
-        "sta table PN+": (station_table(y, "phasenet_plus"), f"{HERE}/reloc_2016_uf/station_table/stations_2016.csv"),
-        "cat orig m9":   (catalog_pyocto("original", 9, y), f"{HERE}/catalogs/catalog_original_2016_09_pyocto.csv"),
-        "pyocto PN+":    (pyocto_year(y, "phasenet_plus"), f"{HERE}/reloc_2016_uf/pyocto/pyocto_kim2011_2016.csv"),
+        "sta table PN+": (station_table(y, "phasenet_plus"), f"{RELOC_OUT}/reloc_2016_uf/station_table/stations_2016.csv"),
+        "pyocto PN+":    (pyocto_year(y, "phasenet_plus"), f"{RELOC_OUT}/reloc_2016_uf/pyocto/pyocto_kim2011_2016.csv"),
+        "pilot archive": (os.path.isdir(f"{HERE}/reloc_2016_uf"), True),   # frozen pilot untouched
     }
     bad = 0
     for name, (got, want) in checks.items():
         ok = got == want
         bad += not ok
         print(f"  {'OK ' if ok else 'BAD'} {name}: {got}" + ("" if ok else f"  != {want}"))
-    print(f"\n{'ALL 2016 paths back-compatible' if not bad else f'{bad} MISMATCH'}")
+    print(f"\n{'ALL paths on the outputs/reloc convention' if not bad else f'{bad} MISMATCH'}")
     sys.exit(1 if bad else 0)

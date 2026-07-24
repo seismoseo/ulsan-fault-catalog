@@ -46,9 +46,11 @@ association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ locate $\right
 dt.ct $+$ dt.cc). The final \code{relocate} stage produces the double-difference relocated catalog. The heavy
 dt.cc/xcorr/HypoDD \emph{engine} is external (\code{15.PocketQuake} korea-cluster-relocation, HypoDD v2.1beta);
 ufpipe orchestrates it. The relocate stage is \textbf{self-fed}: it builds its inputs from ufpipe's OWN
-detection+association (\code{ufpipe.reloc\_inputs}), so \code{detection\_test/lib/} is DEPRECATED (see
-\S7 + \code{detection\_test/lib/DEPRECATED.md}); only the downstream reloc driver + PocketQuake engine remain live.
-The relocation internals have a dedicated guide: \code{detection\_test/reloc\_2016\_uf/PIPELINE.md} + \code{study\_guide.pdf}.}
+detection+association (\code{ufpipe.reloc\_inputs}) and runs the orchestration in
+\code{src/ufpipe/reloc\_driver/}; working dirs + results go to \code{outputs/reloc/}.
+\code{detection\_test/} is a \textbf{fully frozen pilot archive} (the 2016 4-picker comparison;
+\code{lib/} DEPRECATED, see \code{detection\_test/lib/DEPRECATED.md}). The relocation internals have a
+dedicated guide: \code{src/ufpipe/reloc\_driver/PIPELINE.md} + the pilot's \code{study\_guide.pdf}.}
 
 \tableofcontents
 \vspace{3mm}\hrule
@@ -71,20 +73,21 @@ PhaseNet / PhaseNet+ & PyOcto (+augment) & HYPOINVERSE & \code{uf\_cluster} & Hy
 \end{center}
 
 \subsection{\code{ufpipe} vs \code{detection\_test}}
-\code{ufpipe} is the production end-to-end pipeline. \code{detection\_test} is the pilot experiment (the 2016
-4-picker comparison). Its \code{lib/} (per-month detection/association) is DEPRECATED --- ufpipe feeds itself now ---
-and only the relocation \emph{orchestrator} \code{reloc\_2016\_uf/run\_picker\_reloc.py} (driven by ufpipe's
-relocate stage with \code{-{}-skip-build}) + the external HypoDD engine remain live there.
+\code{ufpipe} is the production end-to-end pipeline; everything live is under \code{src/}, including the
+relocation orchestrator \code{src/ufpipe/reloc\_driver/run\_picker\_reloc.py} (driven by the relocate stage
+with \code{-{}-skip-build}; the HypoDD/xcorr engine itself is external in \code{15.PocketQuake}).
+\code{detection\_test} is the \textbf{frozen pilot archive} of the 2016 4-picker comparison — nothing in it
+is live (\code{lib/} DEPRECATED; the \code{reloc\_2016\_uf*/} dirs hold the pilot's manifests and results).
 \begin{center}
 \small
 \begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{5.6cm}>{\raggedright\arraybackslash}p{5.7cm}@{}}
 \toprule
  & \textbf{\code{ufpipe}} (\code{src/ufpipe}) & \textbf{\code{detection\_test}} \\
 \midrule
-Role & the self-contained end-to-end catalog + relocation pipeline & 4-picker-comparison pilot; hosts the reloc driver + PocketQuake engine (\code{lib/} DEPRECATED) \\
-Stages & detection $\rightarrow$ association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ locate $\rightarrow$ \textbf{relocate} & reloc driver (\code{reloc\_2016\_uf/}, \code{-{}-skip-build}) \\
-Driver & \code{python -m ufpipe.run\_pipeline} & (called by ufpipe's relocate stage) \\
-Ends at & HypoDD dt.cc (\S7) & --- \\
+Role & the self-contained end-to-end catalog + relocation pipeline (incl.\ \code{reloc\_driver/}) & frozen archive of the 2016 4-picker pilot \\
+Stages & detection $\rightarrow$ association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ locate $\rightarrow$ \textbf{relocate} & --- (nothing live) \\
+Driver & \code{python -m ufpipe.run\_pipeline} & --- \\
+Ends at & HypoDD dt.cc (\S7); results in \code{outputs/reloc/} & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -301,7 +304,7 @@ Reloc (full) & python -m ufpipe.run\_pipeline -{}-model original -{}-years 2016 
 \code{-{}-through hypoinverse} stops at the QC'd absolute-location subset; \code{-{}-through dtcc} continues to the
 double-difference relocation. \code{-{}-clean-cache} deletes the $\sim$tens-of-GB interp cache after dt.cc
 (essential for multi-year runs). \code{detection\_test/lib/} is DEPRECATED (see \code{lib/DEPRECATED.md}); the
-relocation internals are documented in \code{reloc\_2016\_uf/PIPELINE.md} + \code{study\_guide.pdf}.
+relocation internals are documented in \code{src/ufpipe/reloc\_driver/PIPELINE.md} + \code{study\_guide.pdf}.
 
 %================================================================================
 \section{Outputs \& layout}
@@ -319,7 +322,7 @@ Path & Contents \\
 \code{.../station\_table/stations\_\{year\}.csv} & per-year station roster (discovered from metadata) \\
 \code{.../HypoInv/PHS/UF\{year\}.phs} & HYPOINVERSE phase file (stage 4) \\
 \code{.../HypoInv/\{vm\}/UF\{year\}.\{sum,arc,prt\}} & located catalog + errors (stage 5) \\
-\code{detection\_test/reloc\_\{year\}\_uf[\_\{model\}]/results/} & dt.cc-relocated catalog + links (stage 6) \\
+\code{outputs/reloc/reloc\_\{year\}\_uf[\_\{model\}]/results/} & dt.cc-relocated catalog + links (stage 6) \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -345,7 +348,7 @@ python -m ufpipe.run\_pipeline -{}-model original -{}-years 2016 -{}-stage-from 
 \code{ufpipe.relocate} (\code{src/ufpipe/relocate.py}) is \emph{self-fed}: it preflights ufpipe's OWN per-year
 association, builds the reloc inputs from it (\code{ufpipe.reloc\_inputs} --- SAC store, pyocto tables, station
 table, merged archive), then invokes the validated orchestrator
-\code{detection\_test/reloc\_2016\_uf/run\_picker\_reloc.py -{}-skip-build}, which drives the external
+\code{src/ufpipe/reloc\_driver/run\_picker\_reloc.py -{}-skip-build}, which drives the external
 HypoDD/xcorr engine. Internal stages (all KS/KG/GJ/NS):
 
 \begin{center}
@@ -366,7 +369,7 @@ HypoDD/xcorr engine. Internal stages (all KS/KG/GJ/NS):
 \end{center}
 
 \begin{keybox}{Relocation outputs (symlinked into the working dir)}
-Each run publishes \code{detection\_test/reloc\_<year>\_uf[\_<p>]/results/} with symlinks to the external run tree:
+Each run publishes \code{outputs/reloc/reloc\_<year>\_uf[\_<p>]/results/} with symlinks to the external run tree:
 \code{hypoDD.reloc.dtcc} (dt.ct+dt.cc), \code{hypoDD.reloc.dtct} (dt.ct-only), \code{HypoInv.full.sum}, \dots
 ``dt.cc-resolved'' = events keeping $\ge$1 surviving cross-correlation link — the highest-precision subset.
 \end{keybox}
@@ -419,6 +422,6 @@ Sparse early years, few events & expected --- KS/KG-only network (2010--2015) ha
 \vspace{2mm}\hrule\vspace{2mm}
 {\small\color{soft} Companion docs: \code{docs/overview.md}, \code{docs/pipeline.md}, \code{docs/how-to-run.md},
 \code{docs/directory-structure.md} · \code{src/ufpipe/README.md} · relocation pipeline:
-\code{detection\_test/reloc\_2016\_uf/PIPELINE.md} + \code{study\_guide.pdf}.}
+\code{src/ufpipe/reloc\_driver/PIPELINE.md} + \code{study\_guide.pdf}.}
 
 \end{document}

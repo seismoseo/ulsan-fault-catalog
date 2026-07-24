@@ -3,7 +3,7 @@
 > **DEPRECATION NOTE (2026-07).** Stages 0–2 below (lib per-month detection/association +
 > `build_sac_and_pyocto.py`) are superseded: the ufpipe `relocate` stage now builds those inputs from ufpipe's
 > own per-year detection+association (`src/ufpipe/reloc_inputs.py`) and invokes this driver with
-> `--skip-build` (see `../lib/DEPRECATED.md`). Stages 3+ (scaffold → HYPOINVERSE → QC → **inject full-run
+> `--skip-build` (see `detection_test/lib/DEPRECATED.md`). Stages 3+ (scaffold → HYPOINVERSE → QC → **inject full-run
 > HYPOINVERSE** → rereference → xcorr → HypoDD) and all **Invariants** in this document remain fully in force —
 > they describe the live driver. This document is also the historical record of the 2016 4-picker pilot.
 
