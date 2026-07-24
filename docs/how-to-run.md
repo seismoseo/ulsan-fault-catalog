@@ -2,6 +2,11 @@
 
 > **Full reference:** [ufpipe_reference_manual.pdf](ufpipe_reference_manual.pdf) — all stages, parameters, and troubleshooting in one place.
 
+> **Prefer a notebook?** `python notebooks/build_yearly_run_nb.py` emits
+> `notebooks/00.Run_yearly_pipeline.ipynb` — the per-year cockpit: run each stage from a cell (detection
+> shells to `eqnet` automatically) with intermediate-check + PyGMT map cells between stages, and a
+> computed end-of-year summary. Kernel: `base`. Parameters at the top of the notebook.
+
 ## 0. Environment (once)
 
 The pipeline runs in a **two-env split** on this server — detection (PhaseNet+/SeisBench, torch) in the

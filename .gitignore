@@ -86,6 +86,8 @@ gmt.history
 
 # ---- tidy-up (2026-07): moved locations ----
 archive/00.Summary_figures_Zhigang.ipynb
+# emitted by notebooks/build_yearly_run_nb.py (the builder is tracked; regenerate any time)
+notebooks/00.Run_yearly_pipeline.ipynb
 notebooks/02.Multi-station_detection.ipynb
 docs/planning/gyeongju_catalog/**/*.ipynb  # planning-run notebooks
 
