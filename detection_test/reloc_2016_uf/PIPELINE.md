@@ -1,5 +1,12 @@
 # 2016 Ulsan-Fault relocation pipeline — full walkthrough & invariants
 
+> **DEPRECATION NOTE (2026-07).** Stages 0–2 below (lib per-month detection/association +
+> `build_sac_and_pyocto.py`) are superseded: the ufpipe `relocate` stage now builds those inputs from ufpipe's
+> own per-year detection+association (`src/ufpipe/reloc_inputs.py`) and invokes this driver with
+> `--skip-build` (see `../lib/DEPRECATED.md`). Stages 3+ (scaffold → HYPOINVERSE → QC → **inject full-run
+> HYPOINVERSE** → rereference → xcorr → HypoDD) and all **Invariants** in this document remain fully in force —
+> they describe the live driver. This document is also the historical record of the 2016 4-picker pilot.
+
 This document explains, stage by stage, how a picker's picks become a dt.cc-relocated catalog, **where the
 origin/location information comes from at each step**, and the invariants that must hold. It exists because a
 subtle bug (a redundant HYPOINVERSE re-run that mis-staged picks by a timestamp key) silently corrupted dt.cc for

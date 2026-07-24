@@ -46,7 +46,8 @@ RELOC = os.environ.get("UF_RELOC",                        # kim2011 dt.cc primar
 WF100 = f"{RUN}/waveforms_100km"                          # hypoDD cuspid = 200000 + sorted "20*" dir index
 MEIDX = ("/home/msseo/works/02.Ulsan_Fault_detection/analysis/uf_subregion_hypodd/"
          "uf_subregion/members_event_idx.csv")            # ts (floor-sec) -> master event_idx
-STATB = "../models/phasenet_plus/station_table/stations_*.csv"
+STATB = ("/home/msseo/works/02.Ulsan_Fault_detection/outputs/models/phasenet_plus/"
+         "station_table/stations_*.csv")   # was ../models/... pre-restructure (cwd-dependent)
 
 # ---- 1. relocated catalog (kim2011 dt.cc) -------------------------------------------------------------
 COLS = ["id","lat","lon","depth","x","y","z","ex","ey","ez","yr","mo","dy","hr","mi","sc","mag",

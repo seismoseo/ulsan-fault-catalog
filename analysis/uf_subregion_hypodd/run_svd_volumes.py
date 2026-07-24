@@ -22,14 +22,15 @@ sys.path.insert(0, "/home/msseo/works/16.kma_absolute_location")
 from kma_absolute_location import nnd, clustering                      # canonical NND + UTM
 
 # ----------------------------------------------------------------- constants (mirror nb30)
-KG      = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG"
-RELOC   = f"{KG}/local_magnitudes/catalog_ml_heo_ufonly_reloc.csv"
+# Restructured 2026-07: KS_KG/local_magnitudes -> analysis/local_magnitudes; uf_subregion_hypodd -> analysis/.
+REPO    = "/home/msseo/works/02.Ulsan_Fault_detection"
+RELOC   = f"{REPO}/analysis/local_magnitudes/catalog_ml_heo_ufonly_reloc.csv"
 RUN03   = ("/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/"
            "uf_subregion_reuse/2.HypoDD/03.dt.cc_kim2011")
 WF100   = ("/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation/pipeline/runs/"
            "uf_subregion_reuse/waveforms_100km")
-MEIDX   = f"{KG}/uf_subregion_hypodd/uf_subregion/members_event_idx.csv"
-BASE    = f"{KG}/uf_subregion_hypodd/svd_volumes"
+MEIDX   = f"{REPO}/analysis/uf_subregion_hypodd/uf_subregion/members_event_idx.csv"
+BASE    = f"{REPO}/analysis/uf_subregion_hypodd/svd_volumes"
 HYPODD  = os.path.expanduser("~/bin/hypoDD")
 DF_UF, B_NND, LINKR, HALF = 1.2, 1.0, 1.0, 0.5
 ERRCAP_M = 150.0     # a well-located event has bootstrap 95% half-width < this on every axis (n_boot>=50);

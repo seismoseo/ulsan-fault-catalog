@@ -6,20 +6,23 @@ exposed by a thin CLI. All defaults live in
 `outputs/models/<model>/` (default `--model original`).
 
 ```
-continuous waveforms
-   │  detection.py            PhaseNet
+continuous waveforms (KS_KG/ GJ/ NS_100hz/)
+   │  detection.py            PhaseNet / PhaseNet+ (multi-network)
    ▼
 models/<model>/detection_location/<year>/picks/picks_<year>.<doy>.csv   (station, phase, peak_time, probability)
-   │  association.py          PyOcto
+   │  association.py          PyOcto, daily-chunked
    ▼
-models/<model>/pyocto/pyocto_kim1983_<year>.csv            (events: idx, time, x,y,z, picks, lat, lon, depth)
-models/<model>/pyocto/pyocto_assignment_kim1983_<year>.csv (assignments: event_idx, station, phase, time, …)
-   │  make_phs.py
+models/<model>/pyocto/pyocto_kim2011_<year>.csv            (events: idx, time, x,y,z, picks, lat, lon, depth)
+models/<model>/pyocto/pyocto_assignment_kim2011_<year>.csv (assignments: event_idx, station, phase, time, …)
+   │  (augment: orphan-pick rescan updates the assignment in place)
    ▼
-models/<model>/HypoInv/PHS/UF<year>.phs                    (HYPO71 fixed-width phase file)
+models/<model>/HypoInv/PHS/UF<year>.phs                    (HYPO71 fixed-width phase file; make_phs.py)
    │  run_hypoinverse.py      hyp1.40
    ▼
 models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
+   │  relocate (stage 6)      reloc_inputs -> driver -> GPU xcorr -> HypoDD v2.1beta
+   ▼
+detection_test/reloc_<year>_uf[_<model>]/results/          (hypoDD.reloc.dtcc — dt.cc-relocated catalog)
 ```
 
 ## 1. Detection — `detection.py`
@@ -56,8 +59,8 @@ models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
 - **Velocity model**: kim2011 1-D (`config.KIM2011`), matching the reloc feeder.
 - **Stations**: coordinates come from the **multi-network year table** (`src/ufpipe/stations.py`) covering
   **KS/KG/GJ/NS** — so GJ/NS picks associate (KS/KG-only `station_update.dat` is no longer the source).
-- **Output** (schema unchanged): `pyocto_kim1983_<year>.csv` (events: `idx,time,x,y,z,picks,latitude,longitude,
-  depth`) + `pyocto_assignment_kim1983_<year>.csv` (`event_idx,pick_idx,residual,station,phase,time`), plus
+- **Output** (schema unchanged): `pyocto_kim2011_<year>.csv` (events: `idx,time,x,y,z,picks,latitude,longitude,
+  depth`) + `pyocto_assignment_kim2011_<year>.csv` (`event_idx,pick_idx,residual,station,phase,time`), plus
   `stations_<year>.csv` under the model's `station_table/`.
 
 ## 3. PHS file — `make_phs.py`
@@ -76,10 +79,14 @@ models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
 
 ## Orchestrator — `run_pipeline.py`
 
-Runs stages 1→4 in order for one or more years (`--years 2010-2024`), with `--stage-from` to resume
-mid-chain. Continues on per-year errors and prints a summary.
+Runs all 6 stages (`detection → association → augment → phs → locate → relocate`) in order for one or
+more years (`--years 2010-2024`), with `--stage-from` to resume mid-chain. Continues on per-year errors
+and prints a summary.
 
-## Relative relocation — HypoDD *(planned)*
+## 6. Relative relocation — HypoDD dt.ct + dt.cc (implemented, self-fed)
 
-Will consume the HYPOINVERSE catalog + differential times into `outputs/models/<model>/hypodd/`. A reference
-implementation exists at `/home/msseo/works/relocDD-py/`.
+`ufpipe.relocate` builds the reloc inputs (event-idx SAC store + pyocto tables + multi-network station
+table) from ufpipe's own per-year association via `src/ufpipe/reloc_inputs.py`, then hands off to the
+validated driver `detection_test/reloc_2016_uf/run_picker_reloc.py --skip-build` (scaffold → HYPOINVERSE →
+QC → rereference → GPU xcorr → HypoDD v2.1beta; external 15.PocketQuake engine). Results are symlinked
+under `detection_test/reloc_<year>_uf[_<model>]/results/`. See the reference manual §7.

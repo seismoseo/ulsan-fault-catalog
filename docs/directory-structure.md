@@ -33,8 +33,7 @@ data / code / outputs separation.
 │   │   ├── velocity/                 kim1983.csv
 │   │   └── catalogs/                 ghbsn_heo/ (Heo et al.), USGS_M7_event_catalog.csv
 │   └── hypoinv/                      HYPOINVERSE control inputs (STA/*.sta, kim*/*.crh) + working data
-├── outputs/                      regenerable pipeline products (picks, pyocto, models, …) — NOT in git
-├── runs/                         canonical output root going forward — NOT in git
+├── outputs/                      regenerable pipeline products (models/<picker>/{picks,pyocto,HypoInv}, …) — NOT in git
 ├── docs/                         documentation (this folder) + docs/planning/ (design + gap-analysis notebooks)
 ├── notebooks/  archive/  papers/  tools/
 ```
@@ -61,7 +60,7 @@ The repo holds **code, docs, and small reference metadata only** — no waveform
 
 **Not tracked** (see [`.gitignore`](../.gitignore))
 - waveforms: `KS_KG/`, `GJ/`, `NS/`, `NS_100hz/` (station dirs at each root, ~7 TB) + the `data/waveforms/` symlinks
-- outputs: `outputs/`, `runs/`, `**/picks/`, `**/pyocto/`, HYPOINVERSE `*.prt/*.arc/*.sum`, `*.phs`
+- outputs: `outputs/`, `**/picks/`, `**/pyocto/`, HYPOINVERSE `*.prt/*.arc/*.sum`, `*.phs`
 - large data: `data/hypoinv/event_waveforms_*/`, `data/metadata/responses/master/` (148 MB StationXML) +
   `responses/fetched/zips/`, per-station ML CSVs, HypoDD `*.res`, SVD volumes, `.gif`
 - **generated notebooks** (`analysis/**/*.ipynb`, `detection_test/**/*.ipynb`, `data/hypoinv/**/*.ipynb`) — the
@@ -74,8 +73,9 @@ Waveforms live on the workstation; notebooks and data products are **regenerable
 ## Install & import
 
 ```bash
-conda activate ulsan        # (the code actually runs in `base` here)
-pip install -e .            # makes uflib + ufpipe importable from any directory
+# two-env split: detection (PhaseNet+, torch) in `eqnet`; association (PyOcto) + rest in `base`.
+conda run -n eqnet pip install -e . --no-deps
+conda run -n base  pip install -e . --no-deps   # makes uflib + ufpipe importable from any directory
 ```
 
 Then `from uflib import uf_cluster`, `import ufpipe.config`, or `python -m ufpipe.run_pipeline` work

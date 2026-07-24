@@ -24,18 +24,20 @@ Run:  python build_uf_event_idx.py
 import os, sys, glob, shutil
 import numpy as np, pandas as pd
 
-KS    = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG"
-HYPO  = f"{KS}/HypoInv"
+# Restructured 2026-07: KS_KG/HypoInv -> data/hypoinv; KS_KG/local_magnitudes -> analysis/local_magnitudes;
+# continuous station dirs live at KS_KG/ root; the phasenet_plus pyocto/station_table live under outputs/models/.
+REPO  = "/home/msseo/works/02.Ulsan_Fault_detection"
+HYPO  = f"{REPO}/data/hypoinv"
 MASTER= f"{HYPO}/catalog_phasenet_plus_2010_2024_blastclean.csv"
-CLEAN = f"{KS}/local_magnitudes/catalog_phasenet_plus_2010_2024_blastclean_with_ml_heo_clean.csv"
+CLEAN = f"{REPO}/analysis/local_magnitudes/catalog_phasenet_plus_2010_2024_blastclean_with_ml_heo_clean.csv"
 WF_ROOTS = (f"{HYPO}/event_waveforms_ulsanfault", f"{HYPO}/event_waveforms_blastclean")
 STORE = f"{HYPO}/event_waveforms_ufidx"
 UF_BOX = (129.25, 129.55, 35.60, 35.90)
-# re-export inputs
-CONT  = f"{KS}/continuous"
-PYO   = f"{KS}/pyocto"
-STA   = f"{KS}/station_table"
-PICKS = f"{KS}/picks"
+# re-export inputs (the phasenet_plus whole-year run this catalog was built from)
+CONT  = f"{REPO}/KS_KG"
+PYO   = f"{REPO}/outputs/models/phasenet_plus/pyocto"
+STA   = f"{REPO}/outputs/models/phasenet_plus/station_table"
+PICKS = f"{REPO}/outputs/picks"
 HERE  = os.path.dirname(os.path.abspath(__file__))
 
 

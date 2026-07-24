@@ -6,7 +6,9 @@
 git clone git@github.com:seismoseo/ulsan-fault-catalog.git
 cd ulsan-fault-catalog
 bash tools/setup-git-filters.sh        # enable notebook output stripping
-conda env create -f environment.yml && conda activate ulsan
+# two-env split on this server: pip install -e . in BOTH eqnet (detection) and base (association);
+# fresh machine: conda env create -f environment.yml && conda activate uf-catalog
+conda run -n eqnet pip install -e . --no-deps && conda run -n base pip install -e . --no-deps
 ```
 
 `setup-git-filters.sh` registers a git **clean filter** (`tools/nbstrip.py`) so notebook outputs are
@@ -49,15 +51,15 @@ python src/ufpipe/run_pipeline.py --model instance --years 2024
 Outputs land in `outputs/models/instance/…`. Add the picker to the comparison set in the docs as needed.
 (If you want pre-built notebooks for it too, generalize `build_original_tree.py`.)
 
-**A new velocity model**: add `KS_KG/HypoInv/<name>/<name>_p.crh` + `_s.crh`, then
-`run_hypoinverse.py --velmodel <name>`.
+**A new velocity model**: add `data/hypoinv/<name>/<name>_p.crh` + `_s.crh`, then
+`run_hypoinverse.py --velmodel <name>` (the crh files are symlinked into each model's `HypoInv/`).
 
-**HypoDD (relative relocation)**: implement under `outputs/models/<model>/hypodd/`, consuming the
-HYPOINVERSE catalog + differential times. Add a `core.run_hypodd_year(...)` and a `hypodd.py` CLI,
-and extend `run_pipeline.py`'s stage list. Reference implementation: `/home/msseo/works/relocDD-py/`.
+**HypoDD (relative relocation)**: implemented — the `relocate` stage (`src/ufpipe/relocate.py` +
+`reloc_inputs.py`) is self-fed from ufpipe's own association and drives the external PocketQuake
+HypoDD/xcorr engine via `detection_test/reloc_2016_uf/run_picker_reloc.py --skip-build`.
 
-**The NS network**: deferred. Reuse the same `--model`/path convention; the main new work is
-station discovery + metadata for the additional stations (mostly active post-2018/19).
+**The NS + GJ networks**: integrated — the per-year multi-network station table
+(`src/ufpipe/stations.py`) covers KS/KG/GJ/NS; NS reads the pre-decimated `NS_100hz/` mirror.
 
 ## Where to change defaults
 

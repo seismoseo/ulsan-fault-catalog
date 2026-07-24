@@ -1,8 +1,14 @@
 # 2016 Gyeongju / Ulsan-Fault ML-picker comparison — project guide
 
+> **DEPRECATION NOTE (2026-07).** The `lib/` per-month feeder described below (`build_stations.py`,
+> `run_seisbench_picker.py`/`run_pnplus_month.py`, `associate_daily.py`) and `reloc_2016_uf/build_sac_and_pyocto.py`
+> are **superseded by ufpipe** (`ufpipe.detection` / `ufpipe.association` / `ufpipe.reloc_inputs`; see
+> `lib/DEPRECATED.md`). The relocate stage is now self-fed and calls `run_picker_reloc.py --skip-build`.
+> This document remains valid as the historical record of how the 2016 4-picker pilot was actually produced.
+
 Guidance for Claude Code working in `detection_test/`. This is a **controlled comparison
 of four ML pickers** on year 2016, run through one identical relocation pipeline. Parent project guide:
-`../../CLAUDE.md` (the long-term UF catalog). This sub-project shares that pipeline but isolates the
+`../CLAUDE.md` (the long-term UF catalog). This sub-project shares that pipeline but isolates the
 **picker as the only variable**.
 
 ## Goal

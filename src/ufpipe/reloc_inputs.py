@@ -74,6 +74,10 @@ def build_merged_archive(model, year, out_root):
     event_sac_export globs <continuous_root>/<CODE>/<CHA>.D/<NET>.<CODE>..<CHA>.D.<year>.<ddd>, so one
     flat <CODE> level spanning KS_KG/ GJ/ NS/ is what it needs. Rebuilt each run (idempotent)."""
     ma = os.path.join(out_root, "merged_archive")
+    # Legacy reloc dirs had merged_archive as a SYMLINK (sometimes dangling after the restructure);
+    # os.makedirs would crash on a dangling link. Replace any symlink with a real dir.
+    if os.path.islink(ma):
+        os.unlink(ma)
     os.makedirs(ma, exist_ok=True)
     S = _stations.build_year_table(year)
     n = 0

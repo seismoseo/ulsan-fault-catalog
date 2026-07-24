@@ -20,12 +20,15 @@ models, different velocity models) can be run side-by-side and compared.
 - **Comparing velocity models** (`kim1983` vs `kim2011`) tests location sensitivity, independently of
   the picker.
 
-## The four-stage pipeline
+## The six-stage pipeline
 
-1. **Detection** — PhaseNet picks P/S arrivals on each station-day → daily pick CSVs.
-2. **Association** — PyOcto groups picks into events with hypocentres → event + assignment tables.
-3. **Absolute location** — HYPOINVERSE relocates each event in a 1-D crustal model → located catalog.
-4. **Relative relocation** — HypoDD (double-difference) for high-precision relative locations *(planned)*.
+1. **Detection** — PhaseNet/PhaseNet+ picks P/S arrivals per station-day across **KS/KG/GJ/NS** → daily pick CSVs.
+2. **Association** — PyOcto groups picks into events (daily-chunked, kim2011) → event + assignment tables.
+3. **Augment** — rescans daily picks for orphans PyOcto missed; updates the assignment in place.
+4. **PHS** — writes the HYPO71 fixed-width phase file from the augmented assignment.
+5. **Absolute location** — HYPOINVERSE locates each event in a 1-D crustal model → located catalog.
+6. **Relative relocation** — HypoDD dt.ct + dt.cc (GPU cross-correlation), self-fed from ufpipe's own
+   association via `reloc_inputs.py` → sub-100 m relative locations.
 
 Details in [pipeline.md](pipeline.md); commands in [how-to-run.md](how-to-run.md).
 
@@ -39,8 +42,8 @@ Details in [pipeline.md](pipeline.md); commands in [how-to-run.md](how-to-run.md
 | Orchestrator (full chain, year ranges) | ✅ done | `run_pipeline.py` |
 | `stead` reference run | ✅ exists | the original 2010–2024 notebooks |
 | `original` PhaseNet run | ◐ in progress | scaffold + scripts ready; full years to be run |
-| HypoDD relative relocation | ⏳ planned | `outputs/models/<model>/hypodd/` placeholder |
-| `NS` network (post-2018/19) | ⏳ deferred | extend `--model`/path convention later |
+| HypoDD relative relocation | ✅ done | `relocate` stage: `reloc_inputs.py` + driver `--skip-build` (HypoDD v2.1beta) |
+| `NS` + `GJ` networks | ✅ done | multi-network station table (`stations.py`); NS via `NS_100hz/` mirror |
 | Magnitudes / completeness (Mc) | ⏳ future | not started |
 
 ## Scope of this repository

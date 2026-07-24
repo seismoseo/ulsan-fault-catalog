@@ -1,5 +1,10 @@
 # Clean-catalog derivation — provenance & reproduction (Heo ML, 2026-06-25)
 
+> **Path note (2026-07 restructure).** The `KS_KG/{local_magnitudes,detection_location,station_table}` paths
+> below record where files lived when the catalog was produced. Today: `analysis/local_magnitudes/`,
+> `outputs/detection_location/`, `data/metadata/stations/ks_kg/`. To re-run, use `rebuild_derived_heo.py`
+> (already repointed).
+
 How `..._with_ml_heo_clean.csv` and `..._with_ml_heo_homogenised_clean.csv` are produced from the
 recomputed magnitudes. Every step is deterministic (no randomness) → bit-reproducible.
 

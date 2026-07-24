@@ -15,10 +15,11 @@ for _f in ("Helvetica","Arial","Nimbus Sans","TeX Gyre Heros","DejaVu Sans"):
     if _f in _av: mpl.rcParams["font.family"]=_f; break
 mpl.rcParams.update({"figure.dpi":130,"font.size":11,"axes.grid":True,"grid.alpha":0.25,
     "legend.framealpha":1.0,"legend.facecolor":"white","legend.edgecolor":"0.6"})
-D="/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/"
-CONT=D+"continuous/HDB/HHZ.D/"
-SXML="/home/msseo/works/02.Ulsan_Fault_detection/data/metadata/responses/master/KS_KG_metadata_1.0.2.xml"
-CAT=D+"local_magnitudes/catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo.csv"
+# Restructured 2026-07: station dirs at KS_KG/ root; local_magnitudes -> analysis/local_magnitudes.
+REPO="/home/msseo/works/02.Ulsan_Fault_detection/"
+CONT=REPO+"KS_KG/HDB/HHZ.D/"
+SXML=REPO+"data/metadata/responses/master/KS_KG_metadata_1.0.2.xml"
+CAT=REPO+"analysis/local_magnitudes/catalog_phasenet_plus_2010_2024_blastclean_per_station_ml_heo.csv"
 FS=100.0; NPS=8192
 FAIL_ON=pd.Timestamp("2014-11-01"); FAIL_OFF=pd.Timestamp("2015-05-21")
 SWAPS=[pd.Timestamp("2015-05-21"),pd.Timestamp("2019-02-01")]  # documented sensor swaps

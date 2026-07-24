@@ -1,17 +1,22 @@
-# Conda environment for the Ulsan Fault catalog pipeline.
-#   conda env create -f environment.yml
-#   conda activate ulsan
-# Then install the torch build matching your CUDA (see docs/how-to-run.md).
-name: ulsan
+# Conda environment spec for the Ulsan Fault catalog pipeline — REFERENCE for a fresh machine.
+#
+# NOTE (2026-07): on the current server the pipeline does NOT use a single env. It runs in a TWO-ENV split:
+#   * detection (PhaseNet+ / EQNet, SeisBench) -> conda env `eqnet` (Python 3.9, torch+eqnet+seisbench+obspy)
+#   * association (PyOcto) + orchestration     -> conda env `base`  (Python 3.12, pyocto+obspy+pandas)
+#   `pip install -e .` must be run in BOTH (pyproject requires-python >=3.9).
+# This file describes the dependency set for reproducing the pipeline in ONE fresh env elsewhere; adjust the
+# torch install to your CUDA. See docs/how-to-run.md for the per-stage env usage.
+#   conda env create -f environment.yml && conda activate uf-catalog && pip install -e .
+name: uf-catalog
 channels:
   - conda-forge
 dependencies:
-  - python=3.11
+  - python>=3.9
   - numpy
   - scipy
   - pandas
   - matplotlib-base
-  - obspy=1.4.2
+  - obspy>=1.4
   - tqdm
   - pip
   - pip:
@@ -19,3 +24,4 @@ dependencies:
       - pyocto==0.1.10
       # torch: install separately to match your CUDA, e.g.
       #   pip install torch --index-url https://download.pytorch.org/whl/cu128
+      # PhaseNet+ additionally needs a local clone of AI4EPS/EQNet (see config.EQNET_DIR).

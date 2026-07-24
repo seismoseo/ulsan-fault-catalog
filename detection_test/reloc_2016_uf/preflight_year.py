@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# DEPRECATED (2026-07): ORPHANED — nothing calls this. ufpipe.relocate has its own _preflight() that checks
+# ufpipe's per-year association instead of the lib per-month inputs. See detection_test/lib/DEPRECATED.md.
 """Preflight: for a given --year, report which detection+association INPUTS exist per picker, so you know what
 to generate before a full-year `run_picker_reloc.py --year <Y>`. The orchestration (stages 2-9) is year-general;
 this only checks the stage 0-1 inputs (station cache + picks + association) that must exist first.

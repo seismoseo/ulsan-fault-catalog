@@ -4,14 +4,16 @@
 
 ## 0. Environment (once)
 
+The pipeline runs in a **two-env split** on this server — detection (PhaseNet+/SeisBench, torch) in the
+`eqnet` env (Py 3.9); association (PyOcto) + everything else in `base` (Py 3.12). Install editable in **both**:
+
 ```bash
-conda env create -f environment.yml
-conda activate ulsan
-# install the torch build matching your CUDA (GPU strongly recommended for detection):
-pip install torch --index-url https://download.pytorch.org/whl/cu128
-# install the uflib + ufpipe packages (editable) — makes them importable from any directory:
-pip install -e .
+conda run -n eqnet pip install -e . --no-deps
+conda run -n base  pip install -e . --no-deps
 ```
+
+(Fresh machine: `conda env create -f environment.yml && conda activate uf-catalog`, then install the torch
+build matching your CUDA — `pip install torch --index-url https://download.pytorch.org/whl/cu128` — and `pip install -e .`.)
 
 Check it imports and sees the GPU:
 
@@ -49,10 +51,14 @@ The orchestrator runs years independently, continues past a failing year, and pr
 ## 2. Individual stages
 
 ```bash
-python -m ufpipe.detection       --model original --year 2024 [--days 1-305] [--networks KS,KG,GJ,NS] [--workers 8]
-python -m ufpipe.association     --model original --year 2024 [--networks KS,KG,GJ,NS] [--workers 8]
+python -m ufpipe.detection       --model original --year 2024 [--days 1-305] [--networks KS,KG,GJ,NS] [--workers 8]   # eqnet env
+python -m ufpipe.association     --model original --year 2024 [--networks KS,KG,GJ,NS] [--workers 8]                  # base env
 python -m ufpipe.make_phs        --model original --year 2024
 python -m ufpipe.run_hypoinverse --model original --year 2024 --velmodel kim2011
+# augment has no standalone CLI — run it via the orchestrator:
+python -m ufpipe.run_pipeline    --model original --years 2024 --stage-from augment
+# relocation (stage 6; self-fed from ufpipe's own association):
+python -m ufpipe.run_pipeline    --model original --years 2024 --stage-from relocate --through dtcc
 ```
 
 Common flags: `--model` (picker: `original`/`stead`/`phasenet_plus`), `--year`, `--force` (allow writing into
@@ -113,10 +119,14 @@ core.run_hypoinverse_year("original", 2024, velmodel="kim2011")
 
 ```
 outputs/models/original/detection_location/<year>/picks/picks_<year>.<doy>.csv
-outputs/models/original/pyocto/pyocto_kim1983_<year>.csv  (+ _assignment_)
+outputs/models/original/pyocto/pyocto_kim2011_<year>.csv  (+ _assignment_)
 outputs/models/original/HypoInv/PHS/UF<year>.phs
 outputs/models/original/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   # .sum = located catalog
+detection_test/reloc_<year>_uf[_<model>]/results/                   # relocate stage (hypoDD.reloc.dtcc, …)
 ```
+
+(Legacy `pyocto_kim1983_<year>.csv` files from the pre-2026-07 whole-year KS/KG-only association may still
+exist on disk; the current daily-chunked association writes `pyocto_kim2011_*`.)
 
 Compare against the `stead` reference run via `outputs/models/stead/…` (symlinks to the original outputs).
 

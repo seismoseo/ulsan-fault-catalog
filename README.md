@@ -44,24 +44,29 @@ data/
   waveforms/      symlinks to the network dirs (browsable view; no data copied)
   metadata/       station tables, velocity model, StationXML, external catalogs
   hypoinv/        HYPOINVERSE control inputs (STA/*.sta, kim*/*.crh) + working data
-outputs/          regenerable pipeline products (picks, pyocto, models, …) — NOT in git
-runs/             canonical output root going forward
+outputs/          regenerable pipeline products (models/<picker>/{picks,pyocto,HypoInv}, …) — NOT in git
 docs/             documentation  ·  notebooks/  archive/  papers/  tools/
 ```
 
 > **Git tracks code, docs, and small reference metadata only.** Raw waveforms (`KS_KG/`, `GJ/`, `NS/`,
-> `NS_100hz/`, ~7 TB), pipeline outputs (`outputs/`, `runs/`), generated notebooks, and large data
+> `NS_100hz/`, ~7 TB), pipeline outputs (`outputs/`), generated notebooks, and large data
 > (StationXML, per-station ML CSVs, HypoDD residuals) are gitignored — the pipeline runs against these
 > local files. See [docs/directory-structure.md](docs/directory-structure.md).
 
 ## Install
 
+On this server the pipeline uses a **two-env split**: detection (PhaseNet+/SeisBench, torch) runs in the
+`eqnet` conda env (Py 3.9); association (PyOcto) + orchestration run in `base` (Py 3.12). Install the
+packages editable in **both**:
+
 ```bash
-conda env create -f environment.yml     # or use your existing env; the code runs in `base` here
-conda activate ulsan
-pip install torch --index-url https://download.pytorch.org/whl/cu128   # match your CUDA
-pip install -e .                         # installs the uflib + ufpipe packages (editable)
+conda run -n eqnet pip install -e . --no-deps
+conda run -n base  pip install -e . --no-deps
 ```
+
+On a fresh machine, `environment.yml` describes the dependency set for a single new env
+(`conda env create -f environment.yml && conda activate uf-catalog`), then
+`pip install torch --index-url https://download.pytorch.org/whl/cu128` to match your CUDA and `pip install -e .`.
 
 `pip install -e .` makes `from uflib import uf_cluster` and `import ufpipe.config` work from any
 directory — no more `sys.path.insert`.

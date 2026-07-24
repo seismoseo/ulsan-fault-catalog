@@ -44,8 +44,9 @@ mis-assignment when two events fall < 60 s apart at the same station (the earlie
 "won" by chronological earliest, leaking into the later event's SAC headers). The production
 SAC-header writer (`event_sac_export.export_event(..., pyocto_root=...)`, the audit notebook
 (`local_magnitudes/04.Catalog_quality_audit.ipynb`), and any downstream that reads `SAC.a`/`.t0`
-should consume `models/phasenet_plus/pyocto/pyocto_assignment_kim1983_{year}.csv`, NOT the
-time-window CSV.
+should consume `models/phasenet_plus/pyocto/pyocto_assignment_<vm>_{year}.csv`, NOT the
+time-window CSV. (`<vm>` = `config.PYOCTO_VELMODEL`: **kim2011** for current daily-chunked runs;
+legacy pre-2026-07 whole-year artifacts on disk are named `kim1983`.)
 
 The automated implementation lives in **`src/ufpipe/`** (shared module + thin CLIs).
 See `docs/how-to-run.md` for commands and `docs/pipeline.md` for stage details.
@@ -212,7 +213,7 @@ data/
 outputs/
   models/       picker-model dimension: stead/ (reference), original/, phasenet_plus/ — detection→location
 analysis/       local_magnitudes/ (ML + responses consumers), uf_subregion_hypodd/, reloc_analysis/, ...
-detection_test/ picker-comparison pilot + the reloc feeder (lib/) + reloc driver (reloc_2016_uf/)
+detection_test/ picker-comparison pilot + reloc driver (reloc_2016_uf/, --skip-build); lib/ DEPRECATED
 docs/           documentation (+ ufpipe_reference_manual.pdf)
 tools/          git helpers (nbstrip.py)
 ```
@@ -265,7 +266,9 @@ subsequent years polite from the start.
 
 ## Environment
 
-- miniforge Python; `seisbench`, `pyocto`, `obspy`, `torch` (+ CUDA GPU). See `requirements.txt` / `environment.yml`.
+- miniforge Python, **two-env split**: detection (PhaseNet+/SeisBench, torch) in `eqnet` (Py 3.9);
+  association (PyOcto) + orchestration in `base` (Py 3.12). `pip install -e .` in BOTH (requires-python
+  >=3.9). GPU xcorr (relocate) shells out to `pq-gpu`. See `environment.yml` header + `requirements.txt`.
 - **HYPOINVERSE** needs the external `hyp1.40` binary on `PATH` (not pip-installable).
 
 ## Version control
@@ -557,8 +560,9 @@ direct-ray travel time to every station within `radius_km=100 km` is computed fr
 for that event, is a candidate. `apply_safeguards` enforces: (1) phase-strict matching, (2)
 best-match-wins across competing events, (3) drop-on-tie when two candidates are within
 `tie_threshold_s=0.2 s` of each other. The output overwrites
-`pyocto_assignment_kim1983_<year>.csv` so the downstream PHS/HypoInverse stages consume the
-augmented set unchanged.
+`pyocto_assignment_kim2011_<year>.csv` (the `config.PYOCTO_VELMODEL` filename; augmentation's internal
+travel-time layers are still Kim-1983 — that's the physics table, not the filename) so the downstream
+PHS/HypoInverse stages consume the augmented set unchanged.
 
 `ufpipe/run_pipeline.py` runs `augment` between `association` and `phs`. Validated on 2013-03-22
 13:40:04: 10 picks / DMIN=42.8 / ERZ=3.9 → 14 picks / DMIN=2.1 / ERZ=0.5.

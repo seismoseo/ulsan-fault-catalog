@@ -15,10 +15,11 @@ Writes uf_subregion/{catalog_kma.csv, members.txt, scaffold_args.txt}.
 import os
 import pandas as pd
 
-KS    = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG"
-CLEAN = (f"{KS}/local_magnitudes/"
+# Restructured 2026-07: KS_KG/local_magnitudes -> analysis/local_magnitudes; KS_KG/HypoInv -> data/hypoinv.
+REPO  = "/home/msseo/works/02.Ulsan_Fault_detection"
+CLEAN = (f"{REPO}/analysis/local_magnitudes/"
          "catalog_phasenet_plus_2010_2024_blastclean_with_ml_heo_clean.csv")
-STORE = f"{KS}/HypoInv/event_waveforms_ufidx"        # event_idx-keyed waveform store
+STORE = f"{REPO}/data/hypoinv/event_waveforms_ufidx"  # event_idx-keyed waveform store
 UF_BOX = (129.25, 129.55, 35.60, 35.90)              # lon0, lon1, lat0, lat1
 KST_OFFSET_H = 9.0
 HERE = os.path.dirname(os.path.abspath(__file__))

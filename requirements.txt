@@ -1,5 +1,6 @@
 # Core dependencies for the Ulsan Fault catalog pipeline.
-# Verified-working versions (miniforge Python 3.12, CUDA 12.8 GPU).
+# Verified-working versions (association/orchestration: `base` env, miniforge Python 3.12, CUDA 12.8 GPU;
+# detection runs in the separate `eqnet` env, Python 3.9 — see environment.yml header for the two-env split).
 # NOTE: install the torch build that matches YOUR CUDA — https://pytorch.org
 #       A GPU is strongly recommended for the detection stage.
 

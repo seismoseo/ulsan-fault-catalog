@@ -15,8 +15,9 @@ import os, sys
 import pandas as pd, numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-KS   = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG"
-sys.path.insert(0, f"{KS}/HypoInv")
+# Restructured 2026-07: qc_location_coherence -> analysis/hypoinv; stead detection/station tables moved.
+REPO = "/home/msseo/works/02.Ulsan_Fault_detection"
+sys.path.insert(0, f"{REPO}/analysis/hypoinv")
 BASE = f"{HERE}/catalog_phasenet_plus_2010_2024_blastclean_with_ml_heo"
 
 
@@ -24,7 +25,8 @@ def stage_qc():
     import qc_location_coherence as qc
     cat = pd.read_csv(f"{BASE}.csv")
     print(f"scoring {len(cat):,} events for location coherence ...")
-    scored = qc.score_catalog(cat, f"{KS}/detection_location", f"{KS}/station_table",
+    scored = qc.score_catalog(cat, f"{REPO}/outputs/detection_location",
+                              f"{REPO}/data/metadata/stations/ks_kg",
                               stations_prefix="stations_")
     qc._report(scored)
     scored.to_csv(f"{BASE}_scored.csv", index=False)
