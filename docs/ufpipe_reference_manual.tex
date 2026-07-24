@@ -1,0 +1,276 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{sectsty}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{longtable}
+\usepackage[hidelinks]{hyperref}
+\definecolor{accent}{RGB}{40,90,140}
+\definecolor{warn}{RGB}{150,60,30}
+\definecolor{soft}{RGB}{95,100,110}
+\allsectionsfont{\color{accent}\sffamily}
+\titleformat{\section}{\Large\bfseries\sffamily\color{accent}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\sffamily\color{accent}}{\thesubsection}{0.5em}{}
+\renewcommand{\arraystretch}{1.25}
+\pagestyle{fancy}\fancyhf{}
+\rhead{\sffamily\small\color{soft}ufpipe — Ulsan-Fault catalog pipeline reference}
+\rfoot{\sffamily\small\color{soft}\thepage}
+\setlength{\headheight}{14pt}
+\newtcolorbox{keybox}[1]{colback=accent!6,colframe=accent!55,title=#1,fonttitle=\bfseries\sffamily,
+  left=3mm,right=3mm,top=1.5mm,bottom=1.5mm}
+\newtcolorbox{warnbox}[1]{colback=warn!6,colframe=warn!55,title=#1,fonttitle=\bfseries\sffamily,
+  left=3mm,right=3mm,top=1.5mm,bottom=1.5mm}
+\newcommand{\code}[1]{\texttt{#1}}
+% let long typewriter paths break inside words so they don't overflow the right margin
+\usepackage{url}
+\sloppy
+\emergencystretch=3em
+
+\begin{document}
+
+\begin{center}
+{\huge\bfseries\sffamily\color{accent} ufpipe — Ulsan-Fault catalog pipeline}\\[2mm]
+{\large\sffamily Reference manual: detection $\rightarrow$ association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ HYPOINVERSE}\\[2mm]
+{\small\color{soft} Long-term (2010–present) earthquake catalog for the Ulsan Fault, SE Korea\hfill package \code{src/ufpipe}}
+\end{center}
+\vspace{1mm}\hrule\vspace{3mm}
+
+{\small This manual documents the \code{ufpipe} package (\code{src/ufpipe}) — the automated pipeline that turns
+continuous waveforms into a located earthquake catalog. The related \emph{relocation / picker-comparison} pipeline
+(\code{detection\_test/}) has its own guide: \code{detection\_test/reloc\_2016\_uf/PIPELINE.md} +
+\code{study\_guide.pdf}.}
+
+\tableofcontents
+\vspace{3mm}\hrule
+
+%================================================================================
+\section{What the pipeline does}
+
+Build an \textbf{internally consistent, long-term earthquake catalog} for the Ulsan Fault region (SE Korea),
+2010–present, from continuous seismic waveforms, using AI phase pickers so small events are detected uniformly
+even as the recording network grows. Every stage is scripted and parameterized; results are reproducible.
+
+\begin{center}
+\small
+\begin{tabular}{@{}cccc@{}}
+\textbf{Detection} & \textbf{Association} & \textbf{Location} & \textbf{Catalog} \\
+PhaseNet / PhaseNet+ & PyOcto (+augment) & HYPOINVERSE & located events \\
+\emph{picks per station-day} $\rightarrow$ & \emph{events + assignments} $\rightarrow$ & \emph{PHS $\rightarrow$ .sum/.arc} $\rightarrow$ & \emph{UF\{year\}.sum} \\
+\end{tabular}
+\end{center}
+
+\subsection{Two orthogonal ``model'' dimensions}
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Dimension & Flag & Values \\
+\midrule
+\textbf{Picker model} & \code{-{}-model} & \code{stead}, \code{original}, \code{phasenet\_plus}, \code{eqt}, \dots \\
+\textbf{Velocity model} & \code{-{}-velmodel} & \code{kim1983}, \code{kim2011} \\
+\bottomrule
+\end{tabular}
+\end{center}
+Any picker model can be located with any velocity model. \code{stead}/\code{original} are SeisBench PhaseNet
+weights; \code{phasenet\_plus} is EQNet PhaseNet+ (needs a local EQNet clone).
+
+%================================================================================
+\section{Install \& environment}
+
+\begin{keybox}{One-time setup}
+\begin{enumerate}[leftmargin=6mm,itemsep=0.5mm]
+\item \code{conda env create -f environment.yml \&\& conda activate ulsan} \hfill(the code also runs in \code{base} here)
+\item \code{pip install torch -{}-index-url https://download.pytorch.org/whl/cu128} \hfill(match your CUDA; GPU strongly recommended)
+\item \code{pip install -e .} \hfill(installs the \code{uflib} + \code{ufpipe} packages, editable)
+\item \textbf{HYPOINVERSE}: the external \code{hyp1.40} binary must be on \code{PATH} (not pip-installable).
+\item \textbf{PhaseNet+ only}: a local EQNet clone at \code{config.EQNET\_DIR}.
+\end{enumerate}
+\end{keybox}
+
+After \code{pip install -e .}, \code{import ufpipe.config} and \code{python -m ufpipe.run\_pipeline} work from any
+directory — no \code{sys.path} hacks.
+
+%================================================================================
+\section{The five stages}
+
+\code{STAGES = [detection, association, augment, phs, locate]} — run in order. Each is a function in
+\code{src/ufpipe/core.py}; \code{run\_pipeline.py} chains them per year.
+
+\begin{center}
+\small
+\begin{longtable}{@{}c>{\raggedright\arraybackslash}p{2.4cm}>{\raggedright\arraybackslash}p{5.0cm}>{\raggedright\arraybackslash}p{5.2cm}@{}}
+\toprule
+\# & Stage & In $\rightarrow$ Out & What it does \\
+\midrule
+\endhead
+1 & \textbf{detection} & continuous mSEED $\rightarrow$ \code{picks/} (per station-day) & AI picker on each station-day; anti-alias $>$100 Hz, resample to 100 Hz, pick P/S above threshold. GPU. Idempotent (skips done days). \\
+2 & \textbf{association} & picks $\rightarrow$ \code{pyocto\_*.csv} + assignment & PyOcto octree associator groups picks into events (gate below). Whole-year or daily-chunked. \\
+3 & \textbf{augment} & assignment $\rightarrow$ augmented assignment & scan daily picks for orphans PyOcto missed, add to each event so HYPOINVERSE sees the full pick set. Backs up + overwrites in place; idempotent. \\
+4 & \textbf{phs} & assignment $\rightarrow$ \code{UF\{year\}.phs} & write the HYPOINVERSE phase file from the (augmented) assignment. \\
+5 & \textbf{locate} & \code{.phs} $\rightarrow$ \code{UF\{year\}.\{sum,arc\}} & run HYPOINVERSE (\code{hyp1.40}) with the chosen velocity model $\rightarrow$ located catalog + errors. \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\begin{warnbox}{Pipeline order matters}
+\code{augment} runs \emph{between} \code{association} and \code{phs}, so HYPOINVERSE sees the full augmented pick
+set and computes correct \code{GAP}/\code{DMIN}/\code{ERZ}/\code{RMS}. Do not reorder.
+\end{warnbox}
+
+\subsection{Source of truth for pick$\leftrightarrow$event assignment}
+The \textbf{PyOcto assignment (after augmentation)} is authoritative for which \code{(station, phase)} tuples
+belong to each event. Do NOT use a legacy time-window pick dump — when two events fall $<$60\,s apart at the same
+station the earliest pick ``wins'' and leaks into the wrong event. Downstream (SAC-header writers, magnitude/QC
+notebooks) must read \code{pyocto\_assignment\_\{velmodel\}\_\{year\}.csv}.
+
+%================================================================================
+\section{Parameters (\code{src/ufpipe/config.py} — the single disclosed source)}
+
+Change defaults here. Everything is one file.
+
+\subsection{Detection / DSP}
+\begin{center}
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{4.0cm}>{\raggedright\arraybackslash}p{6.6cm}@{}}
+\toprule
+Parameter & Value & Meaning \\
+\midrule
+\code{SAMPLING\_RATE} & 100.0 Hz & the pickers' trained rate; all data resampled to it \\
+\code{ANTIALIAS} & lowpass 45 Hz, 8 corners, zerophase & applied BEFORE down-sampling ($>$100 Hz KG/NS) \\
+\code{BANDPASS} & 1--40 Hz, 4 corners, causal & legacy detection path; PhaseNet+ runs raw \\
+\code{P\_THRESHOLD}, \code{S\_THRESHOLD} & 0.2 & SeisBench pick probability threshold \\
+\code{PNPLUS\_MIN\_PROB} & 0.3 & EQNet PhaseNet+ pick threshold \\
+\code{PNPLUS\_NT} & $1024{\times}36$ & PhaseNet+ patch length (whole-day, \code{cut\_patch}) \\
+\code{MAX\_CORES} & 24 & CPU cap (respects \code{taskset} affinity) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Association (PyOcto) — \code{REGION} (lenient) vs \code{REGION\_STRICT}}
+\begin{center}
+\small
+\begin{tabular}{@{}lcc l@{}}
+\toprule
+Parameter & \code{REGION} & \code{REGION\_STRICT} & Meaning \\
+\midrule
+\code{lat} / \code{lon} & \multicolumn{2}{c}{(34.5,37.0) / (128.5,130.0)} & search area (deg) \\
+\code{zlim} & \multicolumn{2}{c}{(0, 40)} & depth range (km) \\
+\code{time\_before} & \multicolumn{2}{c}{300} & origin-search window (s) \\
+\code{n\_picks} & 4 & 6 & min total picks \\
+\code{n\_p\_picks} & 2 & 3 & min P picks \\
+\code{n\_s\_picks} & 2 & 3 & min S picks \\
+\code{n\_p\_and\_s\_picks} & 1 & 2 & min stations with both P+S (depth constraint) \\
+\code{pick\_match\_tolerance} & 1.5 & 1.0 & residual cap (s) --- the primary quality knob \\
+\code{min\_node\_size} / \code{\_location} & 10/1.5 & 2.0/0.5 & octree granularity (km) \\
+\code{refinement\_iterations} & 3 & 8 & localise+rematch cycles \\
+\code{n\_threads} & \multicolumn{2}{c}{16} & PyOcto threads (polite on a shared box) \\
+\bottomrule
+\end{tabular}
+\end{center}
+Pass \code{-{}-strict} to use \code{REGION\_STRICT} (fewer, cleaner events). Velocity for association =
+\code{PYOCTO\_VELMODEL} (\code{kim1983}).
+
+\subsection{Velocity model \& location}
+\code{DEFAULT\_VELMODEL = kim2011}; \code{kim1983} also available (\code{data/metadata/velocity\_model/kim1983.csv},
+a layered $V_p$/$V_s$ model). \code{PHASE\_CHANNELS = \{P: HHZ, S: HHN\}}.
+
+%================================================================================
+\section{How to run}
+
+\begin{keybox}{Standard runs (from the repo root)}
+\begin{tabular}{@{}>{\ttfamily}p{8.4cm}>{\raggedright\arraybackslash}p{6.2cm}@{}}
+python -m ufpipe.run\_pipeline -{}-model original -{}-years 2024 & one year, all 5 stages \\
+python -m ufpipe.run\_pipeline -{}-model original -{}-years 2010-2024 & the whole record \\
+python -m ufpipe.run\_pipeline -{}-model original -{}-years 2015,2016 -{}-velmodel kim1983 & specific years, kim1983 \\
+python -m ufpipe.run\_pipeline -{}-model original -{}-years 2024 -{}-stage-from association & resume (picks already done) \\
+python -m ufpipe.run\_pipeline -{}-model original -{}-years 2024 -{}-days 1-3 & detection on a few days (testing) \\
+python -m ufpipe.run\_pipeline -{}-model original -{}-years 2024 -{}-strict & strict association gate \\
+\end{tabular}
+\end{keybox}
+
+\noindent\textbf{CLI flags:} \code{-{}-model} · \code{-{}-years} (\code{'2010-2024'} or \code{'2015,2016'}) ·
+\code{-{}-velmodel} · \code{-{}-days} · \code{-{}-device \{cuda,cpu\}} · \code{-{}-workers} · \code{-{}-strict} ·
+\code{-{}-force} (allow writing to \code{stead}) ·\\ \code{-{}-stage-from
+\{detection,association,augment,phs,locate\}} (start mid-chain).
+
+\begin{warnbox}{Shared 64-core server — always pin cores}
+Detection sizes its preprocessing pool and \code{torch} threads from the process CPU \emph{affinity}, capped by
+\code{MAX\_CORES=24}. Launch under \code{taskset} so the whole job stays within budget:\\[1mm]
+\hspace*{3mm}\code{OMP\_NUM\_THREADS=1 taskset -c 0-7 python -m ufpipe.run\_pipeline -{}-model original -{}-years 2010-2024}\\[1mm]
+Without pinning, PhaseNet+ grabbed $\sim$49 cores / 193 threads and starved everything. Inference is
+\textbf{GPU-preferred} (warns loudly, never silently falls back to CPU).
+\end{warnbox}
+
+\noindent Detection is \textbf{idempotent} — it skips station-days whose picks already exist, so runs resume
+safely after an interruption.
+
+%================================================================================
+\section{Outputs \& layout}
+
+All pipeline products go under \code{outputs/models/<model>/} (regenerable; gitignored):
+\begin{center}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+Path & Contents \\
+\midrule
+\code{.../detection\_location/<year>/picks/} & per-station-day picks (stage 1) \\
+\code{.../pyocto/pyocto\_\{vm\}\_\{year\}.csv} & associated events (stage 2) \\
+\code{.../pyocto/pyocto\_assignment\_\{vm\}\_\{year\}.csv} & pick$\rightarrow$event assignment (authoritative) \\
+\code{.../station\_table/stations\_\{year\}.csv} & per-year station roster (discovered from metadata) \\
+\code{.../HypoInv/PHS/UF\{year\}.phs} & HYPOINVERSE phase file (stage 4) \\
+\code{.../HypoInv/\{vm\}/UF\{year\}.\{sum,arc,prt\}} & located catalog + errors (stage 5) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent\textbf{Inputs} (restructured 2026-07): waveforms in \code{KS\_KG/} (station dirs at root, parallel to
+\code{GJ/},\code{NS/}); station metadata in \code{data/metadata/ks\_kg\_station\_table/}; velocity model in
+\code{data/metadata/velocity\_model/}; HYPOINVERSE control inputs (STA/\code{kim*}) in \code{data/hypoinv/}.
+
+%================================================================================
+\section{Robustness \& invariants}
+
+\begin{itemize}[leftmargin=6mm,itemsep=1mm]
+\item \textbf{Network growth is automatic.} Stations are \emph{discovered from StationXML + on-disk coverage}
+each month; the deployed network for that period is what enters the run. No hard-coded station lists.
+\item \textbf{Mixed sampling rates handled.} $>$100 Hz stations (KG/NS at 200 Hz) are anti-alias-lowpassed then
+resampled to the pickers' 100 Hz. The anti-alias filter is applied BEFORE down-sampling (never after).
+\item \textbf{Velocity model, thresholds, and gates are epoch-invariant by choice} $\Rightarrow$ the catalog stays
+internally comparable across years.
+\item \textbf{Idempotent \& resumable} at every stage; \code{-{}-stage-from} restarts mid-chain.
+\item \textbf{Do not edit the \code{stead} reference run} (it is the baseline). Scripts refuse \code{-{}-model
+stead} writes unless \code{-{}-force}.
+\end{itemize}
+
+%================================================================================
+\section{Troubleshooting / provenance checks}
+
+\begin{center}
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.0cm}>{\raggedright\arraybackslash}p{8.5cm}@{}}
+\toprule
+Symptom & Check \\
+\midrule
+Detection finds no waveforms & \code{python -c "import ufpipe.config as c,os; print(c.CONTINUOUS, os.path.isdir(c.CONTINUOUS))"} --- must point at \code{KS\_KG/} and exist. \\
+\code{ImportError: ufpipe} / \code{uflib} & \code{pip install -e .} in the active env; \code{import ufpipe.config; print(\_\_file\_\_)} must be \code{src/ufpipe}. \\
+Wrong \code{pipeline} imported & \code{ufpipe} is renamed precisely to avoid the collision with the external korea-cluster-relocation \code{pipeline}. Verify \code{ufpipe.config.\_\_file\_\_} is under \code{src/}. \\
+Events look over/under-associated & compare \code{REGION} vs \code{-{}-strict}; the \code{pick\_match\_tolerance} is the primary knob. \\
+GPU not used & inference is GPU-preferred and warns loudly; check the torch/CUDA install (never silently CPU). \\
+Sparse early years, few events & expected --- KS/KG-only network (2010–2016) has larger azimuthal gaps; the QC gate honestly reflects what the network resolves. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{2mm}\hrule\vspace{2mm}
+{\small\color{soft} Companion docs: \code{docs/overview.md}, \code{docs/pipeline.md}, \code{docs/how-to-run.md},
+\code{docs/directory-structure.md} · \code{src/ufpipe/README.md} · relocation pipeline:
+\code{detection\_test/reloc\_2016\_uf/PIPELINE.md} + \code{study\_guide.pdf}.}
+
+\end{document}

@@ -1,7 +1,7 @@
 # Detection performance & failure modes — reference notes
 
 Findings from diagnosing the slow/stalling 2010–2024 `original` re-run (2026-05-26), and
-the fixes applied in `KS_KG/models/pipeline/{core,config}.py`. Keep this for later reference.
+the fixes applied in `src/ufpipe/{core,config}.py`. Keep this for later reference.
 
 ## TL;DR
 - **GPU is preferred for all inference.** Detection runs `device="cuda"` and now warns loudly
@@ -87,10 +87,10 @@ This box is shared (≈5 users). Detection jobs must **not** grab all cores. Two
    ```bash
    # original (SeisBench): preprocessing pool — give it ~6 cores
    OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 taskset -c 0-5 \
-     nohup python run_pipeline.py --model original --years 2010-2024 --velmodel kim2011 >> ... &
+     nohup python -m ufpipe.run_pipeline --model original --years 2010-2024 --velmodel kim2011 >> ... &
    # phasenet_plus (EQNet): numpy/torch heavy — give it ~8 cores
    OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 taskset -c 6-13 \
-     nohup python run_pipeline.py --model phasenet_plus --years 2010-2024 --velmodel kim2011 >> ... &
+     nohup python -m ufpipe.run_pipeline --model phasenet_plus --years 2010-2024 --velmodel kim2011 >> ... &
    ```
    Total ≈14 / 64 cores. Live-cap a *running* job without restart:
    `taskset -acp 6-13 <pid>` (the `-a` covers all threads).

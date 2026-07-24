@@ -33,13 +33,13 @@ Details in [pipeline.md](pipeline.md); commands in [how-to-run.md](how-to-run.md
 
 | Step | State | Notes |
 |------|-------|-------|
-| Detection automation (CLI + resume) | ✅ done | `models/pipeline/detection.py` |
+| Detection automation (CLI + resume) | ✅ done | `src/ufpipe/detection.py` |
 | Association automation | ✅ done | `association.py`; robust per-station network from picks |
 | HYPOINVERSE automation | ✅ done | `run_hypoinverse.py` wraps `hyp1.40` |
 | Orchestrator (full chain, year ranges) | ✅ done | `run_pipeline.py` |
 | `stead` reference run | ✅ exists | the original 2010–2024 notebooks |
 | `original` PhaseNet run | ◐ in progress | scaffold + scripts ready; full years to be run |
-| HypoDD relative relocation | ⏳ planned | `models/<model>/hypodd/` placeholder |
+| HypoDD relative relocation | ⏳ planned | `outputs/models/<model>/hypodd/` placeholder |
 | `NS` network (post-2018/19) | ⏳ deferred | extend `--model`/path convention later |
 | Magnitudes / completeness (Mc) | ⏳ future | not started |
 

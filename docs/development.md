@@ -28,7 +28,7 @@ Before committing, **always sanity-check that no data slipped in**:
 # nothing large staged:
 git diff --cached --name-only | xargs -r du -h 2>/dev/null | sort -rh | head
 # data paths must stay ignored:
-git check-ignore KS_KG/continuous NS KS_KG/picks 01.PhaseNet_detection_test.ipynb
+git check-ignore KS_KG NS KS_KG/picks 01.PhaseNet_detection_test.ipynb
 ```
 
 If a notebook keeps showing as "modified" with no real change, the strip filter isn't installed —
@@ -44,15 +44,15 @@ re-run `bash tools/setup-git-filters.sh`.
 
 **A new picker model** (e.g. `instance`):
 ```bash
-python KS_KG/models/pipeline/run_pipeline.py --model instance --years 2024
+python src/ufpipe/run_pipeline.py --model instance --years 2024
 ```
-Outputs land in `KS_KG/models/instance/…`. Add the picker to the comparison set in the docs as needed.
+Outputs land in `outputs/models/instance/…`. Add the picker to the comparison set in the docs as needed.
 (If you want pre-built notebooks for it too, generalize `build_original_tree.py`.)
 
 **A new velocity model**: add `KS_KG/HypoInv/<name>/<name>_p.crh` + `_s.crh`, then
 `run_hypoinverse.py --velmodel <name>`.
 
-**HypoDD (relative relocation)**: implement under `KS_KG/models/<model>/hypodd/`, consuming the
+**HypoDD (relative relocation)**: implement under `outputs/models/<model>/hypodd/`, consuming the
 HYPOINVERSE catalog + differential times. Add a `core.run_hypodd_year(...)` and a `hypodd.py` CLI,
 and extend `run_pipeline.py`'s stage list. Reference implementation: `/home/msseo/works/relocDD-py/`.
 
@@ -62,7 +62,7 @@ station discovery + metadata for the additional stations (mostly active post-201
 ## Where to change defaults
 
 All paths, detection/association parameters, and the region box live in
-[`KS_KG/models/pipeline/config.py`](../KS_KG/models/pipeline/config.py). Change them there rather than
+[`src/ufpipe/config.py`](../src/ufpipe/config.py). Change them there rather than
 editing individual scripts.
 
 ## Safety guard

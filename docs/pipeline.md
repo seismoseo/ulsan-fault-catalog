@@ -1,9 +1,9 @@
 # Pipeline stages
 
-Each stage is a function in [`KS_KG/models/pipeline/core.py`](../KS_KG/models/pipeline/core.py),
+Each stage is a function in [`src/ufpipe/core.py`](../src/ufpipe/core.py),
 exposed by a thin CLI. All defaults live in
-[`config.py`](../KS_KG/models/pipeline/config.py). Outputs are written under
-`KS_KG/models/<model>/` (default `--model original`).
+[`config.py`](../src/ufpipe/config.py). Outputs are written under
+`outputs/models/<model>/` (default `--model original`).
 
 ```
 continuous waveforms
@@ -25,7 +25,7 @@ models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
 ## 1. Detection — `detection.py`
 
 - **Tool**: SeisBench `PhaseNet.from_pretrained(<model>)`, GPU if available.
-- **Input**: `KS_KG/continuous/<STA>/<CHAN>/*.<year>.<doy>` (auto-discovers stations with data that year).
+- **Input**: `KS_KG/<STA>/<CHAN>/*.<year>.<doy>` (auto-discovers stations with data that year).
 - **Per day**: all stations are preprocessed in parallel (`ProcessPoolExecutor`) and merged into one
   `Stream`, then a **single** `classify()` call runs on the whole day.
 - **Preprocessing** (uniform across years): interpolate→100 Hz, `merge(method=1, fill_value=0)`,
@@ -46,8 +46,8 @@ models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
 - **Tool**: PyOcto `OctoAssociator.from_area`.
 - **Region/params** (in `config.REGION`): lat (34.5, 37.0), lon (128.5, 130.0), depth (0, 40) km,
   `time_before=300`, `n_picks=4`, `n_p_picks=2`, `n_s_picks=2`, `n_p_and_s_picks=1`.
-- **Velocity model**: layered from `KS_KG/velocity_model/kim1983.csv`.
-- **Stations**: coordinates from `KS_KG/station_table/station_update.dat`; the **network (KS/KG) is
+- **Velocity model**: layered from `data/metadata/velocity_model/kim1983.csv`.
+- **Stations**: coordinates from `data/metadata/ks_kg_station_table/station_update.dat`; the **network (KS/KG) is
   taken from the picks themselves** (not a hardcoded count).
 - **Output**: `pyocto_kim1983_<year>.csv` (events) + `pyocto_assignment_kim1983_<year>.csv`
   (pick→event), plus `stations_<year>.csv` under the model's `station_table/`.
@@ -56,15 +56,15 @@ models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}   (located catalog)
 
 - Converts PyOcto events+assignments into a **HYPO71 fixed-width `.phs`** file (P→`HHZ`/`IP`,
   S→`HHN`/`ES`), one block per event. Layout ported verbatim from the original notebook.
-- **Output**: `models/<model>/HypoInv/PHS/UF<year>.phs`.
+- **Output**: `outputs/models/<model>/HypoInv/PHS/UF<year>.phs`.
 
 ## 4. Absolute location — `run_hypoinverse.py`
 
 - **Tool**: external `hyp1.40` binary (must be on `PATH`).
 - Generates the HYPOINVERSE control on the fly (from the `UF<year>.sh` template) parameterized by
-  year + `--velmodel`; runs in `models/<model>/HypoInv/` where `STA/` and the `*.crh` crustal-model
+  year + `--velmodel`; runs in `outputs/models/<model>/HypoInv/` where `STA/` and the `*.crh` crustal-model
   files are symlinked in.
-- **Output**: `models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}` (`.sum` = located catalog).
+- **Output**: `outputs/models/<model>/HypoInv/<velmodel>/UF<year>.{sum,prt,arc}` (`.sum` = located catalog).
 
 ## Orchestrator — `run_pipeline.py`
 
@@ -73,5 +73,5 @@ mid-chain. Continues on per-year errors and prints a summary.
 
 ## Relative relocation — HypoDD *(planned)*
 
-Will consume the HYPOINVERSE catalog + differential times into `models/<model>/hypodd/`. A reference
+Will consume the HYPOINVERSE catalog + differential times into `outputs/models/<model>/hypodd/`. A reference
 implementation exists at `/home/msseo/works/relocDD-py/`.

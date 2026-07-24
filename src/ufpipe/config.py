@@ -15,12 +15,16 @@ import calendar
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # --------------------------------------------------------------------- paths
-ROOT = "/home/msseo/works/02.Ulsan_Fault_detection/KS_KG"
-MODELS = os.path.join(ROOT, "models")
-CONTINUOUS = os.path.join(ROOT, "continuous")
-STATION_UPDATE = os.path.join(ROOT, "station_table", "station_update.dat")
-STATIONS_CSV = os.path.join(ROOT, "station_table", "stations.csv")
-VELOCITY_CSV = os.path.join(ROOT, "velocity_model", "kim1983.csv")
+# Restructured (2026-07): KS_KG/ is now the raw-waveform network dir (station dirs at its root,
+# parallel to GJ/NS); metadata lives under data/metadata/; outputs under outputs/.
+REPO = "/home/msseo/works/02.Ulsan_Fault_detection"
+ROOT = os.path.join(REPO, "KS_KG")                                   # KS/KG waveforms (network dir)
+MODELS = os.path.join(REPO, "outputs", "models")                     # generated picker-model scaffolds
+CONTINUOUS = ROOT                                                    # station dirs live directly under KS_KG/
+_META = os.path.join(REPO, "data", "metadata")
+STATION_UPDATE = os.path.join(_META, "ks_kg_station_table", "station_update.dat")
+STATIONS_CSV = os.path.join(_META, "ks_kg_station_table", "stations.csv")
+VELOCITY_CSV = os.path.join(_META, "velocity_model", "kim1983.csv")
 
 # --------------------------------------------- detection (PhaseNet) defaults
 # Verified uniform across 2010-2024.

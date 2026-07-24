@@ -1,10 +1,10 @@
 # Post-location analysis — clustering, blast discrimination, subregion, error ellipses
 
-After HYPOINVERSE produces the located catalog (`KS_KG/HypoInv/catalog_<model>_2010_2024.csv`,
+After HYPOINVERSE produces the located catalog (`analysis/hypoinv/catalog_<model>_2010_2024.csv`,
 written by `catalog_summary.ipynb`), a set of analyses operate on that catalog. The shared,
-**tracked** logic lives in `KS_KG/HypoInv/uf_cluster.py` (spatial/temporal blast decluster + map
-helpers) and `KS_KG/HypoInv/uf_waveform_similarity.py` (a second, waveform-feature blast screen);
-the notebooks that drive them are exploratory and **gitignored** (like all `KS_KG/HypoInv/*.ipynb`
+**tracked** logic lives in `src/uflib/uf_cluster.py` (spatial/temporal blast decluster + map
+helpers) and `src/uflib/uf_waveform_similarity.py` (a second, waveform-feature blast screen);
+the notebooks that drive them are exploratory and **gitignored** (like all `analysis/hypoinv/*.ipynb`
 and `*.csv`):
 
 | Notebook | Purpose |
@@ -18,7 +18,7 @@ and `*.csv`):
 
 All three are **PARAMS-driven** (edit the first cell, re-run) and `model`-parameterized
 (`stead`/`original`/`phasenet_plus`). They `import uf_cluster as uf` (the module sits beside them in
-`KS_KG/HypoInv/`).
+`analysis/hypoinv/`).
 
 ## `uf_cluster.py` API
 
@@ -142,8 +142,8 @@ locations (20–99 km errors) that all fail the catalog QC (erh/erz ≤ 5 km), s
 analysis. A handful of 2023 catalog events lack covariance because the filtered `.sum` and `UF2023.prt`
 on disk are from slightly different runs (~0.4 s / ~1 km apart) — left unmatched rather than mis-paired.
 
-> `.prt` files are large and **gitignored** (`KS_KG/HypoInv/**/*.prt`); `05` needs them locally at
-> `KS_KG/HypoInv/<velmodel>/UF<year>.prt`.
+> `.prt` files are large and **gitignored** (`analysis/hypoinv/**/*.prt`); `05` needs them locally at
+> `analysis/hypoinv/<velmodel>/UF<year>.prt`.
 
 ## 4 — Picker-model comparison: stead vs phasenet_plus (`catalog_model_comparison`)
 
@@ -216,7 +216,7 @@ component (`build_wf_nb.py {HHZ|HHN|HHE}`); `cross_component_blast.py` intersect
 ## Reproducing
 
 ```bash
-cd KS_KG/HypoInv
+cd analysis/hypoinv
 # politely on the shared box:
 taskset -c 0-7 jupyter nbconvert --to notebook --execute --inplace 03_blast_decluster_hdbscan.ipynb
 taskset -c 0-7 jupyter nbconvert --to notebook --execute --inplace 04_subregion_seismicity.ipynb   # needs 03's declustered CSV
@@ -227,4 +227,4 @@ python cross_component_blast.py            # cross-component candidate-event int
 python build_seq_nb.py HHZ && jupyter nbconvert --to notebook --execute --inplace 05_cluster_spacetime_HHZ_phasenet_plus.ipynb  # per-family space-time
 ```
 Outputs (`catalog_*_declustered.csv`, `cluster_summary_*.csv`, `subcatalog_*`, `cluster3d_*.html`,
-`wf_similarity_cache/`) land in `KS_KG/HypoInv/` and are gitignored.
+`wf_similarity_cache/`) land in `analysis/hypoinv/` and are gitignored.
