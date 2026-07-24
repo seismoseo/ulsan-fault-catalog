@@ -49,15 +49,26 @@ The orchestrator runs years independently, continues past a failing year, and pr
 ## 2. Individual stages
 
 ```bash
-python -m ufpipe.detection       --model original --year 2024 [--days 1-305] [--workers 8] [--device cuda]
-python -m ufpipe.association     --model original --year 2024
+python -m ufpipe.detection       --model original --year 2024 [--days 1-305] [--networks KS,KG,GJ,NS] [--workers 8]
+python -m ufpipe.association     --model original --year 2024 [--networks KS,KG,GJ,NS] [--workers 8]
 python -m ufpipe.make_phs        --model original --year 2024
 python -m ufpipe.run_hypoinverse --model original --year 2024 --velmodel kim2011
 ```
 
-Common flags: `--model` (picker: `original`/`stead`/future), `--year`, `--force` (allow writing into
-the protected `stead` tree). Detection extras: `--days A-B`, `--stations CODE1,CODE2`, `--device`,
+Common flags: `--model` (picker: `original`/`stead`/`phasenet_plus`), `--year`, `--force` (allow writing into
+the protected `stead` tree). Detection extras: `--days A-B`, `--stations CODE1,CODE2`, `--networks`, `--device`,
 `--workers`, `--no-skip-existing`.
+
+**Networks (KS/KG/GJ/NS).** Detection and association cover all four networks by default. The station set is
+built per-year from metadata + on-disk presence (`src/ufpipe/stations.py`), so each year automatically uses the
+stations that existed then: KS/KG span the whole record; **GJ** = 2016–2017 Gyeongju temporary arrays; **NS** =
+dense local array, 2017+. NS is read from the pre-decimated `NS_100hz/` mirror for speed. Restrict with
+`--networks GJ` (etc.) for testing. Because association is **daily-chunked** (a ±150 s window per day, keeping
+only in-day origins), it scales to the dense NS array — a whole-year single-pass associate would be intractable
+on ~200 stations.
+
+> **Env split**: detection (PhaseNet+) runs in the `eqnet` conda env; association (PyOcto) runs in `base`.
+> Both have the package installed (`pip install -e .`).
 
 **Resume / idempotency**: detection skips days whose `picks_<year>.<doy>.csv` already exists, so
 re-running a year only fills the gaps. Use `--no-skip-existing` to force recomputation.

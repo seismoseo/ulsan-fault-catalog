@@ -18,29 +18,42 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
+import stations as _stations
 
 
 # ============================================================ detection (1)
-def discover_stations(base_dir, year):
-    """Station dirs under base_dir that hold data for `year`."""
-    out = []
-    for d in sorted(os.listdir(base_dir)):
-        p = os.path.join(base_dir, d)
-        if os.path.isdir(p) and glob.glob(f"{p}/*/*.{year}.*"):
-            out.append(d)
-    return out
+def discover_stations(year, networks=None, stations=None):
+    """Multi-archive station rows for `year` across KS/KG/GJ/NS (default config.DETECT_NETWORKS).
+
+    Returns a list of dicts (net, sta, band, archive) — each says which waveform directory + channel
+    band to read for that station. NS rows point at the NS_100hz mirror when available (see
+    stations.discover_rows). `stations` optionally restricts to an explicit code list.
+    """
+    return _stations.discover_rows(year, networks=networks, stations=stations)
 
 
-def preprocess_station(code, jday, base_dir):
+def _day_files(row, jday):
+    """Waveform component files for one station-row on one day: archive/<sta>/<band>?.D/*.{jday}."""
+    return sorted(glob.glob(os.path.join(row["archive"], row["sta"], f"{row['band']}?.D", f"*.{jday}")))
+
+
+def preprocess_station(row, jday):
     """Load + preprocess one station-day. Runs in a worker process.
 
-    Ported verbatim from 01.Run_multi-station_detection: interpolate to 100 Hz,
-    merge, pad-trim, demean/taper, bandpass, trim back. Returns a Stream or None.
+    `row` is a station dict (net, sta, band, archive) from discover_stations; it reads the day's
+    components from archive/<sta>/<band>?.D/. Ported from 01.Run_multi-station_detection: interpolate
+    to 100 Hz, merge, pad-trim, demean/taper, bandpass, trim back. Returns a Stream or None.
     """
     from obspy import read
     import config as cfg
+    code = row["sta"]
     try:
-        stream = read(f"{base_dir}/{code}/*/*.{jday}")
+        files = _day_files(row, jday)
+        if not files:
+            return None
+        stream = read(files[0])
+        for f in files[1:]:
+            stream += read(f)
         if not stream:
             return None
         # Heavily-fragmented station-days (tens of thousands of short contiguous records,
@@ -88,19 +101,20 @@ def canonical_station(trace_id):
     return parts[0]
 
 
-def detect_day(pn_model, stations, jday, base_dir, executor=None, workers=None):
+def detect_day(pn_model, stations, jday, executor=None, workers=None):
     """Preprocess all stations in parallel (CPU), then a single GPU classify() for the day.
 
-    Prefers a shared, reused `executor` (passed by run_detection_year). Falls back to a
-    one-off pool only if none is given (legacy callers) — that path is the slow one and
-    should be avoided for full-year runs.
+    `stations` is a list of station-row dicts (net, sta, band, archive) from discover_stations,
+    each read from its own archive. Prefers a shared, reused `executor` (passed by
+    run_detection_year). Falls back to a one-off pool only if none is given (legacy callers) — that
+    path is the slow one and should be avoided for full-year runs.
     """
     from obspy import Stream
     daily = Stream()
 
     def _gather(ex):
         local = Stream()
-        futures = [ex.submit(preprocess_station, c, jday, base_dir) for c in stations]
+        futures = [ex.submit(preprocess_station, r, jday) for r in stations]
         for fut in concurrent.futures.as_completed(futures):
             res = fut.result()
             if res:
@@ -122,16 +136,19 @@ def detect_day(pn_model, stations, jday, base_dir, executor=None, workers=None):
 
 
 def run_detection_year(model, year, days=None, stations=None, skip_existing=True,
-                       device=None, workers=None, force=False, min_prob=None, highpass=None):
+                       device=None, workers=None, force=False, min_prob=None, highpass=None,
+                       networks=None):
     """Run detection for a year; write daily picks CSVs.
 
+    Covers KS/KG/GJ/NS (restrict with `networks`); `stations` optionally narrows to explicit codes.
     Routes to the EQNet PhaseNet+ backend for models in config.EQNET_MODELS,
     otherwise uses the SeisBench PhaseNet backend (`from_pretrained(model)`).
     """
     if model in config.EQNET_MODELS:
         return _run_detection_year_eqnet(
             model, year, days=days, stations=stations, skip_existing=skip_existing,
-            device=device, workers=(workers or 0), force=force, min_prob=min_prob, highpass=highpass)
+            device=device, workers=(workers or 0), force=force, min_prob=min_prob,
+            highpass=highpass, networks=networks)
 
     import torch
     import seisbench.models as sbm
@@ -140,7 +157,6 @@ def run_detection_year(model, year, days=None, stations=None, skip_existing=True
     torch.set_num_threads(navail)
 
     config.assert_writable(model, force)
-    base_dir = config.CONTINUOUS
     out_dir = config.picks_dir(model, year)
     os.makedirs(out_dir, exist_ok=True)
 
@@ -152,9 +168,11 @@ def run_detection_year(model, year, days=None, stations=None, skip_existing=True
               "Check the GPU/torch install if a GPU is expected.")
     print(f"[detection] model={model} year={year} device={device}")
 
-    if stations is None:
-        stations = discover_stations(base_dir, year)
-    print(f"[detection] {len(stations)} stations with {year} data")
+    # multi-archive station rows (KS/KG/GJ/NS); `stations` (if given) narrows to explicit codes
+    station_rows = discover_stations(year, networks=networks, stations=stations)
+    nets = sorted({r["net"] for r in station_rows})
+    print(f"[detection] {len(station_rows)} stations with {year} data across {nets}")
+    stations = station_rows
 
     if days is None:
         days = range(1, config.days_in_year(year) + 1)
@@ -175,7 +193,7 @@ def run_detection_year(model, year, days=None, stations=None, skip_existing=True
             out = os.path.join(out_dir, f"picks_{jday}.csv")
             if skip_existing and os.path.exists(out):
                 continue
-            df = detect_day(pn_model, stations, jday, base_dir, executor=ex)
+            df = detect_day(pn_model, stations, jday, executor=ex)
             if df is None or df.empty:
                 continue
             df.to_csv(out, index=False)
@@ -280,7 +298,26 @@ def _make_antialias_dataset_cls():
                                 os.path.join(response_path, meta[0].id[:-1]) + ".xml")
                             meta = meta.remove_sensitivity(inv)
                         stream += meta
-                stream = stream.merge(fill_value="latest")
+                # UNIFY sampling rate BEFORE merge: some GJ/NS station-days carry a mid-day rate change
+                # (e.g. 1000->200 Hz native SAC), and merge() refuses traces with the same id at differing
+                # rates. Anti-alias + interpolate every trace to `sampling_rate` first, then merge cleanly.
+                unified = obspy.Stream()
+                for trace in stream:
+                    if trace.stats.sampling_rate != sampling_rate:
+                        try:
+                            if trace.stats.sampling_rate > sampling_rate:      # anti-alias before downsampling
+                                trace = trace.detrend("demean")
+                                trace = trace.taper(max_percentage=None, max_length=1.0)
+                                trace = trace.filter("lowpass", **config.ANTIALIAS)
+                            trace = trace.interpolate(sampling_rate, method="linear")
+                        except Exception as e:
+                            print(f"Error resampling {trace.id}:\n{e}")
+                            continue
+                    # unify dtype too: interpolation yields float64 while native-rate records stay int32,
+                    # and merge() refuses same-id traces with differing dtypes. Cast all to float64.
+                    trace.data = trace.data.astype("float64")
+                    unified.append(trace)
+                stream = unified.merge(fill_value="latest")
                 if (response_path is None) and (response_xml is not None):
                     response = obspy.read_inventory(response_xml)
                     stream = stream.remove_sensitivity(response)
@@ -292,17 +329,6 @@ def _make_antialias_dataset_cls():
             for trace in stream:
                 if len(trace.data) < 10:
                     continue
-                if trace.stats.sampling_rate != sampling_rate:
-                    try:
-                        # --- anti-alias before downsampling (EQNet's read_mseed does not) ---
-                        if trace.stats.sampling_rate > sampling_rate:
-                            trace = trace.detrend("demean")
-                            trace = trace.taper(max_percentage=None, max_length=1.0)
-                            trace = trace.filter("lowpass", **config.ANTIALIAS)
-                        # ------------------------------------------------------------------
-                        trace = trace.interpolate(sampling_rate, method="linear")
-                    except Exception as e:
-                        print(f"Error resampling {trace.id}:\n{e}")
                 trace = trace.detrend("demean")
                 if highpass_filter > 0.0:
                     trace = trace.filter("highpass", freq=highpass_filter)
@@ -352,7 +378,8 @@ def _make_antialias_dataset_cls():
 
 
 def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existing=True,
-                              device=None, workers=0, force=False, min_prob=None, highpass=None):
+                              device=None, workers=0, force=False, min_prob=None, highpass=None,
+                              networks=None):
     """EQNet PhaseNet+ detection backend (in-process; no wandb, no edits to the EQNet clone).
 
     Writes canonical per-day picks (station="NET.STA", phase, peak_time, probability) so the
@@ -377,7 +404,6 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     if device == "cpu":
         print("  ! WARNING: CUDA not available — PhaseNet+ inference on CPU (much slower).")
-    base_dir = config.CONTINUOUS
     out_dir = config.picks_dir(model, year)
     raw_dir = config.phasenet_plus_raw_dir(model, year)
     os.makedirs(out_dir, exist_ok=True)
@@ -386,9 +412,11 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
     print(f"[detection/phasenet_plus] year={year} device={device} min_prob={min_prob} highpass={highpass}")
     net = _load_pnplus(device)
 
-    if stations is None:
-        stations = discover_stations(base_dir, year)
-    print(f"[detection/phasenet_plus] {len(stations)} stations with {year} data")
+    # multi-archive station rows (KS/KG/GJ/NS); `stations` (if given) narrows to explicit codes
+    station_rows = discover_stations(year, networks=networks, stations=stations)
+    nets = sorted({r["net"] for r in station_rows})
+    print(f"[detection/phasenet_plus] {len(station_rows)} stations with {year} data across {nets}")
+    stations = station_rows
     if days is None:
         days = range(1, config.days_in_year(year) + 1)
 
@@ -399,9 +427,10 @@ def _run_detection_year_eqnet(model, year, days=None, stations=None, skip_existi
         if skip_existing and os.path.exists(out):
             continue
         # one data_list line per station = comma-joined component files for this day
+        # (read from each station's own archive/<sta>/<band>?.D/, e.g. KS_KG/ GJ/ NS_100hz/)
         lines = []
-        for code in stations:
-            comps = sorted(glob.glob(f"{base_dir}/{code}/*/*.{jday}"))
+        for row in stations:
+            comps = _day_files(row, jday)
             if comps:
                 lines.append(",".join(comps))
         if not lines:
@@ -583,14 +612,54 @@ def _station_pyocto(st):
     return s[["id", "longitude", "latitude", "elevation"]].copy()
 
 
-def run_association_year(model, year, force=False, strict=False):
-    """Associate picks into events with PyOcto; write events + assignments + station table.
+def _assoc_day(day_ts, picks_win, stations_xy, vpath, gate, zlim, region_center,
+               lat_pad, lon_pad, time_before, pick_match_tol, vel_tol):
+    """Associate ONE day's pick window with PyOcto. Returns (events, assignments) in NATIVE PyOcto
+    schema with a day-local event_idx, or (None, None) if no in-day event. Top-level + self-contained
+    so it can run in a multiprocessing worker (each builds its own cheap associator).
 
-    `strict=True` uses `config.REGION_STRICT` (Stage-2 tighter parameters: lower
-    `pick_match_tolerance`, finer `min_node_size_location`, higher pick minimums) —
-    intended for the 2017 test pass that targets chimera associations like the
-    canonical 2017-11-15 06:09 case. Default `False` reproduces the loose baseline.
-    Output paths are unchanged (overwrites in place); back up before running with strict."""
+    Keeps only events whose ORIGIN falls in [day, day+1) — the overlap window's out-of-day events are
+    the dedup mechanism (a local event is seconds long, fully captured by ±overlap)."""
+    import pyocto
+    import pandas as pd
+    day = pd.Timestamp(day_ts)
+    d1 = day + pd.Timedelta(days=1)
+    vm = pyocto.VelocityModel1D(vpath, tolerance=vel_tol)
+    assoc = pyocto.OctoAssociator.from_area(
+        lat=(region_center[0] - lat_pad, region_center[0] + lat_pad),
+        lon=(region_center[1] - lon_pad, region_center[1] + lon_pad),
+        zlim=zlim, time_before=time_before, velocity_model=vm,
+        n_picks=gate["n_picks"], n_p_picks=gate["n_p"], n_s_picks=gate["n_s"],
+        n_p_and_s_picks=gate["n_ps"], pick_match_tolerance=pick_match_tol)
+    assoc.transform_stations(stations_xy)
+    picks = picks_win[["station", "phase", "time"]].copy()
+    picks["time"] = picks["time"].apply(lambda x: x.timestamp())
+    events, assignments = assoc.associate(picks, stations_xy)
+    if not len(events):
+        return None, None
+    assoc.transform_events(events)
+    otime = pd.to_datetime(events["time"], unit="s")
+    inday = (otime >= day) & (otime < d1)                    # dedup overlap -> origin in-day
+    if not inday.any():
+        return None, None
+    keep_idx = set(events.loc[inday, "idx"])
+    events = events[inday].reset_index(drop=True)
+    assignments = assignments[assignments["event_idx"].isin(keep_idx)].reset_index(drop=True)
+    return events, assignments
+
+
+def run_association_year(model, year, force=False, strict=False, networks=None, workers=1):
+    """Associate picks into events with PyOcto (DAILY-CHUNKED); write events + assignments + station table.
+
+    Daily chunking (a ±config.ASSOC_OVERLAP_S window per calendar day, keeping only in-day origins) is
+    REQUIRED to scale to the dense NS array — a whole-year associate() on ~200 stations is intractable.
+    Station coordinates come from the multi-network year table (KS/KG/GJ/NS), so GJ/NS picks associate.
+    Output schema is the native PyOcto frames (events: idx,time,x,y,z,picks,latitude,longitude,depth;
+    assignments: event_idx,pick_idx,residual,station,phase,time) — unchanged, so phs/locate/relocate parse it.
+
+    `strict=True` uses config.ASSOC_GATE_STRICT (stronger origin/depth constraint). Output paths are
+    unchanged (overwrites in place).
+    """
     import datetime as dt
     import tempfile
     import pyocto
@@ -600,46 +669,83 @@ def run_association_year(model, year, force=False, strict=False):
     parts = picks_df["station"].str.split(".", expand=True)
     picks_df["net"], picks_df["code"] = parts[0], parts[1]
 
-    st = build_station_table(picks_df)
-    station_pyocto = _station_pyocto(st)
+    # station coords from the multi-network year table (all four networks), restricted to used stations
+    ST = _stations.build_year_table(year, networks=networks)
+    used = set(picks_df["code"].dropna())
+    ST = ST[ST.sta.isin(used)].copy()
+    stations_xy = pd.DataFrame({"id": ST.net + "." + ST.sta + ".", "latitude": ST.lat,
+                                "longitude": ST.lon, "elevation": ST.elev}).reset_index(drop=True)
+    have = set(ST.sta)
+    dropped = sorted(used - have)
+    if dropped:
+        print(f"  ! {len(dropped)} picked station(s) absent from the {year} station table (no coords) "
+              f"-> their picks are ignored: {dropped[:12]}{'...' if len(dropped) > 12 else ''}")
 
-    # side-output: stations_<year>.csv into the model tree (not the shared dir)
+    # side-output: stations_<year>.csv into the model tree
     os.makedirs(config.station_table_dir(model), exist_ok=True)
-    fs = station_pyocto.copy()
-    fs[["Network", "Code"]] = fs["id"].str.split(".", expand=True)[[0, 1]]
-    fs[["Network", "Code", "latitude", "longitude", "elevation"]] \
-        .rename(columns=str.capitalize) \
-        .to_csv(config.stations_year_csv(model, year), index=False)
+    stations_xy.assign(Network=ST.net.values, Code=ST.sta.values)[
+        ["Network", "Code", "latitude", "longitude", "elevation"]] \
+        .rename(columns=str.capitalize).to_csv(config.stations_year_csv(model, year), index=False)
 
     # picks for PyOcto: station id must match station 'id' ("NET.CODE.")
     pk = picks_df.rename(columns={"peak_time": "time"}).copy()
     pk["time"] = pd.to_datetime(pk["time"]).dt.tz_localize(None)
     pk["station"] = pk["net"] + "." + pk["code"] + "."
-    picks_pyocto = pk[["station", "phase", "time"]].copy()
+    pk = pk[pk["code"].isin(have)][["station", "phase", "time"]].sort_values("time").reset_index(drop=True)
 
-    layers = pd.read_csv(config.VELOCITY_CSV)
+    gate = config.ASSOC_GATE_STRICT if strict else config.ASSOC_GATE
+    overlap = pd.Timedelta(seconds=config.ASSOC_OVERLAP_S)
+    print(f"[association] {model} {year}: {len(pk)} picks, {pk.station.nunique()} stations -> "
+          f"daily-chunked PyOcto ({config.ASSOC_VELMODEL}, gate {gate}{', STRICT' if strict else ''})")
+
     with tempfile.TemporaryDirectory() as td:
-        mp = os.path.join(td, "vel_model")
-        pyocto.VelocityModel1D.create_model(layers, 1.0, 100, 100, mp)
-        velocity_model = pyocto.VelocityModel1D(mp, tolerance=1.0)
-        region = config.REGION_STRICT if strict else config.REGION
-        if strict:
-            print(f"[association] STRICT mode — pick_match_tolerance="
-                  f"{region.get('pick_match_tolerance', 1.5)} s, "
-                  f"n_picks={region['n_picks']}, n_p_and_s_picks={region['n_p_and_s_picks']}")
-        associator = pyocto.OctoAssociator.from_area(velocity_model=velocity_model, **region)
-        associator.transform_stations(station_pyocto)
-        picks_pyocto["time"] = picks_pyocto["time"].apply(lambda x: x.timestamp())
-        events, assignments = associator.associate(picks_pyocto, station_pyocto)
-        associator.transform_events(events)
+        vpath = os.path.join(td, "kim2011_pyocto.dat")
+        pyocto.VelocityModel1D.create_model(pd.DataFrame(config.KIM2011), 1.0, 130.0, 35.0, vpath)
 
-    if len(events):
+        # per-day pick windows (±overlap); days are independent chunks
+        tasks, day = [], pd.Timestamp(f"{year}-01-01")
+        y_end = pd.Timestamp(f"{year + 1}-01-01")
+        while day < y_end:
+            d1 = day + pd.Timedelta(days=1)
+            w = pk[(pk.time >= day - overlap) & (pk.time < d1 + overlap)]
+            if len(w) >= gate["n_picks"]:
+                tasks.append((day, w, stations_xy, vpath, gate, config.ASSOC_ZLIM,
+                              config.REGION_CENTER, config.ASSOC_LAT_PAD, config.ASSOC_LON_PAD,
+                              config.ASSOC_TIME_BEFORE, config.ASSOC_PICK_MATCH_TOL,
+                              config.ASSOC_VEL_TOLERANCE))
+            day = d1
+
+        if workers and workers > 1:
+            from multiprocessing import Pool
+            with Pool(workers) as pool:
+                results = pool.starmap(_assoc_day, tasks)
+        else:
+            results = [_assoc_day(*t) for t in tasks]
+
+    # concat day-local frames into a global index (re-offset idx / event_idx so they stay linked)
+    ev_parts, asg_parts, off = [], [], 0
+    for ev, asg in results:
+        if ev is None:
+            continue
+        ev = ev.copy(); asg = asg.copy()
+        ev["idx"] += off
+        asg["event_idx"] += off
+        off = int(ev["idx"].max()) + 1
+        ev_parts.append(ev); asg_parts.append(asg)
+
+    if ev_parts:
+        events = pd.concat(ev_parts, ignore_index=True).sort_values("time").reset_index(drop=True)
+        assignments = pd.concat(asg_parts, ignore_index=True).reset_index(drop=True)
         events["time"] = events["time"].apply(dt.datetime.fromtimestamp, tz=dt.timezone.utc)
+    else:
+        events = pd.DataFrame(columns=["idx", "time", "x", "y", "z", "picks", "latitude", "longitude", "depth"])
+        assignments = pd.DataFrame(columns=["event_idx", "pick_idx", "residual", "station", "phase", "time"])
+
     os.makedirs(config.pyocto_dir(model), exist_ok=True)
     events.to_csv(config.pyocto_events(model, year), index=False)
     assignments.to_csv(config.pyocto_assign(model, year), index=False)
     n_pk = int(events["picks"].sum()) if len(events) else 0
-    print(f"[association] {model} {year}: events={len(events)} picks={n_pk} "
+    print(f"[association] {model} {year}: {len(tasks)} days -> events={len(events)} picks={n_pk} "
           f"-> {os.path.relpath(config.pyocto_events(model, year), config.MODELS)}")
     return events, assignments
 

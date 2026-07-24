@@ -87,9 +87,9 @@ Ends at & HypoDD dt.cc (\S7) & feeds the relocate stage \\
 \bottomrule
 \end{tabular}
 \end{center}
-The \code{relocate} stage feeds on \code{detection\_test/lib}'s per-month, KS/KG/GJ/NS, daily-chunked association
-(the dense NS array needs daily chunking), NOT ufpipe's own whole-year association — this is the one place the two
-meet. See \S7.
+ufpipe's own detection + association now cover \textbf{KS/KG/GJ/NS} with daily-chunked association (\S5). The
+\code{relocate} stage nonetheless still consumes \code{detection\_test/lib}'s per-month outputs as its feeder
+(unchanged and validated); converging relocate onto ufpipe's own association is future work. See \S7.
 
 \subsection{Two orthogonal ``model'' dimensions}
 \begin{center}
@@ -136,8 +136,8 @@ functions in \code{src/ufpipe/core.py}; the relocate stage (6) is \code{src/ufpi
 \# & Stage & In $\rightarrow$ Out & What it does \\
 \midrule
 \endhead
-1 & \textbf{detection} & continuous mSEED $\rightarrow$ \code{picks/} (per station-day) & AI picker on each station-day; anti-alias $>$100 Hz, resample to 100 Hz, pick P/S above threshold. GPU. Idempotent (skips done days). \\
-2 & \textbf{association} & picks $\rightarrow$ \code{pyocto\_*.csv} + assignment & PyOcto octree associator groups picks into events (gate below). Whole-year or daily-chunked. \\
+1 & \textbf{detection} & continuous mSEED $\rightarrow$ \code{picks/} (per station-day) & AI picker on each station-day across \textbf{KS/KG/GJ/NS} (per-year multi-network table, \code{stations.py}); anti-alias $>$100 Hz, unify mixed rates, resample to 100 Hz, pick P/S above threshold. GPU. Idempotent (skips done days). \\
+2 & \textbf{association} & picks $\rightarrow$ \code{pyocto\_*.csv} + assignment & PyOcto octree associator groups picks into events (gate below), \textbf{daily-chunked} ($\pm$150 s/day, in-day origins) so it scales to the dense NS array. Coords from the multi-network table. \\
 3 & \textbf{augment} & assignment $\rightarrow$ augmented assignment & scan daily picks for orphans PyOcto missed, add to each event so HYPOINVERSE sees the full pick set. Backs up + overwrites in place; idempotent. \\
 4 & \textbf{phs} & assignment $\rightarrow$ \code{UF\{year\}.phs} & write the HYPOINVERSE phase file from the (augmented) assignment. \\
 5 & \textbf{locate} & \code{.phs} $\rightarrow$ \code{UF\{year\}.\{sum,arc\}} & run HYPOINVERSE (\code{hyp1.40}) with the chosen velocity model $\rightarrow$ located catalog + errors. \\
@@ -179,29 +179,34 @@ Parameter & Value & Meaning \\
 \end{tabular}
 \end{center}
 
-\subsection{Association (PyOcto) — \code{REGION} (lenient) vs \code{REGION\_STRICT}}
+\subsection{Association (PyOcto) — daily-chunked, \code{ASSOC\_GATE} (lenient) vs \code{ASSOC\_GATE\_STRICT}}
+Association runs \textbf{one calendar day at a time}: a $\pm$\code{ASSOC\_OVERLAP\_S} (150 s) window per day is
+associated and only events whose \emph{origin} falls in-day are kept (dedup). This is physically equivalent to a
+single pass (local events are seconds long) but keeps each PyOcto solve to seconds --- a whole-year single pass is
+intractable on the dense $\sim$200-station NS array ($\gg$1 h, 12 GB). Station coordinates come from the
+multi-network year table (\code{stations.py}), so KS/KG/GJ/NS all associate.
 \begin{center}
 \small
 \begin{tabular}{@{}lcc l@{}}
 \toprule
-Parameter & \code{REGION} & \code{REGION\_STRICT} & Meaning \\
+Parameter (\code{config}) & lenient & \code{\_STRICT} & Meaning \\
 \midrule
-\code{lat} / \code{lon} & \multicolumn{2}{c}{(34.5,37.0) / (128.5,130.0)} & search area (deg) \\
-\code{zlim} & \multicolumn{2}{c}{(0, 40)} & depth range (km) \\
-\code{time\_before} & \multicolumn{2}{c}{300} & origin-search window (s) \\
+\code{REGION\_CENTER} $\pm$ pad & \multicolumn{2}{c}{(35.856,129.224) $\pm$ (1.0,1.2)} & search area (deg) \\
+\code{ASSOC\_ZLIM} & \multicolumn{2}{c}{(0, 30)} & depth range (km) \\
+\code{ASSOC\_TIME\_BEFORE} & \multicolumn{2}{c}{300} & origin-search window (s) \\
+\code{ASSOC\_OVERLAP\_S} & \multicolumn{2}{c}{150} & daily-chunk overlap (s) \\
 \code{n\_picks} & 4 & 6 & min total picks \\
-\code{n\_p\_picks} & 2 & 3 & min P picks \\
-\code{n\_s\_picks} & 2 & 3 & min S picks \\
-\code{n\_p\_and\_s\_picks} & 1 & 2 & min stations with both P+S (depth constraint) \\
-\code{pick\_match\_tolerance} & 1.5 & 1.0 & residual cap (s) --- the primary quality knob \\
-\code{min\_node\_size} / \code{\_location} & 10/1.5 & 2.0/0.5 & octree granularity (km) \\
-\code{refinement\_iterations} & 3 & 8 & localise+rematch cycles \\
-\code{n\_threads} & \multicolumn{2}{c}{16} & PyOcto threads (polite on a shared box) \\
+\code{n\_p} / \code{n\_s} & 2 / 2 & 3 / 3 & min P / S picks \\
+\code{n\_ps} & 1 & 2 & min stations with both P+S (depth) \\
+\code{ASSOC\_PICK\_MATCH\_TOL} & \multicolumn{2}{c}{1.5} & residual cap (s) \\
 \bottomrule
 \end{tabular}
 \end{center}
-Pass \code{-{}-strict} to use \code{REGION\_STRICT} (fewer, cleaner events). Velocity for association =
-\code{PYOCTO\_VELMODEL} (\code{kim1983}).
+Pass \code{-{}-strict} to use \code{ASSOC\_GATE\_STRICT} (fewer, cleaner events). \code{-{}-workers N} parallelises
+the independent daily chunks. Velocity for association = \code{ASSOC\_VELMODEL} (\code{kim2011} 1-D), matching the
+reloc feeder. Output schema (events \code{idx,time,x,y,z,picks,latitude,longitude,depth}; assignment
+\code{event\_idx,pick\_idx,residual,station,phase,time}) is unchanged, so \code{phs}/\code{locate}/\code{relocate}
+consume it as before.
 
 \subsection{Velocity model \& location}
 \code{DEFAULT\_VELMODEL = kim2011}; \code{kim1983} also available (\code{data/metadata/velocity\_model/kim1983.csv},
@@ -249,8 +254,8 @@ $\rightarrow$ phs $\rightarrow$ locate}. Each reads the previous stage's output 
 \toprule
 Stage & \normalfont standalone command \\
 \midrule
-Detection & python -m ufpipe.detection -{}-model original -{}-year 2024 [-{}-days 1-5] [-{}-workers 8] [-{}-device cuda] \\
-Association & python -m ufpipe.association -{}-model original -{}-year 2024 [-{}-strict] \\
+Detection & python -m ufpipe.detection -{}-model original -{}-year 2024 [-{}-networks KS,KG,GJ,NS] [-{}-days 1-5] [-{}-workers 8] \\
+Association & python -m ufpipe.association -{}-model original -{}-year 2024 [-{}-networks KS,KG,GJ,NS] [-{}-workers 8] [-{}-strict] \\
 Augment & \normalfont(runs inside \code{run\_pipeline}; or call \code{core.run\_augment\_year} from Python) \\
 PHS & python -m ufpipe.make\_phs -{}-model original -{}-year 2024 \\
 Location & python -m ufpipe.run\_hypoinverse -{}-model original -{}-year 2024 -{}-velmodel kim2011 \\

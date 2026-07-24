@@ -62,7 +62,9 @@ def main():
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--force", action="store_true", help="allow writing into model='stead'")
     ap.add_argument("--strict", action="store_true",
-                    help="use config.REGION_STRICT for PyOcto association (Stage-2 tighter params)")
+                    help="use config.ASSOC_GATE_STRICT for daily-chunked association (stronger constraint)")
+    ap.add_argument("--networks", default=None,
+                    help="comma-separated networks for detection + association (default: KS,KG,GJ,NS)")
     ap.add_argument("--through", default="dtcc", choices=["hypoinverse", "dtcc"],
                     help="relocate stage: stop at QC'd absolute location (hypoinverse) or full dt.cc (default)")
     ap.add_argument("--clean-cache", action="store_true",
@@ -71,6 +73,7 @@ def main():
 
     stages = STAGES[STAGES.index(a.stage_from):]
     days = parse_days(a.days)
+    networks = a.networks.split(",") if a.networks else None
     summary = []
 
     for yr in parse_years(a.years):
@@ -78,9 +81,10 @@ def main():
         try:
             if "detection" in stages:
                 core.run_detection_year(a.model, yr, days=days, device=a.device,
-                                        workers=a.workers, force=a.force)
+                                        workers=a.workers, force=a.force, networks=networks)
             if "association" in stages:
-                core.run_association_year(a.model, yr, force=a.force, strict=a.strict)
+                core.run_association_year(a.model, yr, force=a.force, strict=a.strict,
+                                          networks=networks, workers=(a.workers or 1))
             if "augment" in stages:
                 core.run_augment_year(a.model, yr, force=a.force)
             if "phs" in stages:

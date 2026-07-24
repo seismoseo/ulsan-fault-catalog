@@ -17,11 +17,20 @@ Detection (PhaseNet)  ->  Association (PyOcto, strict)  ->  Pick augmentation  -
 ```
 
 **Stages** (from `src/ufpipe/run_pipeline.py`): `detection` → `association` → `augment` → `phs` → `locate` →
-`relocate`. ufpipe is now **end-to-end through HypoDD dt.cc**: the 6th `relocate` stage (`src/ufpipe/relocate.py`)
+`relocate`. ufpipe is **end-to-end through HypoDD dt.cc**: the 6th `relocate` stage (`src/ufpipe/relocate.py`)
 is a thin wrapper that preflights the per-month feeder and invokes the validated
-`detection_test/reloc_2016_uf/run_picker_reloc.py` (which drives the external 15.PocketQuake HypoDD/xcorr engine,
-HypoDD v2.1beta). Run: `python -m ufpipe.run_pipeline --model <p> --years <Y> --stage-from relocate --through dtcc`.
-The relocate stage feeds on `detection_test/lib`'s per-month KS/KG/GJ/NS association (NOT ufpipe's whole-year one).
+`detection_test/reloc_2016_uf/run_picker_reloc.py` (external 15.PocketQuake HypoDD/xcorr engine, HypoDD v2.1beta).
+Run: `python -m ufpipe.run_pipeline --model <p> --years <Y> --stage-from relocate --through dtcc`.
+
+**Networks — ufpipe detection + association cover KS/KG/GJ/NS** (2026-07). The per-year multi-network station
+table is built by `src/ufpipe/stations.py` (KS/KG from StationXML, NS from GHBSN with `N003a→N003`, GJ from the
+temporary-array list), keeping stations with a metadata epoch overlapping the year AND data on disk. Each station
+carries an `archive` (KS_KG/ · GJ/ · NS_100hz/ mirror for speed); detection globs
+`archive/<sta>/<band>?.D/*.{Y}.{doy}`. Coverage timeline is automatic: 2010 = KS/KG only, 2016 adds GJ, 2017+
+adds the dense NS array. **Association is daily-chunked** (`config.ASSOC_*`, kim2011, ±150 s/day, in-day origins)
+— required because a whole-year single-pass associate is intractable on the ~200-station NS array. Restrict with
+`--networks`. The `relocate` stage still consumes `detection_test/lib`'s per-month outputs (feeder unchanged);
+converging it onto ufpipe's own association is future work.
 
 **PyOcto assignment (after augmentation) is the source of truth for which (station, phase) tuples belong to each event.**
 The legacy time-window pick dump in `HypoInv/event_waveforms_*/*_picks.csv` was a recipe for

@@ -17,9 +17,15 @@ def main():
     ap.add_argument("--year", type=int, required=True)
     ap.add_argument("--force", action="store_true", help="allow writing into model='stead'")
     ap.add_argument("--strict", action="store_true",
-                    help="use config.REGION_STRICT (tighter pick_match_tolerance + minimums)")
+                    help="use config.ASSOC_GATE_STRICT (stronger origin/depth constraint)")
+    ap.add_argument("--networks", default=None,
+                    help="comma-separated networks whose stations provide coords (default: KS,KG,GJ,NS)")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="parallel processes over days (daily chunks are independent)")
     a = ap.parse_args()
-    core.run_association_year(a.model, a.year, force=a.force, strict=a.strict)
+    networks = a.networks.split(",") if a.networks else None
+    core.run_association_year(a.model, a.year, force=a.force, strict=a.strict,
+                              networks=networks, workers=a.workers)
 
 
 if __name__ == "__main__":

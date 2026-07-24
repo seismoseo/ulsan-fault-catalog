@@ -20,11 +20,30 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 REPO = "/home/msseo/works/02.Ulsan_Fault_detection"
 ROOT = os.path.join(REPO, "KS_KG")                                   # KS/KG waveforms (network dir)
 MODELS = os.path.join(REPO, "outputs", "models")                     # generated picker-model scaffolds
-CONTINUOUS = ROOT                                                    # station dirs live directly under KS_KG/
+CONTINUOUS = ROOT                                                    # back-compat: KS/KG root (detection is now archive-aware, see stations.py)
 _META = os.path.join(REPO, "data", "metadata")                       # single home for all metadata (by kind)
 STATION_UPDATE = os.path.join(_META, "stations", "ks_kg", "station_update.dat")
 STATIONS_CSV = os.path.join(_META, "stations", "ks_kg", "stations.csv")
 VELOCITY_CSV = os.path.join(_META, "velocity", "kim1983.csv")
+
+# ------------------------------------------------- multi-network waveform archives (KS/KG/GJ/NS)
+# Detection + association now cover all four networks. Each station carries an `archive` (which dir
+# to read waveforms from) built by src/ufpipe/stations.py. Coverage timeline: KS/KG span the whole
+# record; GJ = 2016-2017 Gyeongju temporary arrays; NS = dense local array, deployed 2017+.
+KS_KG_DIR = os.path.join(REPO, "KS_KG")                              # KS + KG velocity/accel stations
+GJ_DIR = os.path.join(REPO, "GJ")                                    # GJ 2016-2017 temporary arrays
+NS_DIR = os.path.join(REPO, "NS")                                    # NS dense array (native 200 Hz)
+NS_100HZ_DIR = os.path.join(REPO, "NS_100hz")                        # pre-decimated 100 Hz NS mirror (detection speed-up)
+USE_NS_100HZ = True                                                  # read NS from the mirror when a station is present there
+DETECT_NETWORKS = ("KS", "KG", "GJ", "NS")                           # default network scope for detection + association
+BANDS = ("HH", "EL", "HG")                                           # channel priority, one band per station (velocity > accel)
+
+# station-table source metadata (consumed by stations.py; paths moved into data/metadata/ 2026-07)
+STATION_XML = os.path.join(_META, "responses", "master", "KS_KG_metadata_1.0.2.xml")   # KS/KG coords/epochs/bands
+NS_STATION_CSV = os.path.join(_META, "stations", "ns", "20231227",
+                              "GHBSN_station_list_240220_modified_code.csv")            # NS coords/epochs
+GJ_STATION_CSV = os.path.join(_META, "stations", "gj", "gj_temporary_station_list.csv")  # GJ coords
+STATION_TABLE_CACHE = os.path.join(_META, "stations", "derived")                        # per-year built tables cache
 
 # --------------------------------------------- detection (PhaseNet) defaults
 # Verified uniform across 2010-2024.
@@ -94,6 +113,27 @@ REGION_STRICT = dict(
                                 # 16 threads is enough to make progress without crowding out
                                 # other users. Bump up only if the box is dedicated.
 )
+# ---------------------------------------------- daily-chunked association (dense-array scalable)
+# Association runs one calendar day at a time (a ±overlap window per day, keep events whose ORIGIN
+# is in-day, dedup). Whole-year associate() is intractable on the dense ~200-station NS array
+# (>>1 h, 12 GB); daily chunking keeps each solve to seconds and is physically equivalent (local
+# events are seconds long). These constants are the validated detection_test/gj_config values.
+REGION_CENTER = (35.856, 129.224)     # Gyeongju reference point; association area = center ± pad (deg)
+ASSOC_LAT_PAD = 1.0
+ASSOC_LON_PAD = 1.2
+ASSOC_ZLIM = (0.0, 30.0)              # crustal depth search (km)
+ASSOC_TIME_BEFORE = 300.0             # PyOcto origin-search window (s)
+ASSOC_OVERLAP_S = 150                 # daily-chunk overlap (s) > any local S-arrival + margin
+ASSOC_PICK_MATCH_TOL = 1.5            # PyOcto pick-match tolerance (s)
+ASSOC_VEL_TOLERANCE = 1.0             # PyOcto VelocityModel1D tolerance
+ASSOC_GATE = dict(n_picks=4, n_p=2, n_s=2, n_ps=1)          # permissive gate, all epochs (false events removed by QC downstream)
+ASSOC_GATE_STRICT = dict(n_picks=6, n_p=3, n_s=3, n_ps=2)   # --strict: stronger origin/depth constraint
+ASSOC_VELMODEL = "kim2011"            # daily association uses kim2011 1-D (matches the reloc feeder)
+# kim2011 1-D velocity model (km, km/s) — the layered model PyOcto builds for daily association.
+KIM2011 = dict(depth=[0.00, 7.29, 20.70, 31.30],
+               vp=[5.63, 6.17, 6.58, 7.77],
+               vs=[3.40, 3.60, 3.70, 4.45])
+
 # label embedded in pyocto_<label>_<year>.csv (the PyOcto layered velocity model)
 PYOCTO_VELMODEL = "kim1983"
 
