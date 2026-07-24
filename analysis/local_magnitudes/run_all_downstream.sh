@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/msseo/works/02.Ulsan_Fault_detection/KS_KG/local_magnitudes
+cd /home/msseo/works/02.Ulsan_Fault_detection/analysis/local_magnitudes
 for nb in 03.Magnitude_summary 10.Magnitude_summary_homogenised 11.Mc_completeness_investigation \
           12.EMR_completeness 13.UF_secular_changes_artifacts 14.UF_ETAS_declustering_comparison \
           15.Time_dependent_station_corrections 16.Magnitude_timedependence_synthesis \

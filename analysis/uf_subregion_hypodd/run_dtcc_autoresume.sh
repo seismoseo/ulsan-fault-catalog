@@ -8,7 +8,7 @@
 # - Stops when 02.dt.cc/hypoDD.reloc exists (dtcc done) or after MAX_TRIES / 3 no-progress rounds.
 set -u
 source /home/msseo/miniforge3/etc/profile.d/conda.sh; conda activate pq-gpu
-export PYTHONPATH=/home/msseo/works/15.PocketQuake:/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation:/home/msseo/works/02.Ulsan_Fault_detection/KS_KG/HypoInv
+export PYTHONPATH=/home/msseo/works/15.PocketQuake:/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation:/home/msseo/works/02.Ulsan_Fault_detection/src/uflib
 export XCORR_RESUME=1 XCORR_TRACE_CACHE=2000 XCORR_PAIR_CHUNK=50000
 PIPE=/home/msseo/works/15.PocketQuake/external/korea-cluster-relocation
 RD=$PIPE/pipeline/runs/uf_subregion_reuse
