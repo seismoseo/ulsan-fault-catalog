@@ -45,9 +45,10 @@
 association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ locate $\rightarrow$ \textbf{relocate} (HypoDD
 dt.ct $+$ dt.cc). The final \code{relocate} stage produces the double-difference relocated catalog. The heavy
 dt.cc/xcorr/HypoDD \emph{engine} is external (\code{15.PocketQuake} korea-cluster-relocation, HypoDD v2.1beta);
-ufpipe orchestrates it. \code{detection\_test/} is now just the 4-picker-comparison pilot plus the shared
-per-month detection/association \emph{feeder} that the relocate stage consumes (see \S7). The relocation internals
-additionally have a dedicated guide: \code{detection\_test/reloc\_2016\_uf/PIPELINE.md} + \code{study\_guide.pdf}.}
+ufpipe orchestrates it. The relocate stage is \textbf{self-fed}: it builds its inputs from ufpipe's OWN
+detection+association (\code{ufpipe.reloc\_inputs}), so \code{detection\_test/lib/} is DEPRECATED (see
+\S7 + \code{detection\_test/lib/DEPRECATED.md}); only the downstream reloc driver + PocketQuake engine remain live.
+The relocation internals have a dedicated guide: \code{detection\_test/reloc\_2016\_uf/PIPELINE.md} + \code{study\_guide.pdf}.}
 
 \tableofcontents
 \vspace{3mm}\hrule
@@ -71,25 +72,25 @@ PhaseNet / PhaseNet+ & PyOcto (+augment) & HYPOINVERSE & \code{uf\_cluster} & Hy
 
 \subsection{\code{ufpipe} vs \code{detection\_test}}
 \code{ufpipe} is the production end-to-end pipeline. \code{detection\_test} is the pilot experiment (the 2016
-4-picker comparison) and also hosts two things ufpipe's \code{relocate} stage reuses: the per-month, multi-network
-detection/association \emph{feeder} (\code{detection\_test/lib/}) and the validated relocation orchestrator
-(\code{run\_picker\_reloc.py}) that drives the external HypoDD engine.
+4-picker comparison). Its \code{lib/} (per-month detection/association) is DEPRECATED --- ufpipe feeds itself now ---
+and only the relocation \emph{orchestrator} \code{reloc\_2016\_uf/run\_picker\_reloc.py} (driven by ufpipe's
+relocate stage with \code{-{}-skip-build}) + the external HypoDD engine remain live there.
 \begin{center}
 \small
 \begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{5.6cm}>{\raggedright\arraybackslash}p{5.7cm}@{}}
 \toprule
  & \textbf{\code{ufpipe}} (\code{src/ufpipe}) & \textbf{\code{detection\_test}} \\
 \midrule
-Role & the end-to-end catalog + relocation pipeline & 4-picker-comparison pilot + shared feeder/orchestrator \\
-Stages & detection $\rightarrow$ association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ locate $\rightarrow$ \textbf{relocate} & per-month detection/association (\code{lib/}); reloc driver (\code{reloc\_2016\_uf/}) \\
+Role & the self-contained end-to-end catalog + relocation pipeline & 4-picker-comparison pilot; hosts the reloc driver + PocketQuake engine (\code{lib/} DEPRECATED) \\
+Stages & detection $\rightarrow$ association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ locate $\rightarrow$ \textbf{relocate} & reloc driver (\code{reloc\_2016\_uf/}, \code{-{}-skip-build}) \\
 Driver & \code{python -m ufpipe.run\_pipeline} & (called by ufpipe's relocate stage) \\
-Ends at & HypoDD dt.cc (\S7) & feeds the relocate stage \\
+Ends at & HypoDD dt.cc (\S7) & --- \\
 \bottomrule
 \end{tabular}
 \end{center}
-ufpipe's own detection + association now cover \textbf{KS/KG/GJ/NS} with daily-chunked association (\S5). The
-\code{relocate} stage nonetheless still consumes \code{detection\_test/lib}'s per-month outputs as its feeder
-(unchanged and validated); converging relocate onto ufpipe's own association is future work. See \S7.
+ufpipe's own detection + association cover \textbf{KS/KG/GJ/NS} with daily-chunked association (\S5), and the
+\code{relocate} stage builds its inputs from those outputs (\code{ufpipe.reloc\_inputs}); it no longer consumes
+\code{detection\_test/lib}. The pipeline is fully self-contained. See \S7.
 
 \subsection{Two orthogonal ``model'' dimensions}
 \begin{center}
@@ -272,10 +273,11 @@ core.write\_phs("original", 2024); core.run\_hypoinverse\_year("original", 2024,
 \end{quote}
 
 \subsection{Relocation — running the last stage (stage 6)}
-Run the relocate stage via ufpipe (\code{-{}-stage-from relocate}); it wraps the validated year-general
-orchestrator. Its \textbf{feeder} — the per-month, KS/KG/GJ/NS detection + association — is generated separately in
-\code{detection\_test/} (the dense NS array needs daily-chunked association). If a year's feeder is missing, the
-relocate stage preflights and prints exactly what to run. The per-step feeder + reloc commands:
+The relocate stage is \textbf{self-fed}: it needs only ufpipe's own per-year detection + association
+(\code{pyocto\_kim2011\_<year>.csv} + assignment). It builds the reloc input store (event-idx SAC + station table)
+from those via \code{ufpipe.reloc\_inputs}, then hands off to the driver \code{run\_picker\_reloc.py -{}-skip-build}
+(scaffold $\rightarrow$ HYPOINVERSE $\rightarrow$ QC $\rightarrow$ rereference $\rightarrow$ GPU xcorr $\rightarrow$
+HypoDD dt.cc). If a year's association is missing, the stage preflights and prints exactly what to run.
 
 \begin{center}
 \small
@@ -283,17 +285,17 @@ relocate stage preflights and prints exactly what to run. The per-step feeder + 
 \toprule
 Step & \normalfont command \\
 \midrule
-Readiness & python preflight\_year.py -{}-year 2016 \\
-Detection & python ../lib/run\_seisbench\_picker.py -{}-model original -{}-month 2016-01 \quad\normalfont(loop months; PN+: \code{run\_pnplus\_month.py}) \\
-Association & python ../lib/associate\_daily.py -{}-picker original -{}-month 2016-01 \\
-Reloc (to QC) & python run\_picker\_reloc.py -{}-picker original -{}-year 2016 -{}-through hypoinverse \quad\normalfont(fast; SAC$\rightarrow$HYPOINVERSE$\rightarrow$QC) \\
-Reloc (full) & python run\_picker\_reloc.py -{}-picker original -{}-year 2016 -{}-through dtcc -{}-clean-cache \quad\normalfont(+ rereference$\rightarrow$xcorr$\rightarrow$HypoDD dt.cc; xcorr $\sim$6\,h dense) \\
+Detection & conda run -n eqnet python -m ufpipe.detection -{}-model original -{}-year 2016 \\
+Association & conda run -n base python -m ufpipe.association -{}-model original -{}-year 2016 \\
+Reloc (to QC) & python -m ufpipe.run\_pipeline -{}-model original -{}-years 2016 -{}-stage-from relocate -{}-through hypoinverse \quad\normalfont(fast) \\
+Reloc (full) & python -m ufpipe.run\_pipeline -{}-model original -{}-years 2016 -{}-stage-from relocate -{}-through dtcc \quad\normalfont(+ xcorr$\rightarrow$HypoDD dt.cc; $\sim$6\,h dense) \\
 \bottomrule
 \end{tabular}
 \end{center}
 \code{-{}-through hypoinverse} stops at the QC'd absolute-location subset; \code{-{}-through dtcc} continues to the
 double-difference relocation. \code{-{}-clean-cache} deletes the $\sim$tens-of-GB interp cache after dt.cc
-(essential for multi-year runs). Full detail: \code{PIPELINE.md} + \code{study\_guide.pdf}.
+(essential for multi-year runs). \code{detection\_test/lib/} is DEPRECATED (see \code{lib/DEPRECATED.md}); the
+relocation internals are documented in \code{reloc\_2016\_uf/PIPELINE.md} + \code{study\_guide.pdf}.
 
 %================================================================================
 \section{Outputs \& layout}

@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+# DEPRECATED (2026-07): superseded by src/ufpipe/reloc_inputs.py, which builds this store from ufpipe's OWN
+# per-year detection+association (no detection_test/lib per-month feeder). ufpipe.relocate calls that and runs
+# run_picker_reloc.py --skip-build. This script is used only when --skip-build is absent. See lib/DEPRECATED.md.
 """Build the 2016 UF-subregion event-idx-keyed SAC store (whole-box relocation input), PER PICKER.
 
 Reuses data/hypoinv/event_sac_export.py unchanged (multi-archive handled via the symlinked merged_archive),

@@ -134,8 +134,9 @@ KIM2011 = dict(depth=[0.00, 7.29, 20.70, 31.30],
                vp=[5.63, 6.17, 6.58, 7.77],
                vs=[3.40, 3.60, 3.70, 4.45])
 
-# label embedded in pyocto_<label>_<year>.csv (the PyOcto layered velocity model)
-PYOCTO_VELMODEL = "kim1983"
+# label embedded in pyocto_<label>_<year>.csv — the velocity model the (daily-chunked) associator uses.
+# kim2011 since the daily associator builds config.KIM2011 (was kim1983 in the deprecated whole-year path).
+PYOCTO_VELMODEL = ASSOC_VELMODEL      # "kim2011"
 
 # -------------------------------------------------- HYPOINVERSE crustal model
 DEFAULT_VELMODEL = "kim2011"          # which crustal model UF<year>.sh used

@@ -17,10 +17,12 @@ Detection (PhaseNet)  ->  Association (PyOcto, strict)  ->  Pick augmentation  -
 ```
 
 **Stages** (from `src/ufpipe/run_pipeline.py`): `detection` → `association` → `augment` → `phs` → `locate` →
-`relocate`. ufpipe is **end-to-end through HypoDD dt.cc**: the 6th `relocate` stage (`src/ufpipe/relocate.py`)
-is a thin wrapper that preflights the per-month feeder and invokes the validated
-`detection_test/reloc_2016_uf/run_picker_reloc.py` (external 15.PocketQuake HypoDD/xcorr engine, HypoDD v2.1beta).
-Run: `python -m ufpipe.run_pipeline --model <p> --years <Y> --stage-from relocate --through dtcc`.
+`relocate`. ufpipe is **end-to-end through HypoDD dt.cc and fully SELF-FED**: the 6th `relocate` stage
+(`src/ufpipe/relocate.py`) builds its inputs (event-idx SAC store + per-year pyocto + multi-network station table)
+from ufpipe's OWN detection+association via `src/ufpipe/reloc_inputs.py`, then hands off to the downstream driver
+`detection_test/reloc_2016_uf/run_picker_reloc.py --skip-build` (scaffold → HYPOINVERSE → QC → GPU xcorr → HypoDD
+v2.1beta; the external 15.PocketQuake engine). Run: `python -m ufpipe.run_pipeline --model <p> --years <Y>
+--stage-from relocate --through dtcc`.
 
 **Networks — ufpipe detection + association cover KS/KG/GJ/NS** (2026-07). The per-year multi-network station
 table is built by `src/ufpipe/stations.py` (KS/KG from StationXML, NS from GHBSN with `N003a→N003`, GJ from the
@@ -29,8 +31,12 @@ carries an `archive` (KS_KG/ · GJ/ · NS_100hz/ mirror for speed); detection gl
 `archive/<sta>/<band>?.D/*.{Y}.{doy}`. Coverage timeline is automatic: 2010 = KS/KG only, 2016 adds GJ, 2017+
 adds the dense NS array. **Association is daily-chunked** (`config.ASSOC_*`, kim2011, ±150 s/day, in-day origins)
 — required because a whole-year single-pass associate is intractable on the ~200-station NS array. Restrict with
-`--networks`. The `relocate` stage still consumes `detection_test/lib`'s per-month outputs (feeder unchanged);
-converging it onto ufpipe's own association is future work.
+`--networks`. GOTCHA: KG.MKL (and other) 2010 station-days have **corrupt Steim2 records** → obspy
+`InternalMSEEDWarning` ("Data integrity check for Steim2 failed"); the reader collapses these to one summary line
+per station-day and reads anyway (data returned, checksum unverified). **`detection_test/lib` is now DEPRECATED**
+(see `detection_test/lib/DEPRECATED.md`): ufpipe's own detection+association feed the relocate stage — the old
+per-month lib feeder + `build_sac_and_pyocto.py` are no longer used. Only the downstream reloc driver
+(`reloc_2016_uf/run_picker_reloc.py`, run with `--skip-build`) + the PocketQuake engine remain live.
 
 **PyOcto assignment (after augmentation) is the source of truth for which (station, phase) tuples belong to each event.**
 The legacy time-window pick dump in `HypoInv/event_waveforms_*/*_picks.csv` was a recipe for

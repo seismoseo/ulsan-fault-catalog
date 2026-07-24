@@ -10,6 +10,7 @@ Stages:  detection -> association -> PHS -> HYPOINVERSE
 import os
 import sys
 import glob
+import warnings
 import concurrent.futures
 import multiprocessing
 
@@ -19,6 +20,32 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
 import stations as _stations
+
+
+def _read_mseed_quiet(paths, label):
+    """obspy.read one or more mSEED files, collapsing libmseed Steim2 integrity warnings into a single
+    concise per-station-day summary. These warnings ('Data integrity check for Steim2 failed') flag
+    individual CORRUPT records in the archive (e.g. KG.MKL 2010): the samples are still returned, so we
+    read anyway but report the count so the corruption stays visible for QC instead of spamming the log.
+    Returns (Stream or None, n_integrity_warnings)."""
+    from obspy import read
+    try:
+        from obspy.io.mseed import InternalMSEEDWarning
+    except Exception:                                    # pragma: no cover
+        InternalMSEEDWarning = Warning
+    if isinstance(paths, str):
+        paths = [paths]
+    stream = None
+    n_warn = 0
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", InternalMSEEDWarning)
+        for p in paths:
+            s = read(p)
+            stream = s if stream is None else stream + s
+        n_warn = sum(1 for w in caught if issubclass(w.category, InternalMSEEDWarning))
+    if n_warn:
+        print(f"  . [{label}] {n_warn} Steim2 integrity warning(s) — corrupt record(s) in the archive, read anyway")
+    return stream, n_warn
 
 
 # ============================================================ detection (1)
@@ -44,16 +71,13 @@ def preprocess_station(row, jday):
     components from archive/<sta>/<band>?.D/. Ported from 01.Run_multi-station_detection: interpolate
     to 100 Hz, merge, pad-trim, demean/taper, bandpass, trim back. Returns a Stream or None.
     """
-    from obspy import read
     import config as cfg
     code = row["sta"]
     try:
         files = _day_files(row, jday)
         if not files:
             return None
-        stream = read(files[0])
-        for f in files[1:]:
-            stream += read(f)
+        stream, _ = _read_mseed_quiet(files, f"{code} {jday}")
         if not stream:
             return None
         # Heavily-fragmented station-days (tens of thousands of short contiguous records,
@@ -289,15 +313,25 @@ def _make_antialias_dataset_cls():
         def read_mseed(self, fname, response_path=None, response_xml=None,
                        highpass_filter=False, sampling_rate=100):
             try:
+                from obspy.io.mseed import InternalMSEEDWarning
+            except Exception:
+                InternalMSEEDWarning = Warning
+            try:
                 stream = obspy.Stream()
-                for tmp in fname.split(","):
-                    with fsspec.open(tmp, "rb") as fs:
-                        meta = obspy.read(fs, format="MSEED")
-                        if response_path is not None:
-                            inv = obspy.read_inventory(
-                                os.path.join(response_path, meta[0].id[:-1]) + ".xml")
-                            meta = meta.remove_sensitivity(inv)
-                        stream += meta
+                with warnings.catch_warnings(record=True) as _caught:
+                    warnings.simplefilter("always", InternalMSEEDWarning)
+                    for tmp in fname.split(","):
+                        with fsspec.open(tmp, "rb") as fs:
+                            meta = obspy.read(fs, format="MSEED")
+                            if response_path is not None:
+                                inv = obspy.read_inventory(
+                                    os.path.join(response_path, meta[0].id[:-1]) + ".xml")
+                                meta = meta.remove_sensitivity(inv)
+                            stream += meta
+                    _nmw = sum(1 for w in _caught if issubclass(w.category, InternalMSEEDWarning))
+                if _nmw:                                  # corrupt Steim2 record(s) in the archive; read anyway
+                    print(f"  . [{os.path.basename(fname.split(',')[0])}] {_nmw} Steim2 integrity warning(s) "
+                          f"— corrupt record(s), read anyway")
                 # UNIFY sampling rate BEFORE merge: some GJ/NS station-days carry a mid-day rate change
                 # (e.g. 1000->200 Hz native SAC), and merge() refuses traces with the same id at differing
                 # rates. Anti-alias + interpolate every trace to `sampling_rate` first, then merge cleanly.

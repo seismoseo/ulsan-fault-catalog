@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# DEPRECATED (2026-07): superseded by ufpipe.association (daily-chunked, in ufpipe/core.py). See DEPRECATED.md.
 """Daily-chunked PyOcto association — required for the DENSE network.
 
 On the 241-station array with a 0.2 pick threshold, a month is ~1.9M picks; PyOcto's whole-month octree

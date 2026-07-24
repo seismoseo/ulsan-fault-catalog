@@ -87,6 +87,11 @@ def main():
                          "speed-cache, ~tens of GB/picker) — recommended for long multi-year runs")
     ap.add_argument("--link-only", action="store_true",
                     help="don't run anything; just (re)create the results/ symlinks for a completed run")
+    ap.add_argument("--skip-build", action="store_true",
+                    help="skip step 1 (SAC store + pyocto year files) — the caller (ufpipe.relocate) already "
+                         "built the reloc inputs from ufpipe's own detection+association (src/ufpipe/reloc_inputs.py). "
+                         "The deprecated in-tree build_sac_and_pyocto.py (per-month detection_test/lib feeder) is "
+                         "used only when this flag is absent.")
     YP.add_year_arg(ap)
     a = ap.parse_args()
     p = a.picker; yr = a.year
@@ -100,7 +105,10 @@ def main():
     print(f"=== {yr} {p}: slug {slug}, qc {slug_qc} ===", flush=True)
 
     # 1-2: SAC store + pyocto year files + catalog_kma/members (all UF-box)
-    run([PY, os.path.join(HERE, "build_sac_and_pyocto.py"), "--picker", p, "--year", str(yr)], HERE)
+    # Step 1 (SAC store + pyocto year files) is now built by ufpipe.relocate via src/ufpipe/reloc_inputs.py
+    # from ufpipe's OWN detection+association; --skip-build skips the deprecated per-month detection_test/lib path.
+    if not a.skip_build:
+        run([PY, os.path.join(HERE, "build_sac_and_pyocto.py"), "--picker", p, "--year", str(yr)], HERE)
     run([PY, os.path.join(HERE, "build_catalog_kma.py"), "--picker", p, "--year", str(yr)], HERE)
     # 3: scaffold + stage + HypoInverse (kim2011) on ALL UF-box events -> .sum for QC
     run([PY, os.path.join(HERE, "scaffold_2016.py"), "--slug", slug,

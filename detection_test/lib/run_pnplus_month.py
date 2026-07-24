@@ -1,5 +1,8 @@
 #!/usr/bin/env python
-"""Month picking with PhaseNet+ (EQNet), parameterized by --month.
+"""DEPRECATED (2026-07): superseded by `python -m ufpipe.detection --model phasenet_plus --year <Y>`.
+See detection_test/lib/DEPRECATED.md.
+
+Month picking with PhaseNet+ (EQNet), parameterized by --month.
 
 USAGE (env: eqnet, GPU auto):
     conda run -n eqnet python run_pnplus_month.py --month 2021-09

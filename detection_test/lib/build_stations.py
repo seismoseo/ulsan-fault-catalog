@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# DEPRECATED (2026-07): superseded by ufpipe/stations.py (build_year_table). See detection_test/lib/DEPRECATED.md.
 """Build the station table + truth catalogs for a benchmark month (parameterized).
 
     python build_stations.py --month 2014-09     # KS/KG early network (NS not yet deployed)

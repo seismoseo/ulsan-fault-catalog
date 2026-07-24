@@ -1,5 +1,8 @@
 #!/usr/bin/env python
-"""Month picking with a SeisBench picker (parameterized by --month).
+"""DEPRECATED (2026-07): superseded by `python -m ufpipe.detection --model <picker> --year <Y>`.
+See detection_test/lib/DEPRECATED.md.
+
+Month picking with a SeisBench picker (parameterized by --month).
 
 USAGE (env: base, GPU auto):
     python run_seisbench_picker.py --model original --month 2021-09    # PhaseNet original (NCEDC-trained)
