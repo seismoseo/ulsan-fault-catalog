@@ -16,7 +16,12 @@ Detection (PhaseNet)  ->  Association (PyOcto, strict)  ->  Pick augmentation  -
    picks CSV               events + assignments              augmented assignments    UF<year>.{sum,arc}              Heo 2024 + Sheen 2018 ML       uf_subregion dt.cc reloc (§ below)
 ```
 
-**Stages** (from `src/ufpipe/run_pipeline.py`): `detection` → `association` → `augment` → `phs` → `locate`.
+**Stages** (from `src/ufpipe/run_pipeline.py`): `detection` → `association` → `augment` → `phs` → `locate` →
+`relocate`. ufpipe is now **end-to-end through HypoDD dt.cc**: the 6th `relocate` stage (`src/ufpipe/relocate.py`)
+is a thin wrapper that preflights the per-month feeder and invokes the validated
+`detection_test/reloc_2016_uf/run_picker_reloc.py` (which drives the external 15.PocketQuake HypoDD/xcorr engine,
+HypoDD v2.1beta). Run: `python -m ufpipe.run_pipeline --model <p> --years <Y> --stage-from relocate --through dtcc`.
+The relocate stage feeds on `detection_test/lib`'s per-month KS/KG/GJ/NS association (NOT ufpipe's whole-year one).
 
 **PyOcto assignment (after augmentation) is the source of truth for which (station, phase) tuples belong to each event.**
 The legacy time-window pick dump in `HypoInv/event_waveforms_*/*_picks.csv` was a recipe for

@@ -1,16 +1,21 @@
 """CLI: orchestrate the full catalog pipeline over one or more years.
 
-Stages, in order:  detection -> association -> phs -> locate
+Stages, in order:  detection -> association -> augment -> phs -> locate -> relocate
 
 Examples:
-  # one year, end to end
-  python run_pipeline.py --model original --years 2024
+  # one year, end to end (detection ... HYPOINVERSE)
+  python -m ufpipe.run_pipeline --model original --years 2024
   # the whole record
-  python run_pipeline.py --model original --years 2010-2024
+  python -m ufpipe.run_pipeline --model original --years 2010-2024
   # resume from association (picks already exist)
-  python run_pipeline.py --model original --years 2015,2016 --stage-from association
+  python -m ufpipe.run_pipeline --model original --years 2015,2016 --stage-from association
+  # relocation only (HypoDD dt.ct + dt.cc) on an already-located year
+  python -m ufpipe.run_pipeline --model original --years 2016 --stage-from relocate --through dtcc
   # quick plumbing test
-  python run_pipeline.py --model original --years 2024 --days 1-3
+  python -m ufpipe.run_pipeline --model original --years 2024 --days 1-3
+
+NOTE the `relocate` stage feeds on the per-month, per-picker association produced by detection_test/lib
+(KS/KG/GJ/NS, daily-chunked), NOT ufpipe's whole-year pyocto catalog. See src/ufpipe/relocate.py.
 """
 import os
 import sys
@@ -20,8 +25,9 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core
 import config
+import relocate
 
-STAGES = ["detection", "association", "augment", "phs", "locate"]
+STAGES = ["detection", "association", "augment", "phs", "locate", "relocate"]
 
 
 def parse_years(s):
@@ -57,6 +63,10 @@ def main():
     ap.add_argument("--force", action="store_true", help="allow writing into model='stead'")
     ap.add_argument("--strict", action="store_true",
                     help="use config.REGION_STRICT for PyOcto association (Stage-2 tighter params)")
+    ap.add_argument("--through", default="dtcc", choices=["hypoinverse", "dtcc"],
+                    help="relocate stage: stop at QC'd absolute location (hypoinverse) or full dt.cc (default)")
+    ap.add_argument("--clean-cache", action="store_true",
+                    help="relocate stage: delete the interp cache after dt.cc (recommended for multi-year runs)")
     a = ap.parse_args()
 
     stages = STAGES[STAGES.index(a.stage_from):]
@@ -77,6 +87,8 @@ def main():
                 core.write_phs(a.model, yr, force=a.force)
             if "locate" in stages:
                 core.run_hypoinverse_year(a.model, yr, velmodel=a.velmodel, force=a.force)
+            if "relocate" in stages:
+                relocate.run_relocate_year(a.model, yr, through=a.through, clean_cache=a.clean_cache)
             summary.append((yr, "OK"))
         except Exception as e:
             traceback.print_exc()
