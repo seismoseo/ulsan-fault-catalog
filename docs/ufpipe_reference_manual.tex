@@ -37,7 +37,7 @@
 \begin{center}
 {\huge\bfseries\sffamily\color{accent} Ulsan-Fault earthquake catalog pipeline}\\[2mm]
 {\large\sffamily Reference manual: detection $\rightarrow$ association $\rightarrow$ location $\rightarrow$ relocation (HypoDD dt.ct + dt.cc)}\\[2mm]
-{\small\color{soft} Long-term (2010–present) catalog for the Ulsan Fault, SE Korea\hfill \code{src/ufpipe} + \code{detection\_test}}
+{\small\color{soft} Long-term (2010–present) catalog for the Ulsan Fault, SE Korea\hfill rev.\ 2026-07-24 · \code{src/ufpipe}}
 \end{center}
 \vspace{1mm}\hrule\vspace{3mm}
 
@@ -110,13 +110,18 @@ weights; \code{phasenet\_plus} is EQNet PhaseNet+ (needs a local EQNet clone).
 %================================================================================
 \section{Install \& environment}
 
+The pipeline runs in a \textbf{two-env split} on this server (there is no single ``ulsan'' env):
+detection (PhaseNet+/SeisBench, torch) in \code{eqnet} (Py 3.9); association (PyOcto) + orchestration in
+\code{base} (Py 3.12); the relocate stage's GPU xcorr shells out to \code{pq-gpu} internally.
+
 \begin{keybox}{One-time setup}
 \begin{enumerate}[leftmargin=6mm,itemsep=0.5mm]
-\item \code{conda env create -f environment.yml \&\& conda activate ulsan} \hfill(the code also runs in \code{base} here)
-\item \code{pip install torch -{}-index-url https://download.pytorch.org/whl/cu128} \hfill(match your CUDA; GPU strongly recommended)
-\item \code{pip install -e .} \hfill(installs the \code{uflib} + \code{ufpipe} packages, editable)
+\item \code{conda run -n eqnet pip install -e . -{}-no-deps} \hfill(detection env)
+\item \code{conda run -n base~ pip install -e . -{}-no-deps} \hfill(association/orchestration env)
 \item \textbf{HYPOINVERSE}: the external \code{hyp1.40} binary must be on \code{PATH} (not pip-installable).
 \item \textbf{PhaseNet+ only}: a local EQNet clone at \code{config.EQNET\_DIR}.
+\item \textbf{Fresh machine}: \code{conda env create -f environment.yml} (env \code{uf-catalog}), then install the
+      torch build matching your CUDA (\code{pip install torch -{}-index-url https://download.pytorch.org/whl/cu128}).
 \end{enumerate}
 \end{keybox}
 
@@ -210,8 +215,9 @@ reloc feeder. Output schema (events \code{idx,time,x,y,z,picks,latitude,longitud
 consume it as before.
 
 \subsection{Velocity model \& location}
-\code{DEFAULT\_VELMODEL = kim2011}; \code{kim1983} also available (\code{data/metadata/velocity\_model/kim1983.csv},
-a layered $V_p$/$V_s$ model). \code{PHASE\_CHANNELS = \{P: HHZ, S: HHN\}}.
+\code{DEFAULT\_VELMODEL = kim2011}; \code{kim1983} also available (\code{data/metadata/velocity/kim1983.csv},
+a layered $V_p$/$V_s$ model; HYPOINVERSE \code{*.crh} tables live in \code{data/hypoinv/\{kim1983,kim2011\}/}).
+\code{PHASE\_CHANNELS = \{P: HHZ, S: HHN\}}.
 
 %================================================================================
 \section{How to run}
@@ -313,13 +319,18 @@ Path & Contents \\
 \code{.../station\_table/stations\_\{year\}.csv} & per-year station roster (discovered from metadata) \\
 \code{.../HypoInv/PHS/UF\{year\}.phs} & HYPOINVERSE phase file (stage 4) \\
 \code{.../HypoInv/\{vm\}/UF\{year\}.\{sum,arc,prt\}} & located catalog + errors (stage 5) \\
+\code{detection\_test/reloc\_\{year\}\_uf[\_\{model\}]/results/} & dt.cc-relocated catalog + links (stage 6) \\
 \bottomrule
 \end{tabular}
 \end{center}
+\noindent \code{\{vm\}} = \code{config.PYOCTO\_VELMODEL} = \textbf{kim2011} for current daily-chunked runs;
+legacy pre-2026-07 whole-year artifacts on disk are named \code{kim1983}.
 
-\noindent\textbf{Inputs} (restructured 2026-07): waveforms in \code{KS\_KG/} (station dirs at root, parallel to
-\code{GJ/},\code{NS/}); station metadata in \code{data/metadata/ks\_kg\_station\_table/}; velocity model in
-\code{data/metadata/velocity\_model/}; HYPOINVERSE control inputs (STA/\code{kim*}) in \code{data/hypoinv/}.
+\medskip
+\noindent\textbf{Inputs} (metadata by kind, 2026-07): waveforms in \code{KS\_KG/ GJ/ NS/ NS\_100hz/} (station
+dirs at each root); station tables in \code{data/metadata/stations/\{ks\_kg,gj,ns,kigam\}/} (+ the per-year
+derived cache \code{stations/derived/}); instrument responses in \code{data/metadata/responses/}; velocity
+model in \code{data/metadata/velocity/}; HYPOINVERSE control inputs (STA/\code{kim*}) in \code{data/hypoinv/}.
 
 %================================================================================
 \section{Stage 6: relocation — HypoDD dt.ct + dt.cc}
@@ -331,10 +342,11 @@ for sub-100\,m relative precision.
 python -m ufpipe.run\_pipeline -{}-model original -{}-years 2016 -{}-stage-from relocate -{}-through dtcc -{}-clean-cache
 \end{quote}
 
-\code{ufpipe.relocate} (\code{src/ufpipe/relocate.py}) is a \emph{thin wrapper}: it preflights the per-month feeder
-inputs then invokes the validated orchestrator \code{detection\_test/reloc\_2016\_uf/run\_picker\_reloc.py}, which
-drives the external HypoDD/xcorr engine. Internal stages (after the per-month detection + association feeder,
-KS/KG/GJ/NS):
+\code{ufpipe.relocate} (\code{src/ufpipe/relocate.py}) is \emph{self-fed}: it preflights ufpipe's OWN per-year
+association, builds the reloc inputs from it (\code{ufpipe.reloc\_inputs} --- SAC store, pyocto tables, station
+table, merged archive), then invokes the validated orchestrator
+\code{detection\_test/reloc\_2016\_uf/run\_picker\_reloc.py -{}-skip-build}, which drives the external
+HypoDD/xcorr engine. Internal stages (all KS/KG/GJ/NS):
 
 \begin{center}
 \small
@@ -390,12 +402,16 @@ stead} writes unless \code{-{}-force}.
 \toprule
 Symptom & Check \\
 \midrule
-Detection finds no waveforms & \code{python -c "import ufpipe.config as c,os; print(c.CONTINUOUS, os.path.isdir(c.CONTINUOUS))"} --- must point at \code{KS\_KG/} and exist. \\
-\code{ImportError: ufpipe} / \code{uflib} & \code{pip install -e .} in the active env; \code{import ufpipe.config; print(\_\_file\_\_)} must be \code{src/ufpipe}. \\
+Detection finds no waveforms & \code{python -c "import ufpipe.stations as s; print(s.build\_year\_table(YEAR).net.value\_counts())"} --- the per-year multi-network table must list stations, and each row's \code{archive} dir must exist. \\
+\code{ImportError: ufpipe} / \code{uflib} & \code{pip install -e . -{}-no-deps} in \textbf{both} \code{eqnet} and \code{base}; \code{import ufpipe.config; print(\_\_file\_\_)} must be \code{src/ufpipe}. \\
+\code{ModuleNotFoundError: pyocto} & you ran association in \code{eqnet} --- PyOcto lives in \code{base}. Detection $\to$ \code{eqnet}; association $\to$ \code{base}. \\
+\code{InternalMSEEDWarning: ...Steim2 failed} & corrupt Steim2 record(s) in the archive (e.g.\ KG.MKL 2010): the samples still decode; the reader collapses the per-record spam into one summary line per station-day and reads anyway. Informational --- the named station-days are the QC signal. \\
+GJ/NS station silently yields no picks & mid-day sampling-rate changes (100/200/1000\,Hz) and int32/float64 records refuse to merge --- handled since 2026-07 (rate + dtype unified \emph{before} merge in both readers). \\
+\code{relocate} aborts at preflight & ufpipe's own per-year association is missing for that (model, year) --- run \code{ufpipe.detection} (eqnet) then \code{ufpipe.association} (base); the preflight prints the exact commands. \\
 Wrong \code{pipeline} imported & \code{ufpipe} is renamed precisely to avoid the collision with the external korea-cluster-relocation \code{pipeline}. Verify \code{ufpipe.config.\_\_file\_\_} is under \code{src/}. \\
-Events look over/under-associated & compare \code{REGION} vs \code{-{}-strict}; the \code{pick\_match\_tolerance} is the primary knob. \\
+Events look over/under-associated & \code{ASSOC\_GATE} vs \code{-{}-strict} (\code{ASSOC\_GATE\_STRICT}); \code{ASSOC\_PICK\_MATCH\_TOL} is the primary knob. \\
 GPU not used & inference is GPU-preferred and warns loudly; check the torch/CUDA install (never silently CPU). \\
-Sparse early years, few events & expected --- KS/KG-only network (2010–2016) has larger azimuthal gaps; the QC gate honestly reflects what the network resolves. \\
+Sparse early years, few events & expected --- KS/KG-only network (2010--2015) has larger azimuthal gaps; GJ joins 2016, the dense NS array 2017+; the QC gate honestly reflects what the network resolves. \\
 \bottomrule
 \end{tabular}
 \end{center}
