@@ -35,16 +35,18 @@
 \begin{document}
 
 \begin{center}
-{\huge\bfseries\sffamily\color{accent} ufpipe — Ulsan-Fault catalog pipeline}\\[2mm]
-{\large\sffamily Reference manual: detection $\rightarrow$ association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ HYPOINVERSE}\\[2mm]
-{\small\color{soft} Long-term (2010–present) earthquake catalog for the Ulsan Fault, SE Korea\hfill package \code{src/ufpipe}}
+{\huge\bfseries\sffamily\color{accent} Ulsan-Fault earthquake catalog pipeline}\\[2mm]
+{\large\sffamily Reference manual: detection $\rightarrow$ association $\rightarrow$ location $\rightarrow$ relocation (HypoDD dt.ct + dt.cc)}\\[2mm]
+{\small\color{soft} Long-term (2010–present) catalog for the Ulsan Fault, SE Korea\hfill \code{src/ufpipe} + \code{detection\_test}}
 \end{center}
 \vspace{1mm}\hrule\vspace{3mm}
 
-{\small This manual documents the \code{ufpipe} package (\code{src/ufpipe}) — the automated pipeline that turns
-continuous waveforms into a located earthquake catalog. The related \emph{relocation / picker-comparison} pipeline
-(\code{detection\_test/}) has its own guide: \code{detection\_test/reloc\_2016\_uf/PIPELINE.md} +
-\code{study\_guide.pdf}.}
+{\small The full workflow is \textbf{two pipelines} that share the same method. \textbf{(A)} the \code{ufpipe}
+package (\code{src/ufpipe}) builds the \emph{long-term absolute-location catalog} (detection$\rightarrow$
+association$\rightarrow$HYPOINVERSE). \textbf{(B)} the \code{detection\_test} pipeline takes it the last step to
+\emph{double-difference relocation} (HYPOINVERSE$\rightarrow$QC$\rightarrow$HypoDD dt.ct$+$dt.cc), and also runs the
+4-picker comparison. This manual covers \textbf{both}, end to end. The relocation pipeline additionally has a
+dedicated guide (\code{detection\_test/reloc\_2016\_uf/PIPELINE.md} + \code{study\_guide.pdf}).}
 
 \tableofcontents
 \vspace{3mm}\hrule
@@ -54,16 +56,36 @@ continuous waveforms into a located earthquake catalog. The related \emph{reloca
 
 Build an \textbf{internally consistent, long-term earthquake catalog} for the Ulsan Fault region (SE Korea),
 2010–present, from continuous seismic waveforms, using AI phase pickers so small events are detected uniformly
-even as the recording network grows. Every stage is scripted and parameterized; results are reproducible.
+even as the recording network grows, and finally \textbf{relocate} the catalog with double-difference (HypoDD
+dt.ct + dt.cc) for sub-100\,m relative precision. Every stage is scripted and parameterized; results reproducible.
 
 \begin{center}
 \small
-\begin{tabular}{@{}cccc@{}}
-\textbf{Detection} & \textbf{Association} & \textbf{Location} & \textbf{Catalog} \\
-PhaseNet / PhaseNet+ & PyOcto (+augment) & HYPOINVERSE & located events \\
-\emph{picks per station-day} $\rightarrow$ & \emph{events + assignments} $\rightarrow$ & \emph{PHS $\rightarrow$ .sum/.arc} $\rightarrow$ & \emph{UF\{year\}.sum} \\
+\begin{tabular}{@{}ccccc@{}}
+\textbf{Detection} & \textbf{Association} & \textbf{Location} & \textbf{QC} & \textbf{Relocation} \\
+PhaseNet / PhaseNet+ & PyOcto (+augment) & HYPOINVERSE & \code{uf\_cluster} & HypoDD dt.ct + dt.cc \\
+\emph{picks} $\rightarrow$ & \emph{events+assign} $\rightarrow$ & \emph{.sum/.arc} $\rightarrow$ & \emph{well-located} $\rightarrow$ & \emph{hypoDD.reloc} \\
 \end{tabular}
 \end{center}
+
+\subsection{Two pipelines, one workflow}
+\begin{center}
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{5.6cm}>{\raggedright\arraybackslash}p{5.7cm}@{}}
+\toprule
+ & \textbf{(A) \code{ufpipe}} (\code{src/ufpipe}) & \textbf{(B) \code{detection\_test}} \\
+\midrule
+Product & long-term absolute-location catalog & double-difference relocated catalog (+ picker comparison) \\
+Stages & detection $\rightarrow$ association $\rightarrow$ augment $\rightarrow$ PHS $\rightarrow$ locate & detection $\rightarrow$ association $\rightarrow$ HYPOINVERSE $\rightarrow$ QC $\rightarrow$ HypoDD dt.ct$+$dt.cc \\
+Networks & KS, KG & KS, KG, GJ (Gyeongju temporary array) \\
+Association & whole-year PyOcto & per-month PyOcto (daily-chunked) \\
+Driver & \code{python -m ufpipe.run\_pipeline} & \code{detection\_test/reloc\_2016\_uf/run\_picker\_reloc.py} \\
+Ends at & HYPOINVERSE (\S3--\S6) & HypoDD dt.cc (\S7) \\
+\bottomrule
+\end{tabular}
+\end{center}
+They share the same \emph{method} (same pickers, PyOcto, HYPOINVERSE, kim velocity models) but are separate code
+paths with different products. \textbf{To reach dt.cc relocation you use pipeline (B)} — see \S7.
 
 \subsection{Two orthogonal ``model'' dimensions}
 \begin{center}
@@ -97,7 +119,7 @@ After \code{pip install -e .}, \code{import ufpipe.config} and \code{python -m u
 directory — no \code{sys.path} hacks.
 
 %================================================================================
-\section{The five stages}
+\section{The catalog stages (pipeline A)}
 
 \code{STAGES = [detection, association, augment, phs, locate]} — run in order. Each is a function in
 \code{src/ufpipe/core.py}; \code{run\_pipeline.py} chains them per year.
@@ -210,6 +232,57 @@ Without pinning, PhaseNet+ grabbed $\sim$49 cores / 193 threads and starved ever
 \noindent Detection is \textbf{idempotent} — it skips station-days whose picks already exist, so runs resume
 safely after an interruption.
 
+\subsection{Running each stage separately (pipeline A)}
+Every \code{ufpipe} stage is also a standalone CLI (\code{-{}-model -{}-year}), so you can run detection alone,
+then association alone, etc. Order is \code{detection $\rightarrow$ association $\rightarrow$ augment
+$\rightarrow$ phs $\rightarrow$ locate}. Each reads the previous stage's output from disk.
+
+\begin{center}
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.4cm}>{\ttfamily\raggedright\arraybackslash}p{12.0cm}@{}}
+\toprule
+Stage & \normalfont standalone command \\
+\midrule
+Detection & python -m ufpipe.detection -{}-model original -{}-year 2024 [-{}-days 1-5] [-{}-workers 8] [-{}-device cuda] \\
+Association & python -m ufpipe.association -{}-model original -{}-year 2024 [-{}-strict] \\
+Augment & \normalfont(runs inside \code{run\_pipeline}; or call \code{core.run\_augment\_year} from Python) \\
+PHS & python -m ufpipe.make\_phs -{}-model original -{}-year 2024 \\
+Location & python -m ufpipe.run\_hypoinverse -{}-model original -{}-year 2024 -{}-velmodel kim2011 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Or drive the same stage functions from Python / a notebook:
+\begin{quote}\small\ttfamily
+from ufpipe import core, config\\
+core.run\_detection\_year("original", 2024, days=range(1,6))\\
+events, assign = core.run\_association\_year("original", 2024)\\
+core.write\_phs("original", 2024); core.run\_hypoinverse\_year("original", 2024, velmodel="kim2011")
+\end{quote}
+
+\subsection{Relocation (pipeline B) — running the last stage}
+The relocation pipeline (\code{detection\_test/}) has its own driver and its own detection/association (per-month,
+GJ-inclusive). It is \textbf{year-general} (\code{-{}-year}, default 2016). Run from
+\code{detection\_test/reloc\_2016\_uf/}:
+
+\begin{center}
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\ttfamily\raggedright\arraybackslash}p{11.5cm}@{}}
+\toprule
+Step & \normalfont command \\
+\midrule
+Readiness & python preflight\_year.py -{}-year 2016 \\
+Detection & python ../lib/run\_seisbench\_picker.py -{}-model original -{}-month 2016-01 \quad\normalfont(loop months; PN+: \code{run\_pnplus\_month.py}) \\
+Association & python ../lib/associate\_daily.py -{}-picker original -{}-month 2016-01 \\
+Reloc (to QC) & python run\_picker\_reloc.py -{}-picker original -{}-year 2016 -{}-through hypoinverse \quad\normalfont(fast; SAC$\rightarrow$HYPOINVERSE$\rightarrow$QC) \\
+Reloc (full) & python run\_picker\_reloc.py -{}-picker original -{}-year 2016 -{}-through dtcc -{}-clean-cache \quad\normalfont(+ rereference$\rightarrow$xcorr$\rightarrow$HypoDD dt.cc; xcorr $\sim$6\,h dense) \\
+\bottomrule
+\end{tabular}
+\end{center}
+\code{-{}-through hypoinverse} stops at the QC'd absolute-location subset; \code{-{}-through dtcc} continues to the
+double-difference relocation. \code{-{}-clean-cache} deletes the $\sim$tens-of-GB interp cache after dt.cc
+(essential for multi-year runs). Full detail: \code{PIPELINE.md} + \code{study\_guide.pdf}.
+
 %================================================================================
 \section{Outputs \& layout}
 
@@ -233,6 +306,43 @@ Path & Contents \\
 \noindent\textbf{Inputs} (restructured 2026-07): waveforms in \code{KS\_KG/} (station dirs at root, parallel to
 \code{GJ/},\code{NS/}); station metadata in \code{data/metadata/ks\_kg\_station\_table/}; velocity model in
 \code{data/metadata/velocity\_model/}; HYPOINVERSE control inputs (STA/\code{kim*}) in \code{data/hypoinv/}.
+
+%================================================================================
+\section{Relocation — HypoDD dt.ct + dt.cc (pipeline B)}
+
+The final step: turn the QC'd absolute-location catalog into a \textbf{double-difference relocated} catalog for
+sub-100\,m relative precision. Driven by \code{detection\_test/reloc\_2016\_uf/run\_picker\_reloc.py -{}-through
+dtcc}. Stages (after detection + association, which pipeline B runs per-month, GJ-inclusive):
+
+\begin{center}
+\small
+\begin{tabular}{@{}c>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{9.2cm}@{}}
+\toprule
+\# & Stage & What it does \\
+\midrule
+1 & SAC store & event-idx-keyed native-rate SAC waveforms from the associated picks (\code{event\_sac/}) \\
+2 & HYPOINVERSE & absolute location of all UF-box events (kim2011) $\rightarrow$ \code{.sum} \\
+3 & QC & \code{uf\_cluster.QC}: keep \code{erh$<$5, erz$<$5, gap$<$270, num$>$5, rms$<$1.0} \\
+4 & re-reference & stamp each SAC's origin from the (full-run) HYPOINVERSE \code{.sum} \\
+5 & ph2dt & build \code{event.dat} + catalog differential times \code{dt.ct} \\
+6 & xcorr (GPU) & cross-correlation differential times \code{dt.cc} (band 5--20 Hz, interp 1000 Hz, cc$\ge$0.7) \\
+7 & HypoDD & kim2011, ISTART=2, ISOLV=2 (LSQR), adaptive damping (CND 40--80) $\rightarrow$ \code{hypoDD.reloc} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{keybox}{Relocation outputs (symlinked into the working dir)}
+Each run publishes \code{detection\_test/reloc\_<year>\_uf[\_<p>]/results/} with symlinks to the external run tree:
+\code{hypoDD.reloc.dtcc} (dt.ct+dt.cc), \code{hypoDD.reloc.dtct} (dt.ct-only), \code{HypoInv.full.sum}, \dots
+``dt.cc-resolved'' = events keeping $\ge$1 surviving cross-correlation link — the highest-precision subset.
+\end{keybox}
+
+\begin{warnbox}{The invariant that matters (see PIPELINE.md)}
+Origins flow into dt.cc: \code{rereference} stamps SAC origins from a \code{.sum}, and xcorr stores
+$dt=(t_1{+}\text{shift}{-}ot_1)-(t_2{-}ot_2)$ — subtracting those origins. Use the \emph{full-run} HYPOINVERSE
+solution QC gated on (never a redundant re-run), or the dt.cc \emph{values} are corrupted. This is enforced by
+\code{run\_picker\_reloc.py::inject\_full\_hypoinverse}.
+\end{warnbox}
 
 %================================================================================
 \section{Robustness \& invariants}
