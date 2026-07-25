@@ -142,6 +142,16 @@ PYOCTO_VELMODEL = ASSOC_VELMODEL      # "kim2011"
 DEFAULT_VELMODEL = "kim2011"          # which crustal model UF<year>.sh used
 PHASE_CHANNELS = {"P": "HHZ", "S": "HHN"}
 
+# HYPOINVERSE pick-weight code (HYPO71 column 8/40) from the picker's own probability, instead of a fixed
+# P=0/S=1. Weight code 0 = full weight (best) .. 4 = zero weight (worst); HYPOINVERSE maps code k to
+# multiplier ~ (1 - k/4). Consistent with the relocation stage's phs_weight_scheme="probability".
+# PHS_WEIGHT_BINS: descending probability thresholds -> weight code. A pick with prob >= bins[k][0] gets
+# code bins[k][1] (first match wins). Anything below the last threshold -> code 4.
+PHS_WEIGHT_SCHEME = "probability"          # "probability" (default) | "phase" (legacy fixed P=0/S=1)
+PHS_WEIGHT_BINS = [(0.90, 0), (0.70, 1), (0.50, 2), (0.30, 3)]   # else -> 4
+PHS_WEIGHT_S_PENALTY = 1                   # S picks are one code worse than their probability bin
+#                                            (S onsets are intrinsically less precise; +1, capped at 4)
+
 # ------------------------------------------------ picker backends (by model)
 # SeisBench PhaseNet weights run via the default backend; EQNet PhaseNet+ runs
 # via the in-process EQNet backend (see core._run_detection_year_eqnet).

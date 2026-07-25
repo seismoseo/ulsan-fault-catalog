@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core
 import config
 import relocate
+import association as _assoc
 
 STAGES = ["detection", "association", "augment", "phs", "locate", "relocate"]
 
@@ -65,6 +66,7 @@ def main():
                     help="use config.ASSOC_GATE_STRICT for daily-chunked association (stronger constraint)")
     ap.add_argument("--networks", default=None,
                     help="comma-separated networks for detection + association (default: KS,KG,GJ,NS)")
+    _assoc.add_assoc_args(ap)      # --gate/--pick-match-tol/--overlap-s/--zlim/--center/--pads/--time-before
     ap.add_argument("--through", default="dtcc", choices=["hypoinverse", "dtcc"],
                     help="relocate stage: stop at QC'd absolute location (hypoinverse) or full dt.cc (default)")
     ap.add_argument("--clean-cache", action="store_true",
@@ -80,6 +82,7 @@ def main():
     stages = STAGES[STAGES.index(a.stage_from):]
     days = parse_days(a.days)
     networks = a.networks.split(",") if a.networks else None
+    assoc_ovr = _assoc.assoc_overrides(a)
     summary = []
 
     for yr in parse_years(a.years):
@@ -90,7 +93,8 @@ def main():
                                         workers=a.workers, force=a.force, networks=networks)
             if "association" in stages:
                 core.run_association_year(a.model, yr, force=a.force, strict=a.strict,
-                                          networks=networks, workers=(a.workers or 1))
+                                          networks=networks, workers=(a.workers or 1),
+                                          overrides=assoc_ovr)
             if "augment" in stages:
                 core.run_augment_year(a.model, yr, force=a.force)
             if "phs" in stages:

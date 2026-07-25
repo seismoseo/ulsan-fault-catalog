@@ -36,9 +36,10 @@ minutes, relocation `--through hypoinverse` ~minutes / `--through dtcc` hours (G
 
 # ---------------------------------------------------------------- parameters
 co(r'''# ============================ PARAMETERS — the single place to edit ============================
-# Every stage's knobs are HERE, explicit, with the validated defaults written out. What you set here
-# is exactly what runs: association values are applied onto ufpipe.config for this session; the QC
-# gate and xcorr values are passed to the relocation driver via --qc / --xcorr.
+# Every stage's knobs are HERE, explicit, with the validated defaults written out. What you set here is
+# exactly what runs, via the SAME mechanism as the CLI: association -> run_association_year(overrides=...);
+# QC gate + xcorr -> the relocation driver's --qc / --xcorr. Nothing is silently ignored — the cell prints
+# the effective values, and the same knobs exist as CLI flags (python -m ufpipe.association --help).
 
 # ---- run ----------------------------------------------------------------------------------
 YEAR          = 2010
@@ -100,15 +101,12 @@ import pygmt
 from ufpipe import config, core, stations, relocate
 from uflib import uf_cluster as uf
 
-# ---- apply the ASSOC block onto ufpipe.config (session-scoped; core reads config at call time) ----
-config.ASSOC_GATE           = ASSOC["gate"]
-config.ASSOC_OVERLAP_S      = ASSOC["overlap_s"]
-config.ASSOC_PICK_MATCH_TOL = ASSOC["pick_match_tol"]
-config.ASSOC_ZLIM           = ASSOC["zlim"]
-config.REGION_CENTER        = ASSOC["center"]
-config.ASSOC_LAT_PAD        = ASSOC["lat_pad"]
-config.ASSOC_LON_PAD        = ASSOC["lon_pad"]
-config.ASSOC_TIME_BEFORE    = ASSOC["time_before"]
+# ---- association overrides dict (the SAME mechanism the CLI uses: run_association_year(overrides=...)).
+# Passed explicitly -> genuinely takes effect and never mutates config globals. ----
+ASSOC_OVERRIDES = dict(gate=ASSOC["gate"], overlap_s=ASSOC["overlap_s"],
+                       pick_match_tol=ASSOC["pick_match_tol"], zlim=ASSOC["zlim"],
+                       center=ASSOC["center"], lat_pad=ASSOC["lat_pad"], lon_pad=ASSOC["lon_pad"],
+                       time_before=ASSOC["time_before"])
 
 # ---- serialize the QC + XCORR blocks for the relocation driver (--qc / --xcorr) ----
 QC_STR    = ",".join(f"{k}={v}" for k, v in QC_GATE.items())
@@ -132,9 +130,9 @@ SUM_PATH = os.path.join(config.MODELS, MODEL, "HypoInv", VELMODEL, f"UF{YEAR}.su
 print(f"YEAR={YEAR}  MODEL={MODEL}  VELMODEL={VELMODEL}  RELOC_THROUGH={RELOC_THROUGH}")
 print(f"detection : MIN_PROB={MIN_PROB}  HIGHPASS={HIGHPASS}  NETWORKS={NETWORKS or 'KS,KG,GJ,NS'}  "
       f"(SeisBench P/S={config.P_THRESHOLD}/{config.S_THRESHOLD})")
-print(f"assoc     : gate={config.ASSOC_GATE}  overlap={config.ASSOC_OVERLAP_S}s  tol={config.ASSOC_PICK_MATCH_TOL}s")
-print(f"            area={config.REGION_CENTER} +/-({config.ASSOC_LAT_PAD},{config.ASSOC_LON_PAD}) deg  "
-      f"z={config.ASSOC_ZLIM} km  velocity={config.ASSOC_VELMODEL}")
+print(f"assoc     : gate={ASSOC['gate']}  overlap={ASSOC['overlap_s']}s  tol={ASSOC['pick_match_tol']}s")
+print(f"            area={ASSOC['center']} +/-({ASSOC['lat_pad']},{ASSOC['lon_pad']}) deg  "
+      f"z={ASSOC['zlim']} km  velocity={config.ASSOC_VELMODEL}")
 print(f"QC gate   : {QC_GATE}")
 print(f"xcorr     : {XCORR}")
 print(f"reloc dir : {RELOC_ROOT}")''')
@@ -192,7 +190,8 @@ ax.legend(ncol=4, loc="upper left"); plt.tight_layout(); plt.show()''')
 md(r"""## Stage 2 — association (in-kernel, daily-chunked PyOcto, kim2011)
 
 Returns the events + assignments directly for immediate inspection.""")
-co(r'''EV, ASG = core.run_association_year(MODEL, YEAR, networks=networks, workers=ASSOC_WORKERS)
+co(r'''EV, ASG = core.run_association_year(MODEL, YEAR, networks=networks, workers=ASSOC_WORKERS,
+                                    overrides=ASSOC_OVERRIDES)
 print(f"events: {len(EV):,}   assigned picks: {len(ASG):,}")''')
 co(r'''# ---- check: picks/event, timeline ----
 EV2 = pd.read_csv(config.pyocto_events(MODEL, YEAR), parse_dates=["time"])

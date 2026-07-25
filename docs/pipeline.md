@@ -53,12 +53,17 @@ outputs/reloc/reloc_<year>_uf[_<model>]/results/          (hypoDD.reloc.dtcc —
 - **Why daily-chunked**: a whole-year single-pass associate is intractable on the dense ~200-station NS array
   (>>1 h, 12 GB). Associating a ±`ASSOC_OVERLAP_S` (150 s) window per day and keeping only events whose origin
   is in-day (dedup) keeps each solve to seconds and is physically equivalent — local events are seconds long.
-- **Region/gate** (`config`): area = `REGION_CENTER` (35.856, 129.224) ± (`ASSOC_LAT_PAD`=1.0, `ASSOC_LON_PAD`
-  =1.2)°, depth (0, 30) km, `time_before=300`, gate `ASSOC_GATE` = {n_picks 4, n_p 2, n_s 2, n_ps 1}
-  (`--strict` → `ASSOC_GATE_STRICT` = {6, 3, 3, 2}).
+- **Region/gate** (`config` defaults, all overridable per run): area = `REGION_CENTER` (35.856, 129.224) ±
+  (`ASSOC_LAT_PAD`=1.0, `ASSOC_LON_PAD`=1.2)°, depth (0, 30) km, `time_before=300`, `pick_match_tol=1.5`,
+  gate `ASSOC_GATE` = {n_picks 4, n_p 2, n_s 2, n_ps 1} (`--strict` → `ASSOC_GATE_STRICT` = {6, 3, 3, 2}).
+- **Override flags** (same on `association.py` and `run_pipeline.py`; notebook sets them via `overrides=`):
+  `--gate n_picks=…,n_p=…,n_s=…,n_ps=…`, `--pick-match-tol`, `--overlap-s`, `--zlim Z0,Z1`,
+  `--center LAT,LON`, `--lat-pad`, `--lon-pad`, `--time-before`. Any omitted flag falls back to config.
 - **Velocity model**: kim2011 1-D (`config.KIM2011`), matching the reloc feeder.
 - **Stations**: coordinates come from the **multi-network year table** (`src/ufpipe/stations.py`) covering
   **KS/KG/GJ/NS** — so GJ/NS picks associate (KS/KG-only `station_update.dat` is no longer the source).
+  A picked code missing from the table but present as `<code>2` (e.g. `BUS`→`BUS2`, `DAG`→`DAG2` — same
+  station, renamed code) is **aliased** onto the table code so its arrivals are used, not dropped.
 - **Output** (schema unchanged): `pyocto_kim2011_<year>.csv` (events: `idx,time,x,y,z,picks,latitude,longitude,
   depth`) + `pyocto_assignment_kim2011_<year>.csv` (`event_idx,pick_idx,residual,station,phase,time`), plus
   `stations_<year>.csv` under the model's `station_table/`.
@@ -67,6 +72,12 @@ outputs/reloc/reloc_<year>_uf[_<model>]/results/          (hypoDD.reloc.dtcc —
 
 - Converts PyOcto events+assignments into a **HYPO71 fixed-width `.phs`** file (P→`HHZ`/`IP`,
   S→`HHN`/`ES`), one block per event. Layout ported verbatim from the original notebook.
+- **Pick weighting** (`config.PHS_WEIGHT_SCHEME`, default `"probability"`): the HYPOINVERSE weight code
+  (0 = full weight … 4 = zero) is set from the **picker's own probability** via `PHS_WEIGHT_BINS`
+  (`≥0.90→0, ≥0.70→1, ≥0.50→2, ≥0.30→3, else 4`), with S picks one code worse (`PHS_WEIGHT_S_PENALTY`).
+  The probability is recovered by joining the assignment back to the daily pick CSVs. This matches the
+  relocation stage's `phs_weight_scheme="probability"`, so both stages weight picks the same way. Set
+  `PHS_WEIGHT_SCHEME="phase"` for the legacy fixed P=0 / S=1.
 - **Output**: `outputs/models/<model>/HypoInv/PHS/UF<year>.phs`.
 
 ## 4. Absolute location — `run_hypoinverse.py`

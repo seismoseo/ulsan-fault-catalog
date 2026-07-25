@@ -211,11 +211,23 @@ Parameter (\code{config}) & lenient & \code{\_STRICT} & Meaning \\
 \bottomrule
 \end{tabular}
 \end{center}
-Pass \code{-{}-strict} to use \code{ASSOC\_GATE\_STRICT} (fewer, cleaner events). \code{-{}-workers N} parallelises
-the independent daily chunks. Velocity for association = \code{ASSOC\_VELMODEL} (\code{kim2011} 1-D), matching the
-reloc feeder. Output schema (events \code{idx,time,x,y,z,picks,latitude,longitude,depth}; assignment
+Every value above is \textbf{overridable per run} (defaults = config) with matching flags on
+\code{association.py} and \code{run\_pipeline.py}: \code{-{}-gate n\_picks=…,n\_p=…,n\_s=…,n\_ps=…},
+\code{-{}-pick-match-tol}, \code{-{}-overlap-s}, \code{-{}-zlim Z0,Z1}, \code{-{}-center LAT,LON},
+\code{-{}-lat-pad}, \code{-{}-lon-pad}, \code{-{}-time-before}; \code{-{}-strict} selects
+\code{ASSOC\_GATE\_STRICT} (ignored if \code{-{}-gate} is given). The cockpit notebook sets the same knobs via
+\code{run\_association\_year(overrides=…)}. Velocity = \code{ASSOC\_VELMODEL} (\code{kim2011} 1-D).
+\textbf{Station-code alias}: a picked code missing from the year table but present as \code{<code>2}
+(e.g.\ \code{BUS}$\to$\code{BUS2} — same station, renamed code) is remapped so its picks are used, not dropped.
+Output schema (events \code{idx,time,x,y,z,picks,latitude,longitude,depth}; assignment
 \code{event\_idx,pick\_idx,residual,station,phase,time}) is unchanged, so \code{phs}/\code{locate}/\code{relocate}
 consume it as before.
+
+\smallskip\noindent\textbf{HYPOINVERSE pick weights (stage 4 input).} \code{make\_phs} sets the HYPO71 weight
+code from the picker's own probability (\code{config.PHS\_WEIGHT\_SCHEME="probability"}): \code{PHS\_WEIGHT\_BINS}
+$\ge$0.90$\to$0, $\ge$0.70$\to$1, $\ge$0.50$\to$2, $\ge$0.30$\to$3, else 4 (0 = full weight); S picks one code
+worse (\code{PHS\_WEIGHT\_S\_PENALTY}). This matches the relocation stage's \code{phs\_weight\_scheme="probability"}.
+Set \code{PHS\_WEIGHT\_SCHEME="phase"} for the legacy fixed P=0/S=1.
 
 \subsection{Velocity model \& location}
 \code{DEFAULT\_VELMODEL = kim2011}; \code{kim1983} also available (\code{data/metadata/velocity/kim1983.csv},

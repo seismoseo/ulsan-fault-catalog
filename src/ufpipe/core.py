@@ -682,29 +682,49 @@ def _assoc_day(day_ts, picks_win, stations_xy, vpath, gate, zlim, region_center,
     return events, assignments
 
 
-def run_association_year(model, year, force=False, strict=False, networks=None, workers=1):
+def run_association_year(model, year, force=False, strict=False, networks=None, workers=1,
+                         overrides=None):
     """Associate picks into events with PyOcto (DAILY-CHUNKED); write events + assignments + station table.
 
-    Daily chunking (a ±config.ASSOC_OVERLAP_S window per calendar day, keeping only in-day origins) is
-    REQUIRED to scale to the dense NS array — a whole-year associate() on ~200 stations is intractable.
+    Daily chunking (a ±overlap window per calendar day, keeping only in-day origins) is REQUIRED to scale
+    to the dense NS array — a whole-year associate() on ~200 stations is intractable.
     Station coordinates come from the multi-network year table (KS/KG/GJ/NS), so GJ/NS picks associate.
     Output schema is the native PyOcto frames (events: idx,time,x,y,z,picks,latitude,longitude,depth;
     assignments: event_idx,pick_idx,residual,station,phase,time) — unchanged, so phs/locate/relocate parse it.
 
-    `strict=True` uses config.ASSOC_GATE_STRICT (stronger origin/depth constraint). Output paths are
-    unchanged (overwrites in place).
+    `strict=True` uses config.ASSOC_GATE_STRICT (stronger origin/depth constraint).
+    `overrides` (dict) takes precedence over config for THIS call without mutating the module globals —
+    keys: gate, overlap_s, pick_match_tol, zlim, center, lat_pad, lon_pad, time_before, vel_tolerance.
+    (The CLI / notebook build this dict; passing None reproduces the config defaults exactly.)
+    Output paths are unchanged (overwrites in place).
     """
     import datetime as dt
     import tempfile
     import pyocto
+    o = dict(overrides or {})
+    def _p(key, default):
+        return o.get(key, default)
 
     config.assert_writable(model, force)
     picks_df = load_picks(model, year).copy()
     parts = picks_df["station"].str.split(".", expand=True)
     picks_df["net"], picks_df["code"] = parts[0], parts[1]
 
-    # station coords from the multi-network year table (all four networks), restricted to used stations
+    # station coords from the multi-network year table (all four networks)
     ST = _stations.build_year_table(year, networks=networks)
+    table_codes = set(ST.sta)
+
+    # station-code alias: a picked code X missing from the table but present as X2 is the SAME physical
+    # station under a renamed code (e.g. BUS->BUS2, DAG->DAG2 — same coords, code change only). Remap the
+    # picks onto the table code so their arrivals are USED, not silently dropped. (Restores the behaviour
+    # of the deprecated associate_daily.py; general X->X2, applied before the coord join.)
+    used0 = set(picks_df["code"].dropna())
+    alias = {c: c + "2" for c in used0 if c not in table_codes and (c + "2") in table_codes}
+    if alias:
+        picks_df["code"] = picks_df["code"].replace(alias)
+        picks_df["station"] = picks_df["net"] + "." + picks_df["code"]
+        print(f"  station-code alias applied (same station, renamed code): {alias}")
+
     used = set(picks_df["code"].dropna())
     ST = ST[ST.sta.isin(used)].copy()
     stations_xy = pd.DataFrame({"id": ST.net + "." + ST.sta + ".", "latitude": ST.lat,
@@ -727,10 +747,18 @@ def run_association_year(model, year, force=False, strict=False, networks=None, 
     pk["station"] = pk["net"] + "." + pk["code"] + "."
     pk = pk[pk["code"].isin(have)][["station", "phase", "time"]].sort_values("time").reset_index(drop=True)
 
-    gate = config.ASSOC_GATE_STRICT if strict else config.ASSOC_GATE
-    overlap = pd.Timedelta(seconds=config.ASSOC_OVERLAP_S)
+    gate = _p("gate", config.ASSOC_GATE_STRICT if strict else config.ASSOC_GATE)
+    overlap = pd.Timedelta(seconds=_p("overlap_s", config.ASSOC_OVERLAP_S))
+    zlim = _p("zlim", config.ASSOC_ZLIM)
+    center = _p("center", config.REGION_CENTER)
+    lat_pad = _p("lat_pad", config.ASSOC_LAT_PAD)
+    lon_pad = _p("lon_pad", config.ASSOC_LON_PAD)
+    time_before = _p("time_before", config.ASSOC_TIME_BEFORE)
+    pick_match_tol = _p("pick_match_tol", config.ASSOC_PICK_MATCH_TOL)
+    vel_tolerance = _p("vel_tolerance", config.ASSOC_VEL_TOLERANCE)
     print(f"[association] {model} {year}: {len(pk)} picks, {pk.station.nunique()} stations -> "
-          f"daily-chunked PyOcto ({config.ASSOC_VELMODEL}, gate {gate}{', STRICT' if strict else ''})")
+          f"daily-chunked PyOcto ({config.ASSOC_VELMODEL}, gate {gate}{', STRICT' if strict else ''}, "
+          f"tol {pick_match_tol}s, overlap {overlap.seconds}s{', OVERRIDES' if o else ''})")
 
     with tempfile.TemporaryDirectory() as td:
         vpath = os.path.join(td, "kim2011_pyocto.dat")
@@ -743,10 +771,8 @@ def run_association_year(model, year, force=False, strict=False, networks=None, 
             d1 = day + pd.Timedelta(days=1)
             w = pk[(pk.time >= day - overlap) & (pk.time < d1 + overlap)]
             if len(w) >= gate["n_picks"]:
-                tasks.append((day, w, stations_xy, vpath, gate, config.ASSOC_ZLIM,
-                              config.REGION_CENTER, config.ASSOC_LAT_PAD, config.ASSOC_LON_PAD,
-                              config.ASSOC_TIME_BEFORE, config.ASSOC_PICK_MATCH_TOL,
-                              config.ASSOC_VEL_TOLERANCE))
+                tasks.append((day, w, stations_xy, vpath, gate, zlim, center, lat_pad, lon_pad,
+                              time_before, pick_match_tol, vel_tolerance))
             day = d1
 
         if workers and workers > 1:
@@ -849,6 +875,39 @@ def write_phs(model, year, force=False):
     os.makedirs(config.phs_dir(model), exist_ok=True)
     out = config.phs_file(model, year)
 
+    # ---- pick-probability lookup for HYPOINVERSE weighting (scheme="probability") ----
+    # The PyOcto assignment carries no probability, so recover it from the daily pick CSVs and key on
+    # (NET.STA, phase, peak_time rounded to 10 ms). Falls back to the fixed P=0/S=1 scheme if unavailable.
+    prob_lut = {}
+    if config.PHS_WEIGHT_SCHEME == "probability":
+        try:
+            allpk = load_picks(model, year).copy()
+            t = pd.to_datetime(allpk["peak_time"], utc=True, errors="coerce").astype("int64") // 10_000_000
+            key = list(zip(allpk["station"].astype(str), allpk["phase"].astype(str), t))
+            # keep the max probability per key (dedupe collisions from the ±overlap association windows)
+            for k, p in zip(key, allpk["probability"].astype(float)):
+                if k not in prob_lut or p > prob_lut[k]:
+                    prob_lut[k] = p
+        except Exception as e:
+            print(f"  ! probability lookup unavailable ({e}); using fixed P=0/S=1 weights")
+
+    def _wcode(net, sta, phase, pt_utc):
+        """HYPOINVERSE weight code from pick probability (0 best..4 worst); S penalized one code."""
+        if config.PHS_WEIGHT_SCHEME != "probability" or not prob_lut:
+            return 0 if phase == "P" else 1                        # legacy fixed scheme
+        tk = int(pd.Timestamp(pt_utc.datetime, tz="UTC").value // 10_000_000)
+        prob = prob_lut.get((f"{net}.{sta}", phase, tk))
+        if prob is None:
+            return 0 if phase == "P" else 1                        # unmatched -> legacy default
+        code = 4
+        for thr, c in config.PHS_WEIGHT_BINS:
+            if prob >= thr:
+                code = c
+                break
+        if phase == "S":
+            code = min(4, code + config.PHS_WEIGHT_S_PENALTY)
+        return code
+
     with open(out, "w") as f:
         idn = 0
         for i in range(len(ev)):
@@ -866,10 +925,11 @@ def write_phs(model, year, force=False):
                 net = ept["station"][j].split(".")[0]
                 sta = ept["station"][j].split(".")[1]
                 phase = ept["phase"][j]
+                wc = _wcode(net, sta, phase, pt)
                 if phase == "P":
                     f.write(sta.ljust(5)); f.write(net.ljust(4))
                     f.write(config.PHASE_CHANNELS["P"][:3].ljust(4))
-                    f.write("IP".ljust(3)); f.write("0")
+                    f.write("IP".ljust(3)); f.write(str(wc))
                     f.write(str(pt.year)); f.write(str(pt.month).zfill(2)); f.write(str(pt.day).zfill(2))
                     f.write(str(pt.hour).zfill(2)); f.write(str(pt.minute).zfill(2).ljust(3))
                     f.write(str(pt.second).zfill(2)); f.write(str(pt.microsecond).zfill(6)[:2])
@@ -880,12 +940,13 @@ def write_phs(model, year, force=False):
                     f.write(str(pt.year)); f.write(str(pt.month).zfill(2)); f.write(str(pt.day).zfill(2))
                     f.write(str(pt.hour).zfill(2)); f.write(str(pt.minute).zfill(2).ljust(15))
                     f.write(str(pt.second).zfill(2)); f.write(str(pt.microsecond).zfill(6)[:2])
-                    f.write("ES".ljust(3)); f.write("1"); f.write("\n")
+                    f.write("ES".ljust(3)); f.write(str(wc)); f.write("\n")
 
             f.write(" " * 66 + "20" + f"{idn}".zfill(4) + "\n")
             idn += 1
 
-    print(f"[phs] {model} {year}: {len(ev)} events -> {os.path.relpath(out, config.MODELS)}")
+    print(f"[phs] {model} {year}: {len(ev)} events -> {os.path.relpath(out, config.MODELS)} "
+          f"(weights: {config.PHS_WEIGHT_SCHEME})")
     return out
 
 
