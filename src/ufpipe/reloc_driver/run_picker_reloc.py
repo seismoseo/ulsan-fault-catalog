@@ -149,8 +149,13 @@ def main():
     # .sum/.arc subset to the QC members (renumbered to QC cuspids) so rereference/ph2dt use the SAME solution QC
     # gated on. See fix_qc_rerun_bug.py for the full diagnosis.
     inject_full_hypoinverse(p, slug, slug_qc, ROOT)
+    # Start the dt.cc pipeline at ph2dt (NOT rereference): ph2dt/dtct build event.dat + dt.ct from the injected
+    # .arc (ph2dt reads the .arc, it does NOT re-locate — hypoinverse is upstream of ph2dt and stays skipped, so
+    # the injected solution is preserved). Starting at rereference skipped ph2dt and only worked when a prior run
+    # had left event.dat behind; on a FRESH year (e.g. 2010) event.dat was absent -> HypoDD "event.dat DOES NOT
+    # EXIST". ph2dt->dtct->rereference->xcorr->dtcc now all run on the one QC-gated solution.
     try:
-        run([PY, "-m", "pipeline.cli.run_pipeline", "--cluster", slug_qc, "--stage-from", "rereference",
+        run([PY, "-m", "pipeline.cli.run_pipeline", "--cluster", slug_qc, "--stage-from", "ph2dt",
              "--through", "dtcc", "--velmodels", "kim2011", "--arc-velmodel", "kim2011"], PIPE, conda_env="pq-gpu")
     except subprocess.CalledProcessError as e:
         print(f"[expected] pipeline dtcc HypoDD failed ({e.returncode}); 02.dt.cc assembled -> our adaptive HypoDD.", flush=True)
