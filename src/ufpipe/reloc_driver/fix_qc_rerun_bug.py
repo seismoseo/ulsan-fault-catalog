@@ -44,10 +44,24 @@ def pickers_for(year):
             for p in PICKER_NAMES}
 
 
+def _root_dir(root):
+    """Resolve `root` (a full reloc working-dir path, or a bare `reloc_<year>_uf[_<picker>]` basename) to the
+    directory that actually holds members.txt. Reloc dirs live under outputs/reloc/ since the 2026-07 migration
+    (YP.RELOC_OUT); a legacy detection_test/ path is honoured only if that's where it actually is."""
+    if os.path.isabs(root) and os.path.isdir(root):
+        return root
+    base = os.path.basename(root.rstrip("/"))
+    for cand in (os.path.join(YP.RELOC_OUT, base), os.path.join(DT, base)):
+        if os.path.exists(os.path.join(cand, "members.txt")):
+            return cand
+    return os.path.join(YP.RELOC_OUT, base)          # default to the current convention (clear error if absent)
+
+
 def qc_to_fullrow(root):
     """qc_row (0..N-1, == QC cuspid-200000 == event-dir index) -> full-run members row (== full cuspid-200000)."""
-    mem_full = pd.read_csv(f"{DT}/{root}/members.txt", header=None)[0].tolist()
-    mem_qc = pd.read_csv(f"{DT}/{root}/members_qc.txt", header=None)[0].tolist()
+    rd = _root_dir(root)
+    mem_full = pd.read_csv(f"{rd}/members.txt", header=None)[0].tolist()
+    mem_qc = pd.read_csv(f"{rd}/members_qc.txt", header=None)[0].tolist()
     fp = {e: i for i, e in enumerate(mem_full)}
     assert all(e in fp for e in mem_qc), "QC member not in full members"
     return [fp[e] for e in mem_qc], mem_qc          # qc_row -> full_row ; qc_row -> event_idx
