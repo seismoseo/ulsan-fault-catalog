@@ -74,7 +74,17 @@ def inject_full_hypoinverse(picker, full_slug, qc_slug, root):
     os.makedirs(hyp_qc, exist_ok=True)
     FX.subset_renumber_sum(full_slug, qc_slug, full_rows)
     FX.subset_renumber_arc(full_slug, qc_slug, full_rows)
-    print(f"  [{picker}] injected full-run HypoInverse ({len(mem_qc)} events) into {qc_slug} "
+    # ph2dt (now run on the injected solution) needs the HYPOINVERSE station file in 1.HypoInv/STA/. The QC
+    # subset skips the hypoinverse stage, so that file is never generated -- but stations are picker/subset-
+    # independent, so copy the full-run's <full_slug>{_hyp.sta,.sta} across, renamed to the QC slug.
+    sta_full = os.path.join(RUNS, full_slug, "1.HypoInv", "STA")
+    sta_qc = os.path.join(RUNS, qc_slug, "1.HypoInv", "STA")
+    os.makedirs(sta_qc, exist_ok=True)
+    for suf in ("_hyp.sta", ".sta"):
+        src = os.path.join(sta_full, f"{full_slug}{suf}")
+        if os.path.exists(src):
+            shutil.copyfile(src, os.path.join(sta_qc, f"{qc_slug}{suf}"))
+    print(f"  [{picker}] injected full-run HypoInverse ({len(mem_qc)} events) + STA into {qc_slug} "
           f"(no redundant re-run)", flush=True)
 
 
