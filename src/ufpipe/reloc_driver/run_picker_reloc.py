@@ -29,11 +29,11 @@ ENV = {**os.environ, "PYTHONPATH": f"{PQ}:{PIPE}:{HYPO}"}
 PY = sys.executable
 
 
-def run(cmd, cwd, conda_env=None):
+def run(cmd, cwd, conda_env=None, timeout=None):
     if conda_env:
         cmd = ["conda", "run", "-n", conda_env, "python3"] + cmd[1:]
     print(f"\n$ (cwd={cwd}) {' '.join(str(c) for c in cmd)}", flush=True)
-    subprocess.run(cmd, cwd=cwd, env=ENV, check=True)
+    subprocess.run(cmd, cwd=cwd, env=ENV, check=True, timeout=timeout)
 
 
 def link_results(year, picker, slug, qc_slug):
@@ -172,18 +172,22 @@ def main():
     dtcc = os.path.join(RUNS, slug_qc, "2.HypoDD", "02.dt.cc")
     for f in ("event.dat", "dt.ct", "station.dat", "hypoDD.inp"):
         assert os.path.exists(os.path.join(dtcc, f)), f"{dtcc}/{f} missing"
-    # adaptive kim2011/ISTART=2 dt.cc, then a dt.ct-only copy
+    # adaptive kim2011/ISTART=2 dt.cc -- this is the PRIMARY deliverable (hypoDD.reloc.dtcc)
     run([PY, os.path.join(HERE, "run_hypodd_kim2011_istart2.py"), dtcc], HERE)
+    # dt.ct-only copy = a SECONDARY diagnostic baseline (dt.ct vs dt.cc comparison). It runs the adaptive
+    # HypoDD again on catalog differential times only, which is much heavier per iteration (no cc) and can
+    # run long; make it NON-FATAL + time-bounded so a slow/failing dt.ct never blocks publishing the dt.cc result.
     dtct = os.path.join(RUNS, slug_qc, "2.HypoDD", "01b.dtct_qc"); os.makedirs(dtct, exist_ok=True)
-    for f in ("event.dat", "dt.ct", "station.dat"):
-        shutil.copyfile(os.path.join(dtcc, f), os.path.join(dtct, f))
-    # dt.ct-only hypoDD.inp template: reuse the pipeline-default from the PN+ 2016 dt.ct run (a valid
-    # kim2011 dt.ct .inp; the adaptive driver overwrites the weighting/damping anyway, so it is a seed only).
-    inp_tpl = os.path.join(RUNS, "uf_2016", "2.HypoDD", "01.dt.ct", "hypoDD.inp.pipeline_default")
-    if not os.path.exists(inp_tpl):                       # any year's own dt.cc .inp is an equivalent seed
-        inp_tpl = os.path.join(dtcc, "hypoDD.inp")
-    shutil.copyfile(inp_tpl, os.path.join(dtct, "hypoDD.inp"))
-    run([PY, os.path.join(HERE, "run_hypodd_kim2011_istart2.py"), dtct], HERE)
+    try:
+        for f in ("event.dat", "dt.ct", "station.dat"):
+            shutil.copyfile(os.path.join(dtcc, f), os.path.join(dtct, f))
+        inp_tpl = os.path.join(RUNS, "uf_2016", "2.HypoDD", "01.dt.ct", "hypoDD.inp.pipeline_default")
+        if not os.path.exists(inp_tpl):                   # any year's own dt.cc .inp is an equivalent seed
+            inp_tpl = os.path.join(dtcc, "hypoDD.inp")
+        shutil.copyfile(inp_tpl, os.path.join(dtct, "hypoDD.inp"))
+        run([PY, os.path.join(HERE, "run_hypodd_kim2011_istart2.py"), dtct], HERE, timeout=1800)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        print(f"  [{p}] dt.ct-only baseline skipped ({type(e).__name__}); dt.cc result is unaffected.", flush=True)
     for nm, d in [("dt.cc", dtcc), ("dt.ct", dtct)]:
         rl = os.path.join(d, "hypoDD.reloc")
         n = sum(1 for _ in open(rl)) if os.path.exists(rl) else 0
