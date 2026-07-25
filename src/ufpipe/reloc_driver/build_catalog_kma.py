@@ -28,6 +28,10 @@ def main():
     a = ap.parse_args()
     ROOT = YP.root_dir(a.year, a.picker); SAC = os.path.join(ROOT, "event_sac")
     EV = pd.read_csv(YP.pyocto_year(a.year, a.picker))
+    # normalize the coord column names: ufpipe's per-year pyocto uses latitude/longitude; the old
+    # detection_test per-month catalogs used lat/lon. Rename to lat/lon so the rest of this stage (and the
+    # members_event_idx.csv it writes, which stage.py/build_qc_catalog consume) stay lat/lon as before.
+    EV = EV.rename(columns={"latitude": "lat", "longitude": "lon"})
     EV["time"] = pd.to_datetime(EV.time, format="ISO8601", utc=True)
     box = EV[(EV.lon >= UF[0]) & (EV.lon <= UF[1]) & (EV.lat >= UF[2]) & (EV.lat <= UF[3])].copy()
     box = box.sort_values("time").reset_index(drop=True)

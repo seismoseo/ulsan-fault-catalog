@@ -250,21 +250,29 @@ for ax, colname, thr in zip(axes, ["rms", "erh", "erz", "gap"],
     ax.axvline(thr, color="crimson", lw=1.2)
     ax.set_xlabel(colname.upper() if colname != "gap" else "Gap (deg)")
 axes[0].set_ylabel("Events"); plt.tight_layout(); plt.show()''')
-co(r'''# map: located events, QC pass vs fail — UF-subregion zoom (10 km scale bar)
-fig = pygmt.Figure()
-fig.basemap(region=list(UF_BOX), projection="M12c", frame=["af", f"WSen+tLocated events {YEAR} (UF box)"])
-fig.coast(shorelines="0.4p,gray30", land="gray97", water="azure1")
-fail = SM.loc[~SM.index.isin(uf.apply_qc(SM, qc=QC_GATE).index)] if len(SM) else SM
-inb = lambda d: d[(d.lon.between(UF_BOX[0], UF_BOX[1])) & (d.lat.between(UF_BOX[2], UF_BOX[3]))]
-smb, qcb = inb(SM), inb(QCOK)
-if len(smb):
-    fig.plot(x=smb.lon, y=smb.lat, style="c0.10c", fill="gray70", pen="0.1p,gray40", label="All located")
-if len(qcb):
-    fig.plot(x=qcb.lon, y=qcb.lat, style="c0.12c", fill="#1f77b4", pen="0.1p,black", label="QC pass")
-fig.basemap(map_scale="jBL+w10k+o0.4c/0.4c")
-fig.legend(position="JTR+jTR+o0.2c", box="+gwhite+p0.5p")
-print(f"UF box: {len(smb)} located, {len(qcb)} QC-pass")
-fig.show()''')
+co(r'''# map: FULL extent of QC-passed located events, colored by depth (UF box drawn for reference).
+# QC-dropped events are not shown — only the events that survive the gate.
+Q = QCOK.dropna(subset=["lat", "lon"])
+if len(Q):
+    reg = [Q.lon.min() - 0.15, Q.lon.max() + 0.15, Q.lat.min() - 0.12, Q.lat.max() + 0.12]
+    fig = pygmt.Figure()
+    fig.basemap(region=reg, projection="M13c", frame=["af", f"WSen+tLocated events {YEAR} (QC-passed, {len(Q)})"])
+    fig.coast(shorelines="0.4p,gray30", land="gray97", water="azure1", borders="1/0.3p,gray60")
+    pygmt.makecpt(cmap="viridis", series=[0, max(20, float(Q.depth.quantile(0.98)))])
+    fig.plot(x=Q.lon, y=Q.lat, style="c0.12c", fill=Q.depth, cmap=True, pen="0.15p,gray20")
+    # UF relocation subregion, for reference
+    fig.plot(x=[UF_BOX[0], UF_BOX[1], UF_BOX[1], UF_BOX[0], UF_BOX[0]],
+             y=[UF_BOX[2], UF_BOX[2], UF_BOX[3], UF_BOX[3], UF_BOX[2]], pen="0.9p,firebrick,-")
+    fig.text(x=(UF_BOX[0] + UF_BOX[1]) / 2, y=UF_BOX[3], text="UF subregion",
+             font="8p,Helvetica,firebrick", justify="BC", offset="0/0.1c")
+    fig.colorbar(frame="af+lDepth (km)")
+    fig.basemap(map_scale="jBL+w20k+o0.5c/0.5c")
+    n_uf = ((Q.lon.between(UF_BOX[0], UF_BOX[1])) & (Q.lat.between(UF_BOX[2], UF_BOX[3]))).sum()
+    print(f"{len(Q)} QC-passed events, full extent lon [{Q.lon.min():.2f},{Q.lon.max():.2f}] "
+          f"lat [{Q.lat.min():.2f},{Q.lat.max():.2f}]; {n_uf} inside the UF subregion")
+    fig.show()
+else:
+    print("no QC-passed events to map")''')
 
 # ---------------------------------------------------------------- stage 5 relocation
 md(r"""## Stage 5 — relocation (HypoDD dt.ct + dt.cc)
@@ -274,6 +282,20 @@ Self-fed from this year's association, with YOUR `QC_GATE` and `XCORR` parameter
 `"dtcc"` runs the full chain incl. GPU cross-correlation (**hours** for dense years). Results land in
 `outputs/reloc/`. HypoDD damping/ISTART and the full-run-HypoInverse injection are fixed invariants (see
 the parameters cell).""")
+co(r'''# ---- which events get relocated further? the selection funnel (before running) ----
+# Not every located event goes into dt.cc. The stages narrow it down:
+#   located (HypoInverse .sum)  ->  inside the UF subregion box  ->  has extractable waveforms (SAC)
+#   ->  passes the QC gate  ->  gets >=1 surviving cross-correlation link (the dt.cc catalog).
+UF = UF_BOX
+n_loc = len(SM)
+inbox = QCOK[(QCOK.lon.between(UF[0], UF[1])) & (QCOK.lat.between(UF[2], UF[3]))] if len(QCOK) else QCOK
+smbox = SM[(SM.lon.between(UF[0], UF[1])) & (SM.lat.between(UF[2], UF[3]))] if len(SM) else SM
+print("relocation selection funnel:")
+print(f"  {n_loc:>5}  located (HypoInverse)")
+print(f"  {len(smbox):>5}  inside the UF subregion {UF}")
+print(f"  {len(inbox):>5}  ... AND passing the QC gate {QC_GATE}   <- candidates fed to dt.cc")
+print(f"         (only these are cross-correlated; those that get >=1 cc>={XCORR['cc_threshold']} link "
+      f"appear in the final dt.cc catalog)")''')
 co(r'''cmd = [sys.executable, "-m", "ufpipe.run_pipeline", "--model", MODEL, "--years", str(YEAR),
        "--stage-from", "relocate", "--through", RELOC_THROUGH,
        "--qc", QC_STR, "--xcorr", XCORR_STR]
@@ -288,7 +310,13 @@ if not os.path.exists(frel):
     print(f"(no dt.cc result yet at {frel} — run stage 5 with RELOC_THROUGH='dtcc')")
 else:
     RL = pd.read_csv(frel, sep=r"\s+", names=RELOC_COLS)
-    print(f"dt.cc-relocated events: {len(RL):,}  (cc links: median NCCP {RL.nccp.median():.0f}, NCCS {RL.nccs.median():.0f})")
+    # which events relocated further: the QC candidates that got >=1 cc link survive into RL; the rest
+    # (cc-poor: no waveform-similar neighbour above the cc threshold) do not move to dt.cc precision.
+    ncand = len(inbox) if "inbox" in dir() else None
+    print(f"dt.cc-relocated events: {len(RL):,}"
+          + (f" of {ncand} QC candidates ({100*len(RL)/max(ncand,1):.0f}% got >=1 cc link)" if ncand else ""))
+    print(f"  cc links per event: median NCCP {RL.nccp.median():.0f}, NCCS {RL.nccs.median():.0f}; "
+          f"best-linked event NCCP {int(RL.nccp.max())}")
     from scipy.spatial import cKDTree
     def med_nnd_m(d):
         xy = np.c_[d.lon * 111.0 * np.cos(np.radians(d.lat.mean())), d.lat * 111.0, d.depth]
