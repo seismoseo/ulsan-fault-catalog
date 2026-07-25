@@ -53,13 +53,17 @@ def _preflight(model, year):
     return ok
 
 
-def run_relocate_year(model, year, through="dtcc", clean_cache=True, strict_inputs=True):
+def run_relocate_year(model, year, through="dtcc", clean_cache=True, strict_inputs=True,
+                      qc=None, xcorr=None):
     """Relocate one (model==picker, year) from ufpipe's own outputs.
 
     through : "hypoinverse" -> stop at the QC'd absolute-location subset (fast; no xcorr);
               "dtcc"        -> full double-difference relocation (GPU xcorr ~6 h for dense pickers).
     clean_cache : after dt.cc, delete the ~tens-of-GB interp cache (recommended for multi-year runs).
     strict_inputs : if True, abort when ufpipe's per-year association is missing.
+    qc    : QC-gate override string, e.g. "erh=5,erz=5,gap=270,num=5,rms=1.0" (default uf_cluster.QC).
+    xcorr : dt.cc xcorr override string, e.g. "interp_hz=1000,fmin=5,fmax=20,cc_threshold=0.7"
+            (default: the engine's validated values).
     """
     picker = model                            # identity map: original/stead/eqt/phasenet_plus
     print(f"[relocate] {picker} {year}: through={through} (self-fed from ufpipe detection+association)", flush=True)
@@ -80,6 +84,10 @@ def run_relocate_year(model, year, through="dtcc", clean_cache=True, strict_inpu
            "--picker", picker, "--year", str(year), "--through", through, "--skip-build"]
     if clean_cache and through == "dtcc":
         cmd.append("--clean-cache")
+    if qc:
+        cmd += ["--qc", qc]
+    if xcorr:
+        cmd += ["--xcorr", xcorr]
     print(f"[relocate] $ (cwd={_RELOC_DIR}) {' '.join(cmd)}", flush=True)
     subprocess.run(cmd, cwd=_RELOC_DIR, check=True)
 

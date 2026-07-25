@@ -14,12 +14,47 @@ from pocketquake.scaffold import ClusterSpec, register_cluster, write_cluster_mo
 ROOT = "/home/msseo/works/02.Ulsan_Fault_detection/detection_test/reloc_2016_uf"
 
 
+_XCORR_KEYS = ("interp_hz", "fmin", "fmax", "cc_threshold", "pre", "post", "margin")
+_XCORR_MARK = "# ufpipe xcorr overrides (appended by scaffold --xcorr; do not edit by hand)"
+
+
+def parse_xcorr(s):
+    """Parse 'interp_hz=1000,fmin=5,fmax=20,cc_threshold=0.7,pre=0.5,post=0.5,margin=0.5' into a dict."""
+    out = {}
+    for kv in s.split(","):
+        k, v = kv.split("=")
+        k = k.strip()
+        if k not in _XCORR_KEYS:
+            raise SystemExit(f"--xcorr: unknown key {k!r} (valid: {_XCORR_KEYS})")
+        out[k] = int(float(v)) if k == "interp_hz" else float(v)
+    return out
+
+
+def apply_xcorr_overrides(module_path, xc):
+    """Append a CONFIG=replace(...) xcorr-override block to the generated cluster module (idempotent:
+    any previous override block is stripped first). fmin/fmax map onto the engine's bandpass tuple."""
+    src = open(module_path).read()
+    if _XCORR_MARK in src:                                  # strip a previous block (marker to EOF)
+        src = src[:src.index(_XCORR_MARK)].rstrip() + "\n"
+    upd = {k: v for k, v in xc.items() if k in ("interp_hz", "cc_threshold", "pre", "post", "margin")}
+    if "fmin" in xc or "fmax" in xc:
+        upd["bandpass"] = (xc.get("fmin", 5.0), xc.get("fmax", 20.0))
+    kv = ", ".join(f"{k}={v!r}" for k, v in upd.items())
+    src += f"\n{_XCORR_MARK}\nCONFIG = replace(CONFIG, xcorr=dict(CONFIG.xcorr, {kv}))\n"
+    open(module_path, "w").write(src)
+    print(f"  xcorr overrides -> {upd}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slug", default="uf_2016")
     ap.add_argument("--catalog", default=os.path.join(ROOT, "catalog_kma.csv"))
     ap.add_argument("--station-table", default=os.path.join(ROOT, "station_table", "stations_2016.csv"),
                     help="year-general station table (Network,Code,Latitude,Longitude,Elevation)")
+    ap.add_argument("--xcorr", default=None,
+                    help="dt.cc cross-correlation overrides, e.g. "
+                         "'interp_hz=1000,fmin=5,fmax=20,cc_threshold=0.7,pre=0.5,post=0.5,margin=0.5' "
+                         "(defaults = the engine's validated values)")
     a = ap.parse_args()
     SLUG = a.slug
     epi = tuple(float(x) for x in "35.7539,129.3804".split(","))
@@ -40,6 +75,8 @@ def main():
         allsta[allsta.Network == net][cols].reset_index(drop=True).to_csv(
             os.path.join(src, "station_table", f"{net}_station.csv"), index=False)
     mod = write_cluster_module(spec); register_cluster(spec)
+    if a.xcorr:
+        apply_xcorr_overrides(mod, parse_xcorr(a.xcorr))
     print(f"scaffolded {SLUG} -> {src}")
     print(f"  roster {len(allsta)} (" + " + ".join(f"{int((allsta.Network==n).sum())} {n}" for n in spec.networks)
           + f"); module {mod}")

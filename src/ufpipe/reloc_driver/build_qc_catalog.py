@@ -18,8 +18,23 @@ HERE = YP.HERE
 RUNS = YP.RUNS
 
 
+def parse_qc(s):
+    """Parse an 'erh=5,erz=5,gap=270,num=5,rms=1.0' override string into a QC dict (keys as uf.QC)."""
+    out = dict(uf.QC)
+    for kv in s.split(","):
+        k, v = kv.split("=")
+        k = k.strip()
+        if k not in out:
+            raise SystemExit(f"--qc: unknown key {k!r} (valid: {sorted(out)})")
+        out[k] = int(float(v)) if k == "num" else float(v)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--picker", default="phasenet_plus")
+    ap.add_argument("--qc", default=None,
+                    help="override the uf_cluster.QC gate, e.g. 'erh=5,erz=5,gap=270,num=5,rms=1.0' "
+                         "(defaults to uf_cluster.QC)")
     YP.add_year_arg(ap)
     a = ap.parse_args()
     ROOT, slug = YP.root_dir(a.year, a.picker), YP.slug(a.year, a.picker)
@@ -28,7 +43,8 @@ def main():
     mem = pd.read_csv(f"{ROOT}/members.txt", header=None)[0].tolist()
     me = pd.read_csv(f"{ROOT}/members_event_idx.csv")
     sm = uf.read_sum(SUM).reset_index(drop=True)
-    QC = uf.QC
+    QC = parse_qc(a.qc) if a.qc else uf.QC
+    print(f"[{a.picker}] QC gate: {QC}" + ("  (OVERRIDE via --qc)" if a.qc else "  (uf_cluster.QC default)"))
     if len(sm) == len(cat):                                       # nothing dropped -> exact row-order (sm row i <-> members[i])
         smm = sm; matched = np.arange(len(cat))
         print(f"[{a.picker}] {len(sm)} located = {len(cat)} members (no drops) -> exact row-order")

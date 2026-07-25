@@ -35,17 +35,55 @@ year (2010): detection hours (GPU; already done = skipped), association minutes,
 minutes, relocation `--through hypoinverse` ~minutes / `--through dtcc` hours (GPU xcorr).""")
 
 # ---------------------------------------------------------------- parameters
-co(r'''# ================================ PARAMETERS (edit here only) ================================
+co(r'''# ============================ PARAMETERS — the single place to edit ============================
+# Every stage's knobs are HERE, explicit, with the validated defaults written out. What you set here
+# is exactly what runs: association values are applied onto ufpipe.config for this session; the QC
+# gate and xcorr values are passed to the relocation driver via --qc / --xcorr.
+
+# ---- run ----------------------------------------------------------------------------------
 YEAR          = 2010
 MODEL         = "phasenet_plus"     # picker: phasenet_plus | original | stead | eqt
-MIN_PROB      = 0.2                 # PhaseNet+ pick threshold; 0.2 = the validated benchmark setting
-                                    # (config default is 0.3 — SeisBench pickers ignore this flag)
-NETWORKS      = None                # None = all of KS,KG,GJ,NS; or e.g. "KS,KG" to restrict
 VELMODEL      = "kim2011"           # HYPOINVERSE crustal model (kim2011 | kim1983)
-STRICT_ASSOC  = False               # True -> config.ASSOC_GATE_STRICT (6/3/3/2)
-ASSOC_WORKERS = 8                   # parallel daily association chunks
-RELOC_THROUGH = "dtcc"              # "hypoinverse" = fast QC-only reloc preflight; "dtcc" = full (hours)
 UF_BOX        = (129.25, 129.55, 35.60, 35.90)   # lon0, lon1, lat0, lat1 (the relocation subregion)
+
+# ---- stage 1: detection -------------------------------------------------------------------
+MIN_PROB      = 0.2                 # PhaseNet+ pick threshold (0.2 = validated benchmark; config default 0.3.
+                                    # SeisBench pickers use config.P/S_THRESHOLD=0.2 instead and ignore this)
+HIGHPASS      = 0.0                 # Hz; 0 = raw input (PhaseNet+ normalizes internally)
+NETWORKS      = None                # None = all of KS,KG,GJ,NS; or e.g. "KS,KG" to restrict
+
+# ---- stage 2: association (daily-chunked PyOcto; defaults = the validated values) ----------
+ASSOC = dict(
+    gate           = dict(n_picks=4, n_p=2, n_s=2, n_ps=1),   # permissive gate (strict = 6/3/3/2)
+    overlap_s      = 150,           # daily-chunk overlap (s)
+    pick_match_tol = 1.5,           # PyOcto residual cap (s) — the primary association-quality knob
+    zlim           = (0.0, 30.0),   # depth search range (km)
+    center         = (35.856, 129.224),   # Gyeongju reference point
+    lat_pad        = 1.0,           # association area = center +/- pads (deg)
+    lon_pad        = 1.2,
+    time_before    = 300.0,         # PyOcto origin-search window (s)
+)
+ASSOC_WORKERS = 8                   # parallel daily chunks
+
+# ---- stage 4: QC gate (applied in the preview below AND passed to the reloc driver) --------
+QC_GATE = dict(erh=5.0, erz=5.0, gap=270.0, num=5, rms=1.0)   # strict <, < , < , > , <
+
+# ---- stage 5: relocation / cross-correlation (defaults = the validated engine values) ------
+RELOC_THROUGH = "dtcc"              # "hypoinverse" = fast QC-only pass; "dtcc" = full (GPU xcorr, hours)
+XCORR = dict(
+    interp_hz    = 1000,            # resample rate for sub-sample dt.cc precision (lanczos a=20)
+    fmin         = 5.0,             # bandpass (Hz) applied before correlation
+    fmax         = 20.0,
+    cc_threshold = 0.7,             # keep pairs with CC >= this in the dt.cc combine
+    pre          = 0.5,             # window before the pick (s)
+    post         = 0.5,             # window after the pick (s)
+    margin       = 0.5,             # max slide (s)
+)
+# FIXED invariants (deliberately NOT settable here — validated machinery):
+#   * HypoDD: kim2011 1-D swap + ISTART=2 + adaptive damping (CND driven into 40-80)
+#       -> src/ufpipe/reloc_driver/run_hypodd_kim2011_istart2.py
+#   * QC subset reuses the FULL-run HYPOINVERSE solution (origin-correctness fix)
+#       -> src/ufpipe/reloc_driver/fix_qc_rerun_bug.py::inject_full_hypoinverse
 
 import os, sys, glob, subprocess
 import numpy as np, pandas as pd
@@ -62,6 +100,20 @@ import pygmt
 from ufpipe import config, core, stations, relocate
 from uflib import uf_cluster as uf
 
+# ---- apply the ASSOC block onto ufpipe.config (session-scoped; core reads config at call time) ----
+config.ASSOC_GATE           = ASSOC["gate"]
+config.ASSOC_OVERLAP_S      = ASSOC["overlap_s"]
+config.ASSOC_PICK_MATCH_TOL = ASSOC["pick_match_tol"]
+config.ASSOC_ZLIM           = ASSOC["zlim"]
+config.REGION_CENTER        = ASSOC["center"]
+config.ASSOC_LAT_PAD        = ASSOC["lat_pad"]
+config.ASSOC_LON_PAD        = ASSOC["lon_pad"]
+config.ASSOC_TIME_BEFORE    = ASSOC["time_before"]
+
+# ---- serialize the QC + XCORR blocks for the relocation driver (--qc / --xcorr) ----
+QC_STR    = ",".join(f"{k}={v}" for k, v in QC_GATE.items())
+XCORR_STR = ",".join(f"{k}={v}" for k, v in XCORR.items())
+
 # Helvetica everywhere (graceful fallback), sentence-case labels, opaque legends
 try:
     fm.findfont("Helvetica", fallback_to_default=False)
@@ -76,16 +128,16 @@ networks = NETWORKS.split(",") if NETWORKS else None
 RELOC_ROOT = relocate._reloc_root(MODEL, YEAR)          # outputs/reloc/reloc_<year>_uf[_<model>]
 SUM_PATH = os.path.join(config.MODELS, MODEL, "HypoInv", VELMODEL, f"UF{YEAR}.sum")
 
-# -------- disclosed parameters (nothing hidden; assoc values from config) --------
-print(f"YEAR={YEAR}  MODEL={MODEL}  MIN_PROB={MIN_PROB}  NETWORKS={NETWORKS or 'KS,KG,GJ,NS'}")
-print(f"VELMODEL={VELMODEL}  STRICT_ASSOC={STRICT_ASSOC}  ASSOC_WORKERS={ASSOC_WORKERS}  RELOC_THROUGH={RELOC_THROUGH}")
-print(f"association: center={config.REGION_CENTER} +/-({config.ASSOC_LAT_PAD},{config.ASSOC_LON_PAD}) deg, "
-      f"z={config.ASSOC_ZLIM} km, overlap={config.ASSOC_OVERLAP_S}s, tol={config.ASSOC_PICK_MATCH_TOL}s")
-print(f"gate={'STRICT ' + str(config.ASSOC_GATE_STRICT) if STRICT_ASSOC else str(config.ASSOC_GATE)}  "
-      f"velocity(assoc)={config.ASSOC_VELMODEL}")
-print(f"QC gate (uf_cluster.QC): {uf.QC}")
-print(f"detection thresholds: SeisBench P/S={config.P_THRESHOLD}/{config.S_THRESHOLD}, PN+ default={config.PNPLUS_MIN_PROB}")
-print(f"reloc results dir -> {RELOC_ROOT}")''')
+# -------- effective parameters (what will actually run; nothing hidden) --------
+print(f"YEAR={YEAR}  MODEL={MODEL}  VELMODEL={VELMODEL}  RELOC_THROUGH={RELOC_THROUGH}")
+print(f"detection : MIN_PROB={MIN_PROB}  HIGHPASS={HIGHPASS}  NETWORKS={NETWORKS or 'KS,KG,GJ,NS'}  "
+      f"(SeisBench P/S={config.P_THRESHOLD}/{config.S_THRESHOLD})")
+print(f"assoc     : gate={config.ASSOC_GATE}  overlap={config.ASSOC_OVERLAP_S}s  tol={config.ASSOC_PICK_MATCH_TOL}s")
+print(f"            area={config.REGION_CENTER} +/-({config.ASSOC_LAT_PAD},{config.ASSOC_LON_PAD}) deg  "
+      f"z={config.ASSOC_ZLIM} km  velocity={config.ASSOC_VELMODEL}")
+print(f"QC gate   : {QC_GATE}")
+print(f"xcorr     : {XCORR}")
+print(f"reloc dir : {RELOC_ROOT}")''')
 
 # ---------------------------------------------------------------- stage 0 station table
 md(r"""## Stage 0 — station table for the year
@@ -116,7 +168,7 @@ Idempotent: days whose picks CSV already exists are skipped, so this is safe to 
 gaps). A full un-detected year takes hours on GPU.""")
 co(r'''cmd = ["conda", "run", "--no-capture-output", "-n", "eqnet",
        "python", "-m", "ufpipe.detection", "--model", MODEL, "--year", str(YEAR),
-       "--min-prob", str(MIN_PROB)]
+       "--min-prob", str(MIN_PROB), "--highpass", str(HIGHPASS)]
 if NETWORKS:
     cmd += ["--networks", NETWORKS]
 print("$", " ".join(cmd)); subprocess.run(cmd, check=True)''')
@@ -140,8 +192,7 @@ ax.legend(ncol=4, loc="upper left"); plt.tight_layout(); plt.show()''')
 md(r"""## Stage 2 — association (in-kernel, daily-chunked PyOcto, kim2011)
 
 Returns the events + assignments directly for immediate inspection.""")
-co(r'''EV, ASG = core.run_association_year(MODEL, YEAR, strict=STRICT_ASSOC,
-                                    networks=networks, workers=ASSOC_WORKERS)
+co(r'''EV, ASG = core.run_association_year(MODEL, YEAR, networks=networks, workers=ASSOC_WORKERS)
 print(f"events: {len(EV):,}   assigned picks: {len(ASG):,}")''')
 co(r'''# ---- check: picks/event, timeline ----
 EV2 = pd.read_csv(config.pyocto_events(MODEL, YEAR), parse_dates=["time"])
@@ -181,20 +232,21 @@ core.write_phs(MODEL, YEAR)''')
 # ---------------------------------------------------------------- stage 4 locate + QC
 md(r"""## Stage 4 — absolute location (HYPOINVERSE) and QC
 
-QC gate = `uf_cluster.QC` (erh<5, erz<5, gap<270, num>5, rms<1.0) — the same gate the relocation
-stage applies internally, shown here so you see what will survive *before* launching stage 5.""")
+QC gate = the `QC_GATE` you set in the parameters cell (default = `uf_cluster.QC`: erh<5, erz<5,
+gap<270, num>5, rms<1.0). The SAME gate is passed to the relocation driver (`--qc`), so this preview
+shows exactly what stage 5 will keep.""")
 co(r'''core.run_hypoinverse_year(MODEL, YEAR, velmodel=VELMODEL)''')
 co(r'''# ---- check: location quality + the QC gate ----
 SM = uf.read_sum(SUM_PATH)
-QCOK = uf.apply_qc(SM)
+QCOK = uf.apply_qc(SM, qc=QC_GATE)
 print(f"located: {len(SM):,}   QC pass: {len(QCOK):,} ({100 * len(QCOK) / max(len(SM), 1):.0f}%)")
 for k, op in [("erh", "<"), ("erz", "<"), ("gap", "<"), ("num", ">"), ("rms", "<")]:
-    thr = uf.QC[k]
+    thr = QC_GATE[k]
     frac = (SM[k] < thr).mean() if op == "<" else (SM[k] > thr).mean()
     print(f"  {k} {op} {thr}: {100 * frac:.0f}% pass")
 fig, axes = plt.subplots(1, 4, figsize=(13, 2.8))
 for ax, colname, thr in zip(axes, ["rms", "erh", "erz", "gap"],
-                            [uf.QC["rms"], uf.QC["erh"], uf.QC["erz"], uf.QC["gap"]]):
+                            [QC_GATE["rms"], QC_GATE["erh"], QC_GATE["erz"], QC_GATE["gap"]]):
     ax.hist(SM[colname].dropna(), bins=40, color="#1f77b4")
     ax.axvline(thr, color="crimson", lw=1.2)
     ax.set_xlabel(colname.upper() if colname != "gap" else "Gap (deg)")
@@ -203,7 +255,7 @@ co(r'''# map: located events, QC pass vs fail — UF-subregion zoom (10 km scale
 fig = pygmt.Figure()
 fig.basemap(region=list(UF_BOX), projection="M12c", frame=["af", f"WSen+tLocated events {YEAR} (UF box)"])
 fig.coast(shorelines="0.4p,gray30", land="gray97", water="azure1")
-fail = SM.loc[~SM.index.isin(uf.apply_qc(SM).index)] if len(SM) else SM
+fail = SM.loc[~SM.index.isin(uf.apply_qc(SM, qc=QC_GATE).index)] if len(SM) else SM
 inb = lambda d: d[(d.lon.between(UF_BOX[0], UF_BOX[1])) & (d.lat.between(UF_BOX[2], UF_BOX[3]))]
 smb, qcb = inb(SM), inb(QCOK)
 if len(smb):
@@ -218,11 +270,14 @@ fig.show()''')
 # ---------------------------------------------------------------- stage 5 relocation
 md(r"""## Stage 5 — relocation (HypoDD dt.ct + dt.cc)
 
-Self-fed from this year's association. `RELOC_THROUGH="hypoinverse"` stops at the QC'd absolute subset
-(fast sanity pass); `"dtcc"` runs the full chain incl. GPU cross-correlation (**hours** for dense years).
-Results land in `outputs/reloc/`.""")
+Self-fed from this year's association, with YOUR `QC_GATE` and `XCORR` parameters passed through
+(`--qc` / `--xcorr`). `RELOC_THROUGH="hypoinverse"` stops at the QC'd absolute subset (fast sanity pass);
+`"dtcc"` runs the full chain incl. GPU cross-correlation (**hours** for dense years). Results land in
+`outputs/reloc/`. HypoDD damping/ISTART and the full-run-HypoInverse injection are fixed invariants (see
+the parameters cell).""")
 co(r'''cmd = [sys.executable, "-m", "ufpipe.run_pipeline", "--model", MODEL, "--years", str(YEAR),
-       "--stage-from", "relocate", "--through", RELOC_THROUGH]
+       "--stage-from", "relocate", "--through", RELOC_THROUGH,
+       "--qc", QC_STR, "--xcorr", XCORR_STR]
 if RELOC_THROUGH == "dtcc":
     cmd.append("--clean-cache")
 print("$", " ".join(cmd)); subprocess.run(cmd, check=True)''')
@@ -240,7 +295,7 @@ else:
         xy = np.c_[d.lon * 111.0 * np.cos(np.radians(d.lat.mean())), d.lat * 111.0, d.depth]
         t = cKDTree(xy); dd, _ = t.query(xy, k=2)
         return float(np.median(dd[:, 1]) * 1000.0)
-    qcb = uf.apply_qc(uf.read_sum(SUM_PATH))
+    qcb = uf.apply_qc(uf.read_sum(SUM_PATH), qc=QC_GATE)
     qcb = qcb[(qcb.lon.between(UF_BOX[0], UF_BOX[1])) & (qcb.lat.between(UF_BOX[2], UF_BOX[3]))]
     if len(qcb) > 2 and len(RL) > 2:
         print(f"median nearest-neighbour distance: absolute {med_nnd_m(qcb):.0f} m -> dt.cc {med_nnd_m(RL):.0f} m")
@@ -272,7 +327,7 @@ except FileNotFoundError:
 phs = os.path.join(config.MODELS, MODEL, "HypoInv", "PHS", f"UF{YEAR}.phs")
 rows.append(("3 augment+phs", "written" if os.path.exists(phs) else "-", ""))
 if os.path.exists(SUM_PATH):
-    sm = uf.read_sum(SUM_PATH); qc = uf.apply_qc(sm)
+    sm = uf.read_sum(SUM_PATH); qc = uf.apply_qc(sm, qc=QC_GATE)
     rows.append(("4 locate", f"{len(sm):,} located", f"{len(qc):,} QC-pass ({100 * len(qc) / max(len(sm), 1):.0f}%)"))
 else:
     rows.append(("4 locate", "-", "not run"))

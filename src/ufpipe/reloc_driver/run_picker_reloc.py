@@ -92,6 +92,12 @@ def main():
                          "built the reloc inputs from ufpipe's own detection+association (src/ufpipe/reloc_inputs.py). "
                          "The deprecated in-tree build_sac_and_pyocto.py (per-month detection_test/lib feeder) is "
                          "used only when this flag is absent.")
+    ap.add_argument("--qc", default=None,
+                    help="QC-gate override forwarded to build_qc_catalog, e.g. 'erh=5,erz=5,gap=270,num=5,rms=1.0' "
+                         "(default: uf_cluster.QC)")
+    ap.add_argument("--xcorr", default=None,
+                    help="dt.cc xcorr overrides forwarded to the scaffold, e.g. "
+                         "'interp_hz=1000,fmin=5,fmax=20,cc_threshold=0.7' (default: engine's validated values)")
     YP.add_year_arg(ap)
     a = ap.parse_args()
     p = a.picker; yr = a.year
@@ -120,15 +126,17 @@ def main():
          "--through", "waveforms"], PIPE)
     run([PY, "-m", "pipeline.cli.run_pipeline", "--cluster", slug, "--stage-from", "hypoinverse",
          "--through", "hypoinverse", "--velmodels", "kim2011", "--arc-velmodel", "kim2011"], PIPE)
-    # 4: uf_cluster QC of the .sum -> members_qc / catalog_kma_qc
-    run([PY, os.path.join(HERE, "build_qc_catalog.py"), "--picker", p, "--year", str(yr)], HERE)
+    # 4: uf_cluster QC of the .sum -> members_qc / catalog_kma_qc (gate overridable via --qc)
+    run([PY, os.path.join(HERE, "build_qc_catalog.py"), "--picker", p, "--year", str(yr)]
+        + (["--qc", a.qc] if a.qc else []), HERE)
     if a.through == "hypoinverse":
         link_results(yr, p, slug, slug_qc)
         print(f"\n=== {yr} {p}: through QC in {time.perf_counter()-t0:.0f}s ==="); return
 
-    # 5: QC-subset scaffold + stage + rereference + GPU xcorr -> assemble 02.dt.cc
+    # 5: QC-subset scaffold + stage + rereference + GPU xcorr -> assemble 02.dt.cc (xcorr overridable via --xcorr)
     run([PY, os.path.join(HERE, "scaffold_2016.py"), "--slug", slug_qc,
-         "--catalog", os.path.join(ROOT, "catalog_kma_qc.csv"), "--station-table", sta_table], PIPE)
+         "--catalog", os.path.join(ROOT, "catalog_kma_qc.csv"), "--station-table", sta_table]
+        + (["--xcorr", a.xcorr] if a.xcorr else []), PIPE)
     run([PY, os.path.join(RELOC, "stage.py"), slug_qc, "--reuse-picks",
          "--members", os.path.join(ROOT, "members_qc.txt"), "--wf-root", os.path.join(ROOT, "event_sac"),
          "--catalog", os.path.join(ROOT, "members_event_idx_qc.csv")], RELOC)

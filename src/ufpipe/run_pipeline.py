@@ -69,6 +69,12 @@ def main():
                     help="relocate stage: stop at QC'd absolute location (hypoinverse) or full dt.cc (default)")
     ap.add_argument("--clean-cache", action="store_true",
                     help="relocate stage: delete the interp cache after dt.cc (recommended for multi-year runs)")
+    ap.add_argument("--qc", default=None,
+                    help="relocate stage: QC-gate override, e.g. 'erh=5,erz=5,gap=270,num=5,rms=1.0' "
+                         "(default: uf_cluster.QC)")
+    ap.add_argument("--xcorr", default=None,
+                    help="relocate stage: dt.cc xcorr overrides, e.g. "
+                         "'interp_hz=1000,fmin=5,fmax=20,cc_threshold=0.7' (default: validated engine values)")
     a = ap.parse_args()
 
     stages = STAGES[STAGES.index(a.stage_from):]
@@ -92,7 +98,8 @@ def main():
             if "locate" in stages:
                 core.run_hypoinverse_year(a.model, yr, velmodel=a.velmodel, force=a.force)
             if "relocate" in stages:
-                relocate.run_relocate_year(a.model, yr, through=a.through, clean_cache=a.clean_cache)
+                relocate.run_relocate_year(a.model, yr, through=a.through, clean_cache=a.clean_cache,
+                                           qc=a.qc, xcorr=a.xcorr)
             summary.append((yr, "OK"))
         except Exception as e:
             traceback.print_exc()

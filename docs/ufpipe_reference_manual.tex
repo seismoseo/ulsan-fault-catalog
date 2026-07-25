@@ -303,8 +303,14 @@ Reloc (full) & python -m ufpipe.run\_pipeline -{}-model original -{}-years 2016 
 \end{center}
 \code{-{}-through hypoinverse} stops at the QC'd absolute-location subset; \code{-{}-through dtcc} continues to the
 double-difference relocation. \code{-{}-clean-cache} deletes the $\sim$tens-of-GB interp cache after dt.cc
-(essential for multi-year runs). \code{detection\_test/lib/} is DEPRECATED (see \code{lib/DEPRECATED.md}); the
-relocation internals are documented in \code{src/ufpipe/reloc\_driver/PIPELINE.md} + \code{study\_guide.pdf}.
+(essential for multi-year runs). Two override flags expose the stage-6 knobs per run (defaults = the
+validated values): \code{-{}-qc "erh=5,erz=5,gap=270,num=5,rms=1.0"} (the \code{uf\_cluster.QC} gate) and
+\code{-{}-xcorr "interp\_hz=1000,fmin=5,fmax=20,cc\_threshold=0.7,pre=0.5,post=0.5,margin=0.5"} (the dt.cc
+cross-correlation). The HypoDD adaptive-damping/ISTART=2 scheme and the full-run-HYPOINVERSE injection are
+fixed invariants (not flag-settable). The cockpit notebook (\code{notebooks/00.Run\_yearly\_pipeline.ipynb})
+sets all of these from its parameters cell. \code{detection\_test/lib/} is DEPRECATED (see
+\code{lib/DEPRECATED.md}); the relocation internals are documented in
+\code{src/ufpipe/reloc\_driver/PIPELINE.md} + \code{study\_guide.pdf}.
 
 %================================================================================
 \section{Outputs \& layout}
