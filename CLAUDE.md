@@ -248,6 +248,12 @@ python -m ufpipe.detection --model original --year 2024 --days 1-5    # one stag
 ```
 Detection is idempotent (skips days whose picks already exist). Full details: `docs/how-to-run.md`.
 
+**Interactive notebooks** (builders in `notebooks/`, emitted `.ipynb` gitignored; kernel `base`):
+`build_yearly_run_nb.py` → per-year cockpit (run each stage + intermediate check/map cells; all knobs —
+detection threshold, association gate/tol, QC gate, xcorr — in the top parameters cell, passed through as
+`overrides=`/`--qc`/`--xcorr`). `build_recsec_nb.py` → record sections of N random located events with
+associated P/S picks. Regenerate with `python notebooks/build_*_nb.py`.
+
 ### Performance & shared-server CPU (see `docs/performance-notes.md`)
 
 This is a **shared 64-core server** — keep the footprint polite. Detection sizes its preprocessing

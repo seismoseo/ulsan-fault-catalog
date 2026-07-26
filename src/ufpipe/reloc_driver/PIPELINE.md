@@ -149,6 +149,24 @@ the adaptive HypoDD. One HYPOINVERSE solution, reused — Invariant 1 restored. 
 record-section notebooks nb11/nb12); the QC *selection* itself (596/574/188/160 events unchanged); the pick lag
 measurements in dt.cc (only the origin bookkeeping was wrong).
 
+### Fresh-year fixes (2026-07-25) — running a brand-new year end-to-end
+
+The QC → dt.cc chain had only ever run on years where the validated 2016 work left state behind. Running **2010
+from scratch** surfaced four latent gaps (each now fixed in the driver), so the flow above works for *any* year:
+
+1. **`build_catalog_kma`** read `lat/lon` but ufpipe's per-year pyocto uses `latitude/longitude` → normalize on read.
+2. **`fix_qc_rerun_bug.qc_to_fullrow`** read `members.txt` from a hardcoded `detection_test/` path → resolve via
+   `year_paths` (reloc dirs live under `outputs/reloc/` since the migration).
+3. **The QC dt.cc pipeline** ran `--stage-from rereference`, which *skipped* ph2dt so `event.dat`/`dt.ct` were
+   never built on a fresh cluster → `--stage-from ph2dt` (matches the "re-run rereference → ph2dt → …" intent
+   above; ph2dt reads the injected `.arc`, it does not re-locate).
+4. **`inject_full_hypoinverse`** now also copies the full-run `1.HypoInv/STA/*_hyp.sta` to the QC cluster, since
+   the QC subset skips the hypoinverse stage but ph2dt needs that station file.
+
+Also: the **dt.ct-only baseline** (`01b.dtct_qc`) is a *diagnostic comparison*, not the deliverable — it runs the
+adaptive HypoDD again on catalog differential times only (heavier, no cc) and is now **non-fatal + time-bounded
+(30 min)**, so a slow/failed dt.ct never blocks publishing `hypoDD.reloc.dtcc`.
+
 ---
 
 ## Quick provenance checks (run these if a result looks off)

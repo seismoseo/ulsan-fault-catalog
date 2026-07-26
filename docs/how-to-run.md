@@ -5,7 +5,13 @@
 > **Prefer a notebook?** `python notebooks/build_yearly_run_nb.py` emits
 > `notebooks/00.Run_yearly_pipeline.ipynb` — the per-year cockpit: run each stage from a cell (detection
 > shells to `eqnet` automatically) with intermediate-check + PyGMT map cells between stages, and a
-> computed end-of-year summary. Kernel: `base`. Parameters at the top of the notebook.
+> computed end-of-year summary. Every settable knob (detection threshold, association gate/tol, QC gate,
+> xcorr params) is in the top parameters cell. Kernel: `base`.
+>
+> **Diagnostics:** `python notebooks/build_recsec_nb.py` emits
+> `notebooks/01.Record_sections_located_events.ipynb` — record sections of N random located events (Z
+> waveform vs epicentral distance) with the associated P/S pick times marked, to eyeball that associated
+> picks land on real arrivals. (Builders are tracked; the emitted notebooks are gitignored — regenerate any time.)
 
 ## 0. Environment (once)
 
