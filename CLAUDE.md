@@ -205,7 +205,9 @@ GJ/  NS/  NS_100hz/   the other network waveform dirs (pure waveforms; NOT in gi
 data/
   metadata/     *** single home for all metadata, organized BY KIND ***
     stations/     ks_kg/  gj/  ns/  kigam/     — per-network station tables
-    responses/    master/ (148 MB KS_KG StationXML, gitignored) + fetched/ + small RESP.* text (tracked)
+    responses/    ALL FOUR networks — master/ (148 MB KS_KG StationXML, gitignored) + fetched/ (7 KS)
+                  + gj/ (30 sta) + ns/ (200 sta) + ns_derived/ (N201-N220 CLONED, provisional)
+                  + source/ (raw MARA drop, gitignored). Loaded by src/ufpipe/responses.py
     velocity/     kim1983.csv (PyOcto layered model)
     catalogs/     ghbsn_heo/ (Heo et al.), USGS_M7_event_catalog.csv
   waveforms/    symlinks to the network dirs
@@ -456,6 +458,14 @@ correlate too but separate by hour-of-day + location).
 `analysis/local_magnitudes/ml_pipeline.py` deconvolves each event's response, simulates Wood-Anderson
 (sensitivity 2080, Uhrhammer & Collins 1990), measures peak post-P amplitude with SNR ≥ 3, and
 converts to ML via two attenuation laws.
+
+**Responses now cover all four networks (2026-07-27).** Use `mp.load_full_inventory()` (delegates to
+`ufpipe.responses.load_inventory`), NOT the KS/KG-only `load_combined_inventory`. A station missing
+from the inventory is dropped **silently** — before GJ/NS responses existed, an ML on 2016 or 2021
+would have used only the KS/KG minority (7 of 46 stations in 2016; 43 of 243 in 2021) while appearing
+to succeed. Check with `python -m ufpipe.responses --coverage <year>` (100% for 2010–2024).
+Caveat: NS `N201`–`N220` responses are **cloned** from the common NS response (`ns_derived/`), so ML
+from those stations is provisional — see `data/metadata/responses/README.md`.
 
 **Detectability gate `require_pick=True` (the key bug fix).** Earlier ML had no gate, so a station
 with **no P pick** fell back to a 20 s trace-start noise window → meaningless SNR → far unpicked KS/KG

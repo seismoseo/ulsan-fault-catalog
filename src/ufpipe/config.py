@@ -46,6 +46,18 @@ GJ_STATION_CSV = os.path.join(_META, "stations", "gj", "gj_temporary_station_lis
 STATION_TABLE_CACHE = os.path.join(_META, "stations", "derived")                        # per-year built tables cache
 HYPOINV_STA_DIR = os.path.join(REPO, "data", "hypoinv", "STA")   # per-year HYPOINVERSE station files (GENERATED from the year table)
 
+# --------------------------------------------- instrument responses (consumed by responses.py)
+# One inventory spanning all four networks, for response removal / Wood-Anderson ML. Two formats,
+# both read natively by obspy.read_inventory: StationXML (KS/KG master) and SEED RESP (everything
+# else). Loaded master-first so an authoritative entry always wins over a per-station fill.
+RESPONSE_DIR = os.path.join(_META, "responses")
+RESP_MASTER_DIR = os.path.join(RESPONSE_DIR, "master")            # KS/KG StationXML (also = STATION_XML)
+RESP_FETCHED_DIR = os.path.join(RESPONSE_DIR, "fetched")          # NECIS per-station fills for 7 KS stations
+RESP_GJ_DIR = os.path.join(RESPONSE_DIR, "gj")                    # GJ 2016-2017 arrays, 30 sta (MARA)
+RESP_NS_DIR = os.path.join(RESPONSE_DIR, "ns")                    # NS dense array, 200 sta (MARA dataless2resp)
+RESP_NS_DERIVED_DIR = os.path.join(RESPONSE_DIR, "ns_derived")    # DERIVED clones for N201-N220 (see responses.py)
+RESP_SOURCE_DIR = os.path.join(RESPONSE_DIR, "source")            # raw MARA drop kept for provenance (gitignored)
+
 # --------------------------------------------- detection (PhaseNet) defaults
 # Verified uniform across 2010-2024.
 SAMPLING_RATE = 100.0

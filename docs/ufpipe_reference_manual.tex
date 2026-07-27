@@ -257,6 +257,50 @@ Regenerating took 2010 from \textbf{640 located / 161 QC-pass} to \textbf{791 / 
 later years --- the legacy list knew 13 of 46 stations in 2016 (no GJ array) and 44 of 243 in 2021 (no NS array).
 \end{warnbox}
 
+\subsection{Instrument responses --- all four networks (\code{src/ufpipe/responses.py})}
+\code{responses.py} is to responses what \code{stations.py} is to coordinates: the single source of truth.
+\code{load\_inventory(networks=None)} returns one merged \code{obspy.Inventory} spanning KS/KG/GJ/NS, built
+master-first so an authoritative entry is never shadowed by a per-station fill. Sources, all under
+\code{data/metadata/responses/}:
+
+\begin{center}\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Network} & \textbf{Directory} & \textbf{Format} & \textbf{Coverage} \\
+\midrule
+KS + KG & \code{master/} & StationXML & \code{KS\_KG\_metadata\_1.0.2.xml} \\
+KS (7 gaps) & \code{fetched/extracted/} & SEED RESP & fetched from NECIS \\
+GJ & \code{gj/} & SEED RESP & 30 stations $\times$ 3 (MARA) \\
+NS & \code{ns/} & SEED RESP & 200 stations $\times$ 3 (MARA) \\
+NS \code{N201}--\code{N220} & \code{ns\_derived/} & SEED RESP & 20 stations $\times$ 3, \textbf{derived} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Coverage is \textbf{100\% of the station table for every year 2010--2024}, all three channels.
+Check it with \code{python -m ufpipe.responses -{}-coverage <year>}. The ML side reaches the same inventory
+through \code{ml\_pipeline.load\_full\_inventory()}.
+
+\begin{warnbox}{A missing response is silent rather than loud}
+Response removal is what turns counts into Wood-Anderson millimetres. A station absent from the inventory
+raises no error --- \code{remove\_response} simply skips it, so the event's ML is the median over whatever
+stations happened to have metadata. Before GJ and NS responses existed, an ML computed on a 2016 or 2021
+catalogue would have quietly used only the KS/KG minority (7 of 46 stations in 2016; 43 of 243 in 2021)
+while appearing to succeed. Run the coverage check before trusting any ML catalogue.
+\end{warnbox}
+
+\begin{warnbox}{\code{ns\_derived/} rests on an assumption --- N2xx magnitudes are provisional}
+The MARA dataless (2020-06-03) predates the \code{N201}--\code{N220} deployment (first data 2022.237), so those 20
+stations have no authoritative response. All 600 authoritative NS RESP files are byte-identical apart from
+station code and epoch start date --- one instrument configuration for the whole array (754.3 $\times$
+$4\!\times\!10^{5} = 3.0172\!\times\!10^{8}$ counts/(m/s), exact) --- so \code{write\_derived\_ns} clones it for
+the missing block, stamping each with that station's own first-day-on-disk as the start date. The assumption
+is that the 2022 expansion kept the same configuration; the N2xx stations do record at the same 200\,Hz, in
+3 components, at comparable count amplitudes, but there is no manufacturer record here to confirm it. Every
+generated file carries a \code{DERIVED by ufpipe.responses} header. Delete the directory and re-derive the
+moment real metadata arrives.
+\end{warnbox}
+
 %================================================================================
 \section{How to run}
 
@@ -385,7 +429,8 @@ legacy pre-2026-07 whole-year artifacts on disk are named \code{kim1983}.
 \medskip
 \noindent\textbf{Inputs} (metadata by kind, 2026-07): waveforms in \code{KS\_KG/ GJ/ NS/ NS\_100hz/} (station
 dirs at each root); station tables in \code{data/metadata/stations/\{ks\_kg,gj,ns,kigam\}/} (+ the per-year
-derived cache \code{stations/derived/}); instrument responses in \code{data/metadata/responses/}; velocity
+derived cache \code{stations/derived/}); instrument responses for all four networks in
+\code{data/metadata/responses/\{master,fetched,gj,ns,ns\_derived\}/} (\S4.4); velocity
 model in \code{data/metadata/velocity/}; HYPOINVERSE control inputs (STA/\code{kim*}) in \code{data/hypoinv/}.
 
 %================================================================================

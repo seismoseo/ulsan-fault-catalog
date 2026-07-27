@@ -48,7 +48,7 @@ DEAD_TRACE_FLOOR_MM = 1e-8
 
 
 # --- inventory loaders -----------------------------------------------------
-def load_combined_inventory(master_dir, fetched_dir=None) -> obspy.Inventory:
+def load_combined_inventory(master_dir, fetched_dir=None, extra_dirs=None) -> obspy.Inventory:
     """Merge the master StationXML(s) and (optionally) the NECIS-fetched RESP files
     into a single `obspy.Inventory`. Both formats are auto-detected by obspy.
 
@@ -59,23 +59,53 @@ def load_combined_inventory(master_dir, fetched_dir=None) -> obspy.Inventory:
     For backward compatibility, also accepts:
         fetched_dir/*.xml                                 ← per-station StationXMLs
 
-    The master is loaded first; the fetched files are appended after, so where both
-    have the same (network, station) the master's entry wins."""
+    `extra_dirs` is an iterable of additional directories holding SEED `RESP.*` files
+    (the GJ / NS multi-network responses live in their own per-network directories —
+    see `ufpipe.responses`). They are appended last.
+
+    The master is loaded first; everything else is appended after, so where two sources
+    cover the same (network, station) the master's entry wins."""
     inv = obspy.read_inventory(os.path.join(master_dir, "*.xml"))
+    targets = []
     if fetched_dir and os.path.isdir(fetched_dir):
         # Priority: RESP files under extracted/, then any .xml at the root.
         # SEED RESP filenames begin with "RESP." and have no extension.
-        targets = []
         ext_dir = os.path.join(fetched_dir, "extracted")
         if os.path.isdir(ext_dir):
             targets.extend(sorted(glob.glob(os.path.join(ext_dir, "RESP.*"))))
         targets.extend(sorted(glob.glob(os.path.join(fetched_dir, "*.xml"))))
-        for f in targets:
-            try:
-                inv += obspy.read_inventory(f)
-            except Exception as exc:                  # noqa: BLE001
-                warnings.warn(f"failed to load {f}: {exc}", RuntimeWarning)
+    for d in (extra_dirs or []):
+        if d and os.path.isdir(d):
+            targets.extend(sorted(glob.glob(os.path.join(d, "RESP.*"))))
+    for f in targets:
+        try:
+            inv += obspy.read_inventory(f)
+        except Exception as exc:                  # noqa: BLE001
+            warnings.warn(f"failed to load {f}: {exc}", RuntimeWarning)
     return inv
+
+
+def load_full_inventory(networks=None) -> obspy.Inventory:
+    """The four-network inventory (KS/KG/GJ/NS) — the one to use for any ML run that
+    touches GJ or NS stations.
+
+    Delegates to `ufpipe.responses.load_inventory`, which owns the per-network response
+    sources exactly as `ufpipe.stations` owns the coordinates. Falls back to the KS/KG-only
+    `load_combined_inventory` if ufpipe is not importable, so this module still runs
+    standalone — but then GJ/NS stations are silently absent, which is precisely the failure
+    this function exists to avoid, so the fallback warns and still reads the per-network
+    directories directly off disk."""
+    try:
+        from ufpipe import responses as _r
+        return _r.load_inventory(networks=networks)
+    except ImportError:
+        warnings.warn("ufpipe not importable (`pip install -e .` in this env) — reading the "
+                      "response directories directly by relative path instead", RuntimeWarning)
+    resp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "..", "data", "metadata", "responses")
+    return load_combined_inventory(
+        os.path.join(resp, "master"), os.path.join(resp, "fetched"),
+        extra_dirs=[os.path.join(resp, n) for n in ("gj", "ns", "ns_derived")])
 
 
 def report_coverage(stations_needed, inventory) -> pd.DataFrame:

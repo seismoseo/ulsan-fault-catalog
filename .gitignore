@@ -107,6 +107,8 @@ analysis/**/*.gif
 # responses: the 148 MB master StationXML and the fetched zips are local-only; small extracted RESP.* text stays tracked.
 data/metadata/responses/master/
 data/metadata/responses/fetched/zips/
+# raw MARA drop (8 MB dataless + zips) kept locally for provenance; gj/ + ns/ hold the extracted text.
+data/metadata/responses/source/
 data/metadata/stations/kigam/*.xml
 data/metadata/catalogs/ghbsn_heo/*.pdf
 # per-year station-table cache built by ufpipe/stations.py (regenerable)
