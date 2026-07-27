@@ -129,8 +129,12 @@ def build_reloc_inputs(model, year, out_root):
         pyocto_root=os.path.join(out_root, "pyocto"), pyocto_velmodel=VELMODEL,
         target_hz=SAC_TARGET_HZ, skip_existing=True, progress=True)
     summ.to_csv(os.path.join(out_root, "event_sac_export_summary.csv"), index=False)
-    ok = int((summ.status == "ok").sum()) if "status" in summ else len(summ)
-    print(f"DONE: {ok}/{len(cat)} events with SAC -> {out_root}/event_sac/")
+    if "status" in summ:
+        counts = summ.status.value_counts().to_dict()
+        have = int(sum(v for k, v in counts.items() if k in ("ok", "skip_existing")))
+        print(f"DONE: {have}/{len(cat)} events have SAC ({counts}) -> {out_root}/event_sac/")
+    else:
+        print(f"DONE: {len(summ)}/{len(cat)} events have SAC -> {out_root}/event_sac/")
     return out_root
 
 

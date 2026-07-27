@@ -63,6 +63,24 @@ def link_results(year, picker, slug, qc_slug):
     print(f"  [{picker}] linked {n} results -> {os.path.relpath(res, DT)}/", flush=True)
 
 
+
+def _dtct_only_inp(text):
+    """Convert a dt.cc hypoDD.inp into a dt.ct-ONLY one: blank the cross-correlation input filename,
+    set IDAT=2 (catalog differential times only) and OBSCC=0. Without this the seed .inp still names
+    dt.cc_0.7_combined -- which does not exist in the dt.ct-only dir -- and HypoDD aborts immediately with
+    'FILE DOES NOT EXIST / CHECK IDATA,IPHASE: dt.cc_0.7_combined'."""
+    lines = text.splitlines()
+    for i, L in enumerate(lines):
+        if i + 1 >= len(lines):
+            break
+        if L.startswith("* cross correlation diff times"):
+            lines[i + 1] = ""                                   # no cc file for a ct-only run
+        elif L.startswith("*--- data type selection"):           # IDAT IPHA DIST
+            f = lines[i + 1].split(); f[0] = "2"; lines[i + 1] = "    " + "     ".join(f)
+        elif L.startswith("*--- event clustering"):              # OBSCC OBSCT
+            f = lines[i + 1].split(); f[0] = "0"; lines[i + 1] = "    " + "      ".join(f)
+    return "\n".join(lines) + "\n"
+
 def inject_full_hypoinverse(picker, full_slug, qc_slug, root):
     """Overwrite the QC cluster's HypoInverse .sum/.arc with the FULL-run solution subset to the QC members
     (renumbered to the QC cuspids 200000+qc_row that match the event dirs). This REPLACES the redundant, buggy
@@ -184,7 +202,8 @@ def main():
         inp_tpl = os.path.join(RUNS, "uf_2016", "2.HypoDD", "01.dt.ct", "hypoDD.inp.pipeline_default")
         if not os.path.exists(inp_tpl):                   # any year's own dt.cc .inp is an equivalent seed
             inp_tpl = os.path.join(dtcc, "hypoDD.inp")
-        shutil.copyfile(inp_tpl, os.path.join(dtct, "hypoDD.inp"))
+        with open(os.path.join(dtct, "hypoDD.inp"), "w") as _f:
+            _f.write(_dtct_only_inp(open(inp_tpl).read()))       # ct-only: blank cc file, IDAT=2, OBSCC=0
         run([PY, os.path.join(HERE, "run_hypodd_kim2011_istart2.py"), dtct], HERE, timeout=1800)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
         print(f"  [{p}] dt.ct-only baseline skipped ({type(e).__name__}); dt.cc result is unaffected.", flush=True)
