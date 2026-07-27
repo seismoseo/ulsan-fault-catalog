@@ -2,8 +2,11 @@
 
 > **Full reference:** [ufpipe_reference_manual.pdf](ufpipe_reference_manual.pdf) — all stages, parameters, and troubleshooting in one place.
 
-> **Prefer a notebook?** `python notebooks/build_yearly_run_nb.py` emits
-> `notebooks/00.Run_yearly_pipeline.ipynb` — the per-year cockpit: run each stage from a cell (detection
+> **Prefer notebooks?** `python notebooks/make_year_notebooks.py --years 2010-2024` builds a tidy
+> **folder per year** — `notebooks/<year>/00.Run_pipeline_<year>.ipynb` (the 6-stage cockpit) and
+> `01.Record_sections_<year>.ipynb` (record sections + augmented-events figure), each with YEAR/MODEL
+> already filled in. `--status` alone prints a per-year progress table (picks / assoc / located / QC /
+> dt.cc) so you can see where every year stands. Details of the cockpit: run each stage from a cell (detection
 > shells to `eqnet` automatically) with intermediate-check + PyGMT map cells between stages, and a
 > computed end-of-year summary. Every settable knob (detection threshold, association gate/tol, QC gate,
 > xcorr params) is in the top parameters cell. Kernel: `base`.

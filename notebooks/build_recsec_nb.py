@@ -8,9 +8,21 @@ Kernel: base (obspy/pandas). Reads the pyocto events + assignment (which P/S pic
 the located .sum (to restrict to genuinely-located events), cuts Z waveforms from the continuous archive
 around each origin, and overlays the picks. Parameters (YEAR/MODEL/N/window/filter/seed) at the top.
 """
+import argparse
+import os
+import re
 import nbformat as nbf
 
-NB = "notebooks/01.Record_sections_located_events.ipynb"
+_ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+_ap.add_argument("--year", type=int, default=2010, help="year to hard-wire into the notebook")
+_ap.add_argument("--model", default="phasenet_plus", help="picker model to hard-wire")
+_ap.add_argument("--outdir", default=None,
+                 help="output dir (default notebooks/<year>/ — one tidy folder per year)")
+_A = _ap.parse_args()
+_OUT = _A.outdir or os.path.join("notebooks", str(_A.year))
+os.makedirs(_OUT, exist_ok=True)
+
+NB = os.path.join(_OUT, f"01.Record_sections_{_A.year}.ipynb")
 C = []
 md = lambda s: C.append(nbf.v4.new_markdown_cell(s))
 co = lambda s: C.append(nbf.v4.new_code_cell(s))
@@ -270,5 +282,10 @@ density**: on a sparse year it is negligible, on a dense one (GJ 2016, NS 2017+)
 
 nb = nbf.v4.new_notebook(cells=C, metadata={"kernelspec": {"display_name": "Python 3",
                                                            "language": "python", "name": "python3"}})
+# hard-wire the requested year/model into the parameters cell (one notebook per year)
+for _c in nb.cells:
+    if _c.cell_type == "code":
+        _c.source = re.sub(r'(?m)^(YEAR\s*=\s*)\d+', lambda m: m.group(1) + str(_A.year), _c.source)
+        _c.source = re.sub(r'(?m)^(MODEL\s*=\s*)"[^"]*"', lambda m: m.group(1) + f'"{_A.model}"', _c.source)
 nbf.write(nb, NB)
 print(f"wrote {NB} ({len(C)} cells, unexecuted)")

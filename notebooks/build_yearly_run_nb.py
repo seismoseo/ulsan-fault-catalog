@@ -11,9 +11,21 @@ is idempotent/resumable, so re-running the notebook top-to-bottom is always safe
 Kernel: **base** (pyocto/pygmt live there). The detection cell shells out to the `eqnet` env; the
 relocation cell shells out to run_pipeline (which handles the pq-gpu xcorr env internally).
 """
+import argparse
+import os
+import re
 import nbformat as nbf
 
-NB = "notebooks/00.Run_yearly_pipeline.ipynb"
+_ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+_ap.add_argument("--year", type=int, default=2010, help="year to hard-wire into the notebook")
+_ap.add_argument("--model", default="phasenet_plus", help="picker model to hard-wire")
+_ap.add_argument("--outdir", default=None,
+                 help="output dir (default notebooks/<year>/ — one tidy folder per year)")
+_A = _ap.parse_args()
+_OUT = _A.outdir or os.path.join("notebooks", str(_A.year))
+os.makedirs(_OUT, exist_ok=True)
+
+NB = os.path.join(_OUT, f"00.Run_pipeline_{_A.year}.ipynb")
 cells = []
 md = lambda s: cells.append(nbf.v4.new_markdown_cell(s))
 co = lambda s: cells.append(nbf.v4.new_code_cell(s))
@@ -374,5 +386,10 @@ print("\nTake-homes: check (i) pick-count timeline for station dropouts, (ii) pi
 nb = nbf.v4.new_notebook(cells=cells,
                          metadata={"kernelspec": {"display_name": "Python 3", "language": "python",
                                                   "name": "python3"}})
+# hard-wire the requested year/model into the parameters cell (one notebook per year)
+for _c in nb.cells:
+    if _c.cell_type == "code":
+        _c.source = re.sub(r'(?m)^(YEAR\s*=\s*)\d+', lambda m: m.group(1) + str(_A.year), _c.source)
+        _c.source = re.sub(r'(?m)^(MODEL\s*=\s*)"[^"]*"', lambda m: m.group(1) + f'"{_A.model}"', _c.source)
 nbf.write(nb, NB)
 print(f"wrote {NB} ({len(cells)} cells, unexecuted)")
