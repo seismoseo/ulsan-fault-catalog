@@ -188,3 +188,48 @@ def discover_rows(year, networks=None, stations=None, use_ns_100hz=None):
             archive = config.NS_100HZ_DIR
         rows.append(dict(net=r.net, sta=r.sta, band=r.band, archive=archive))
     return rows
+
+
+# ---------------------------------------------------------------- HYPOINVERSE station files
+# The per-year HYPOINVERSE station files are DERIVED from the year table above — the single source of
+# truth — instead of a hand-maintained static list. A stale/incomplete list is silently destructive:
+# HYPOINVERSE prints "SKIP PHASE CARD WITH UNKNOWN STATION" for every pick at a station it does not know,
+# and an event left with < 4 usable phases dies with "CANT SOLVE". (2010 shipped a 10-station list while
+# the association used 12 -> 21% of picks discarded and 26% of events never located; those losses then
+# propagate into the .arc -> ph2dt -> event.dat/dt.ct that HypoDD relocates on.)
+HYP_COMPONENT = "HHZ"          # must match the channel written into the .phs by core.write_phs
+
+
+def hyp_sta_line(net, sta, lat, lon, elev, comp=HYP_COMPONENT):
+    """One fixed-format HYPOINVERSE station record (byte-compatible with the legacy files):
+    cols 1-6 station, 7-8 network, 11-13 component, 16-25 lat deg+min+N/S, 27-37 lon deg+min+E/W, 39-42 elev."""
+    la_d = int(abs(lat)); la_m = (abs(lat) - la_d) * 60.0
+    lo_d = int(abs(lon)); lo_m = (abs(lon) - lo_d) * 60.0
+    ns = "N" if lat >= 0 else "S"
+    ew = "E" if lon >= 0 else "W"
+    return (f"{sta:<6s}{net:<2s}  {comp:<3s}  "
+            f"{la_d:2d} {la_m:7.4f}{ns}{lo_d:3d} {lo_m:7.4f}{ew}{int(elev):4d}")
+
+
+def write_hypoinverse_sta(year, out_dir=None, networks=None, backup_legacy=True):
+    """Generate `UF<year>_hyp.sta` (fixed-format, read by the HYPOINVERSE control file) and `UF<year>.sta`
+    (CSV `NET.STA,lat,lon,elev,weight`, read by `uflib.uf_cluster.load_stations`) from the year table.
+
+    Idempotent. The first regeneration copies any pre-existing hand-maintained file to `*.legacy` so the
+    historical list stays recoverable. Returns (hyp_path, csv_path, n_stations)."""
+    out_dir = out_dir or config.HYPOINV_STA_DIR
+    os.makedirs(out_dir, exist_ok=True)
+    S = build_year_table(year, networks=networks).sort_values(["net", "sta"])
+    hyp = os.path.join(out_dir, f"UF{year}_hyp.sta")
+    csv = os.path.join(out_dir, f"UF{year}.sta")
+    for p in (hyp, csv):
+        if backup_legacy and os.path.exists(p) and not os.path.exists(p + ".legacy"):
+            import shutil
+            shutil.copy2(p, p + ".legacy")
+    with open(hyp, "w") as f:
+        for r in S.itertuples():
+            f.write(hyp_sta_line(r.net, r.sta, r.lat, r.lon, r.elev) + "\n")
+    with open(csv, "w") as f:
+        for r in S.itertuples():
+            f.write(f"{r.net}.{r.sta},{r.lat},{r.lon},{r.elev},100.0\n")
+    return hyp, csv, len(S)

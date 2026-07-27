@@ -82,6 +82,14 @@ outputs/reloc/reloc_<year>_uf[_<model>]/results/          (hypoDD.reloc.dtcc —
 
 ## 4. Absolute location — `run_hypoinverse.py`
 
+- **Station file is GENERATED** from the per-year multi-network table (`stations.write_hypoinverse_sta`),
+  not hand-maintained: `STA/UF<year>_hyp.sta` (+ the `UF<year>.sta` CSV used by `uf_cluster.load_stations`).
+  A stale/incomplete list is silently destructive — HYPOINVERSE prints `SKIP PHASE CARD WITH UNKNOWN STATION`
+  for every pick at an unknown station and then drops events left with < 4 phases (`CANT SOLVE`), and those
+  losses propagate into the `.arc` → ph2dt → `dt.ct` that HypoDD relocates on. (2010 shipped a 10-station list
+  against 12 used: 21% of picks discarded; regenerating took located 640→791 and QC-pass 161→303.)
+  `--no-regen-sta` keeps an existing file.
+
 - **Tool**: external `hyp1.40` binary (must be on `PATH`).
 - Generates the HYPOINVERSE control on the fly (from the `UF<year>.sh` template) parameterized by
   year + `--velmodel`; runs in `outputs/models/<model>/HypoInv/` where `STA/` and the `*.crh` crustal-model

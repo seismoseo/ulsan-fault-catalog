@@ -1000,7 +1000,7 @@ def ensure_sta(model):
     sta = os.path.join(config.hyp_dir(model), "STA")
     if os.path.lexists(sta):
         return sta
-    shared = os.path.join(config.ROOT, "HypoInv", "STA")
+    shared = config.HYPOINV_STA_DIR                  # data/hypoinv/STA (was the defunct KS_KG/HypoInv/STA)
     os.makedirs(config.hyp_dir(model), exist_ok=True)
     os.symlink(shared, sta)
     print(f"[sta] linked {os.path.relpath(sta, config.MODELS)} -> {shared}")
@@ -1033,8 +1033,12 @@ def ensure_crh(model, velmodel):
     return vmdir
 
 
-def run_hypoinverse_year(model, year, velmodel=None, force=False):
-    """Run hyp1.40 for one year/velocity-model; outputs land in models/<model>/HypoInv/<velmodel>/."""
+def run_hypoinverse_year(model, year, velmodel=None, force=False, networks=None, regen_sta=True):
+    """Run hyp1.40 for one year/velocity-model; outputs land in models/<model>/HypoInv/<velmodel>/.
+
+    `regen_sta=True` (default) regenerates STA/UF<year>_hyp.sta from the multi-network year table before
+    running, so HYPOINVERSE knows exactly the stations the association used. Set False to keep a
+    hand-maintained station file."""
     import shutil
     import subprocess
 
@@ -1043,6 +1047,14 @@ def run_hypoinverse_year(model, year, velmodel=None, force=False):
     hd = config.hyp_dir(model)
     region = f"UF{year}"
     ensure_sta(model)                         # control file reads STA/UF<year>_hyp.sta (must exist)
+    # Regenerate that station file from the multi-network year table (the single source of truth).
+    # A stale/incomplete list is silently destructive: HYPOINVERSE prints "SKIP PHASE CARD WITH UNKNOWN
+    # STATION" for every pick at a station it does not know and then drops events left with < 4 phases
+    # ("CANT SOLVE"); those losses also propagate into the .arc -> ph2dt -> dt.ct that HypoDD uses.
+    if regen_sta:
+        _h, _c, _n = _stations.write_hypoinverse_sta(year, networks=networks)
+        print(f"[locate] station file regenerated from the {year} table: {_n} stations "
+              f"-> {os.path.relpath(_h, config.REPO)}")
 
     phs = config.phs_file(model, year)
     if not os.path.exists(phs):

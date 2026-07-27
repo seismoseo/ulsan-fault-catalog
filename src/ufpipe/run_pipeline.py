@@ -100,7 +100,8 @@ def main():
             if "phs" in stages:
                 core.write_phs(a.model, yr, force=a.force)
             if "locate" in stages:
-                core.run_hypoinverse_year(a.model, yr, velmodel=a.velmodel, force=a.force)
+                core.run_hypoinverse_year(a.model, yr, velmodel=a.velmodel, force=a.force,
+                                          networks=networks)
             if "relocate" in stages:
                 relocate.run_relocate_year(a.model, yr, through=a.through, clean_cache=a.clean_cache,
                                            qc=a.qc, xcorr=a.xcorr)

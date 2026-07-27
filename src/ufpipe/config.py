@@ -44,6 +44,7 @@ NS_STATION_CSV = os.path.join(_META, "stations", "ns", "20231227",
                               "GHBSN_station_list_240220_modified_code.csv")            # NS coords/epochs
 GJ_STATION_CSV = os.path.join(_META, "stations", "gj", "gj_temporary_station_list.csv")  # GJ coords
 STATION_TABLE_CACHE = os.path.join(_META, "stations", "derived")                        # per-year built tables cache
+HYPOINV_STA_DIR = os.path.join(REPO, "data", "hypoinv", "STA")   # per-year HYPOINVERSE station files (GENERATED from the year table)
 
 # --------------------------------------------- detection (PhaseNet) defaults
 # Verified uniform across 2010-2024.
