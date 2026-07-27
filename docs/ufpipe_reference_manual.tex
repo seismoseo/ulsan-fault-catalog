@@ -37,7 +37,7 @@
 \begin{center}
 {\huge\bfseries\sffamily\color{accent} Ulsan-Fault earthquake catalog pipeline}\\[2mm]
 {\large\sffamily Reference manual: detection $\rightarrow$ association $\rightarrow$ location $\rightarrow$ relocation (HypoDD dt.ct + dt.cc)}\\[2mm]
-{\small\color{soft} Long-term (2010–present) catalog for the Ulsan Fault, SE Korea\hfill rev.\ 2026-07-24 · \code{src/ufpipe}}
+{\small\color{soft} Long-term (2010–present) catalog for the Ulsan Fault, SE Korea\hfill rev.\ 2026-07-27 · \code{src/ufpipe}}
 \end{center}
 \vspace{1mm}\hrule\vspace{3mm}
 
@@ -51,6 +51,12 @@ detection+association (\code{ufpipe.reloc\_inputs}) and runs the orchestration i
 \code{detection\_test/} is a \textbf{fully frozen pilot archive} (the 2016 4-picker comparison;
 \code{lib/} DEPRECATED, see \code{detection\_test/lib/DEPRECATED.md}). The relocation internals have a
 dedicated guide: \code{src/ufpipe/reloc\_driver/PIPELINE.md} + the pilot's \code{study\_guide.pdf}.}
+
+\begin{center}\small\color{soft}
+\textbf{Data scope (verified 2026-07):} the waveform archive covers \textbf{2010--2024}, ending at
+2024 day 305 (31 Oct 2024). No 2025+ data is present in any network directory, so 2024's 305 daily pick
+files are complete for the data that exists.
+\end{center}
 
 \tableofcontents
 \vspace{3mm}\hrule
@@ -234,12 +240,39 @@ Set \code{PHS\_WEIGHT\_SCHEME="phase"} for the legacy fixed P=0/S=1.
 a layered $V_p$/$V_s$ model; HYPOINVERSE \code{*.crh} tables live in \code{data/hypoinv/\{kim1983,kim2011\}/}).
 \code{PHASE\_CHANNELS = \{P: HHZ, S: HHN\}}.
 
+\medskip
+\noindent\textbf{The HYPOINVERSE station file is GENERATED, not hand-maintained.} Before locating,
+\code{stations.write\_hypoinverse\_sta(year)} derives \code{STA/UF<year>\_hyp.sta} (fixed-format) and
+\code{STA/UF<year>.sta} (CSV, read by \code{uf\_cluster.load\_stations}) from the multi-network year table ---
+the single source of truth. \code{-{}-no-regen-sta} keeps an existing file; the previous hand file is
+preserved once as \code{*.legacy}.
+
+\begin{warnbox}{Why this matters --- a silent and destructive failure mode}
+A stale or incomplete station list does \emph{not} raise an error. HYPOINVERSE prints
+\code{SKIP PHASE CARD WITH UNKNOWN STATION} for every pick at a station it does not know, then drops any event
+left with $<4$ usable phases (\code{CANT SOLVE}) --- and those losses propagate into the \code{.arc}
+$\rightarrow$ ph2dt $\rightarrow$ \code{event.dat}/\code{dt.ct} that HypoDD relocates on. The shipped legacy
+list held \textbf{10} stations for 2010 while the association used \textbf{12}: 21\% of picks were discarded.
+Regenerating took 2010 from \textbf{640 located / 161 QC-pass} to \textbf{791 / 303}. The gap was far larger in
+later years --- the legacy list knew 13 of 46 stations in 2016 (no GJ array) and 44 of 243 in 2021 (no NS array).
+\end{warnbox}
+
 %================================================================================
 \section{How to run}
 
+\begin{keybox}{Notebooks --- one tidy folder per year}
+\code{python notebooks/make\_year\_notebooks.py -{}-years 2010-2024} builds, for each year,
+\code{notebooks/<year>/00.Run\_pipeline\_<year>.ipynb} (the 6-stage cockpit: run + check + PyGMT maps, every
+knob in the top parameters cell) and \code{01.Record\_sections\_<year>.ipynb} (record sections with associated
+P/S picks + a dedicated augmented-events figure), with YEAR/MODEL pre-filled.\\[1mm]
+\code{python notebooks/make\_year\_notebooks.py -{}-status} prints the per-year progress table
+(picks / assoc / located / QC / dt.cc) read from disk --- the way to manage a multi-year run.
+Kernel \code{base}; the emitted notebooks are gitignored (the builders are tracked).
+\end{keybox}
+
 \begin{keybox}{Standard runs (from the repo root)}
 \begin{tabular}{@{}>{\ttfamily}p{8.4cm}>{\raggedright\arraybackslash}p{6.2cm}@{}}
-python -m ufpipe.run\_pipeline -{}-model original -{}-years 2024 & one year, all 5 stages \\
+python -m ufpipe.run\_pipeline -{}-model original -{}-years 2024 & one year, all 6 stages \\
 python -m ufpipe.run\_pipeline -{}-model original -{}-years 2010-2024 & the whole record \\
 python -m ufpipe.run\_pipeline -{}-model original -{}-years 2015,2016 -{}-velmodel kim1983 & specific years, kim1983 \\
 python -m ufpipe.run\_pipeline -{}-model original -{}-years 2024 -{}-stage-from association & resume (picks already done) \\
@@ -252,7 +285,9 @@ python -m ufpipe.run\_pipeline -{}-model original -{}-years 2016 -{}-stage-from 
 \noindent\textbf{CLI flags:} \code{-{}-model} · \code{-{}-years} (\code{'2010-2024'} or \code{'2015,2016'}) ·
 \code{-{}-velmodel} · \code{-{}-days} · \code{-{}-device \{cuda,cpu\}} · \code{-{}-workers} · \code{-{}-strict} ·
 \code{-{}-force} (allow writing to \code{stead}) ·\\ \code{-{}-stage-from
-\{detection,association,augment,phs,locate\}} (start mid-chain).
+\{detection,association,augment,phs,locate,relocate\}} (start mid-chain) ·
+\code{-{}-gate}/\code{-{}-pick-match-tol}/\dots\ (association, \S4.2) ·
+\code{-{}-qc}/\code{-{}-xcorr} (relocation, \S7) · \code{-{}-no-regen-sta} (keep an existing station file).
 
 \begin{warnbox}{Shared 64-core server — always pin cores}
 Detection sizes its preprocessing pool and \code{torch} threads from the process CPU \emph{affinity}, capped by
