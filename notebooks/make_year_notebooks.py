@@ -36,6 +36,24 @@ def parse_years(s):
     return out
 
 
+def discover_years(model):
+    """Every year the pipeline can actually work on = years with detected picks on disk, unioned with
+    years that have waveform data. Data-driven so the list never silently under-reports (and picks up new
+    years automatically as data arrives) — do NOT hard-code a range."""
+    sys.path.insert(0, os.path.join(REPO, "src"))
+    from ufpipe import config
+    import glob, re
+    yrs = set()
+    root = os.path.join(config.MODELS, model, "detection_location")
+    if os.path.isdir(root):
+        yrs |= {int(d) for d in os.listdir(root) if d.isdigit()}
+    for cache in glob.glob(os.path.join(config.STATION_TABLE_CACHE, "stations_*.csv")):
+        m = re.search(r"stations_(\d{4})\.csv$", cache)
+        if m:
+            yrs.add(int(m.group(1)))
+    return sorted(yrs)
+
+
 def status_row(year, model):
     """What exists on disk for this year (so you can see where each year stands)."""
     sys.path.insert(0, os.path.join(REPO, "src"))
@@ -71,9 +89,7 @@ def main():
     ap.add_argument("--status", action="store_true", help="print the per-year progress table and exit")
     a = ap.parse_args()
 
-    years = parse_years(a.years) if a.years else sorted(
-        int(d) for d in os.listdir(HERE) if d.isdigit() and os.path.isdir(os.path.join(HERE, d))
-    ) or list(range(2010, 2025))
+    years = parse_years(a.years) if a.years else discover_years(a.model)
 
     if not a.status:
         for y in years:
