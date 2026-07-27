@@ -110,12 +110,12 @@ the **next 8 largest-event clusters** (ranks 3–10; `build_cluster_svd_next8_nb
   Differential times pin *relative* positions tightly but barely constrain the *absolute centroid depth*.
   Undamped **SVD** has no anchor, so it slides the whole cloud down that null direction to a **seed-dependent**
   depth (m373: whole-box 11.5 → 9.5 km from a whole-box seed, but 10.4 km from a catalog seed — proves it's the
-  solver, not the data; m389 barely moves, 13.77→13.75, so it's volume-specific). **Light-damped LSQR (CND 40-80,
+  solver, not the data; m389 barely moves, 13.77→13.75, so it's volume-specific). **Light-damped LSQR (CND 60-80,
   `stage_primary`)** is softly anchored to the seed and holds the **physical** whole-box centroid at *every* damping
   level, gives the **same relative structure** as SVD (≈10 m median, identical thickness), and drops no events. So
   the reported solver is LSQR-CND; SVD is kept only as the nb33 §1 depth-drift diagnostic. **LSQR is also ~500×
   faster** than SVD (m389 3 s vs 26 min; dense O(params²)).
-- **Damping = PocketQuake-style PER-SET adaptive (`_adaptive_damp`, CND 40–80 per weighting set).** stage_primary
+- **Damping = PocketQuake-style PER-SET adaptive (`_adaptive_damp`, CND 60–80 per weighting set).** stage_primary
   and the bootstrap tune EACH of the 7 weighting sets' DAMP via a feedback loop (`new = damp·(CND/60)^0.5`, ≤12
   attempts) so every set's worst-iteration CND lands in 40–80 — vendored from `pipeline/core/hypodd.py:_exec_hypodd`.
   **The earlier single-global-DAMP scan (floor 15, final-iteration CND only) was WRONG**: it over-damped small

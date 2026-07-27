@@ -85,7 +85,7 @@ directly, the pipeline would subtract 9 h and place every event 9 h in the past.
 | 6 | **Re-reference** | pipeline `rereference` | `.sum` origins → restamps SAC `nz*` + `a`/`t0` in `waveforms_100km/` | **Must read the full-run `.sum`.** ⚠️ origins flow into dt.cc. |
 | 7 | **ph2dt** | pipeline `ph2dt` | `.arc` → `ncsn2pha` → `.pha` → `event.dat`, `event.sel`, `dt.ct` | Same `.arc` as Stage 4/6 → `event.dat` seeds + `dt.ct`. |
 | 8 | **Cross-correlation dt.cc** | pipeline `xcorr`/`dtcc` (pq-gpu, interp_hz=1000) | re-ref SACs → `dt.cc_0.7_combined` | `dt = (t1+shift−ot1) − (t2−ot2)`; **subtracts the Stage-6 origins.** |
-| 9 | **HypoDD** | `run_hypodd_kim2011_istart2.py` (ISTART=2, adaptive CND 40–80) | event.dat + dt.ct + dt.cc + station.dat + hypoDD.inp → `hypoDD.reloc` | Relative relocation; event.dat = starts, dt.ct/dt.cc = data. |
+| 9 | **HypoDD** | `run_hypodd_kim2011_istart2.py` (ISTART=2, adaptive CND 60–80) | event.dat + dt.ct + dt.cc + station.dat + hypoDD.inp → `hypoDD.reloc` | Relative relocation; event.dat = starts, dt.ct/dt.cc = data. |
 
 Driver: `run_picker_reloc.py --picker <p> --year <Y> --through {hypoinverse,dtcc}` chains Stages 2–9.
 `phasenet_plus` reuses the finished `reloc_<Y>_uf/` (slug `uf_<Y>`); other pickers use `reloc_<Y>_uf_<p>/`.

@@ -38,8 +38,7 @@ MAX_STA   = 12                     # cap traces per panel (nearest stations)
 COMPONENT = "Z"                    # component to plot: "Z" | "N" | "E". NOTE S picks are made on the
                                    # horizontals, so a station whose Z has an outage can still carry a valid
                                    # S pick -- switch to "N"/"E" to see it (the skip note lists what exists).
-ONLY_AUGMENTED = False             # True -> plot only events that received augmented picks (stage 3),
-                                   #         with the added picks highlighted (see the augmentation section)
+N_AUG_MAX = 20                     # cap for the SECOND figure (all augmented events, up to this many)
 COLS      = 4                      # subplot columns (rows = ceil(N/COLS))
 
 import os, glob, math, numpy as np, pandas as pd
@@ -87,13 +86,6 @@ for i, p in enumerate(pos):
 EVL = EV[located].reset_index(drop=True)
 print(f"{len(EVL)} located events (of {len(EV)} associated); drawing {N_EVENTS}")
 
-if ONLY_AUGMENTED:
-    if "source" not in ASG.columns:
-        raise SystemExit("assignment has no 'source' column — run the augment stage first")
-    aug_ids = set(ASG.loc[ASG["source"] != "pyocto", "event_idx"].unique())
-    EVL = EVL[EVL["idx"].isin(aug_ids)].reset_index(drop=True)
-    print(f"ONLY_AUGMENTED: {len(EVL)} located events received >=1 augmented pick")
-
 rng = np.random.default_rng(SEED)
 pick = EVL.iloc[rng.choice(len(EVL), size=min(N_EVENTS, len(EVL)), replace=False)].sort_values("time")
 pick = pick.reset_index(drop=True)
@@ -124,7 +116,7 @@ def comps_with_data(sta, net, jstr, band, o_utc):
     return ok
 
 def event_traces(row):
-    """Return list of (dist_km, trace, p_rel, s_rel) for one event's associated stations (Z only)."""
+    """(dist_km, trace, p_rel, s_rel, p_aug, s_aug) per associated station, + skip notes + n associated."""
     ot = pd.Timestamp(row["time"]).tz_localize(None)
     o_utc = obspy.UTCDateTime(ot.to_pydatetime())
     jstr = f"{ot.year}.{ot.dayofyear:03d}"
@@ -141,9 +133,9 @@ def event_traces(row):
         if not fs:
             skipped.append((code, "no waveform file")); continue
         try:
-            # MERGE first: fragmented station-days (e.g. KG.HDB 2010.018 = 25 traces) would otherwise be
-            # represented by their first fragment only, which may not span the origin -> trim to 0 samples
-            # and the station silently vanishes from the section. Merge, then trim.
+            # MERGE first: a fragmented station-day (e.g. KG.HDB 2010.018 = 25 traces) would otherwise be
+            # represented by its first fragment only, which may not span the origin -> 0 samples after trim
+            # and the station silently vanishes from the section.
             st = obspy.read(fs[0])
             if len(st) > 1:
                 st.merge(method=1, fill_value=0)
@@ -158,8 +150,7 @@ def event_traces(row):
             if BANDPASS:
                 tr.filter("bandpass", freqmin=BANDPASS[0], freqmax=BANDPASS[1], corners=4, zerophase=True)
         except Exception as e:
-            skipped.append((code, f"read error: {type(e).__name__}"))
-            continue
+            skipped.append((code, f"read error: {type(e).__name__}")); continue
         d_m, _, _ = gps2dist_azimuth(row["latitude"], row["longitude"], *COORD[code])
         p_rel = s_rel = None; p_aug = s_aug = False
         for _, pk in g.iterrows():
@@ -171,50 +162,76 @@ def event_traces(row):
     out.sort(key=lambda x: x[0])
     return out[:MAX_STA], skipped, len(picks["code"].unique())
 
-rows_n = math.ceil(len(pick) / COLS)
-fig, axes = plt.subplots(rows_n, COLS, figsize=(COLS * 3.6, rows_n * 2.6))
-axes = np.atleast_1d(axes).ravel()
-for ax in axes[len(pick):]:
-    ax.axis("off")
 
-for k, row in pick.iterrows():
-    ax = axes[k]
-    traces, skipped, n_assoc_sta = event_traces(row)
-    if skipped:
-        print(f"  {pd.Timestamp(row['time']):%Y-%m-%d %H:%M:%S}: {len(traces)}/{n_assoc_sta} associated stations plotted; "
-              f"skipped {skipped}")
-    if not traces:
-        ax.text(0.5, 0.5, "no waveforms", ha="center", va="center", transform=ax.transAxes); ax.axis("off"); continue
-    dmax = max(d for d, *_ in traces) or 1.0
-    off = 0.10 * (dmax if dmax > 0 else 1.0)               # vertical spacing in distance units
-    for d, tr, p_rel, s_rel, p_aug, s_aug in traces:
-        t = tr.times() - PRE_S                              # seconds after origin
-        y = tr.data / (np.max(np.abs(tr.data)) or 1.0) * off * 0.9
-        ax.plot(t, y + d, lw=0.4, color="0.25")
-        for rel, col, aug in ((p_rel, "crimson", p_aug), (s_rel, "royalblue", s_aug)):
-            if rel is None:
-                continue
-            if aug:      # added post-PyOcto by the augmentation stage: thicker + dashed + marker
-                ax.plot([rel, rel], [d - off * 0.7, d + off * 0.7], color=col, lw=2.0, ls=(0, (2, 1)))
-                ax.plot([rel], [d + off * 0.85], marker="v", ms=4, color="darkgreen", mec="k", mew=0.3)
-            else:
-                ax.plot([rel, rel], [d - off * 0.5, d + off * 0.5], color=col, lw=1.1)
-    ot = pd.Timestamp(row["time"]).tz_localize(None)
-    ax.set_title(f"{ot:%Y-%m-%d %H:%M:%S}  z={row['depth']:.0f} km  ({len(traces)}/{n_assoc_sta} sta)", fontsize=8)
-    ax.set_xlim(-PRE_S, POST_S)
-    ax.set_xlabel("Time after origin (s)", fontsize=7)
-    ax.set_ylabel("Epicentral distance (km)", fontsize=7)
-    ax.tick_params(labelsize=6)
-
-# one shared legend (P red, S blue)
 from matplotlib.lines import Line2D
-fig.legend([Line2D([0], [0], color="crimson", lw=1.5), Line2D([0], [0], color="royalblue", lw=1.5),
-            Line2D([0], [0], color="darkgreen", marker="v", ls="none", ms=5)],
-           ["P pick", "S pick", "added by augmentation"], loc="upper right", ncol=3,
-           framealpha=1.0, edgecolor="0.6")
-_ttl = "augmented events" if ONLY_AUGMENTED else "random located events"
-fig.suptitle(f"Record sections — {len(pick)} {_ttl} ({MODEL} {YEAR})", y=1.005, fontsize=11)
-plt.tight_layout(); plt.show()''')
+
+def plot_sections(events, title):
+    """Record-section grid: one panel per event. Augmented picks are dashed + green triangle."""
+    if not len(events):
+        print(f"({title}: no events)"); return None
+    rows_n = math.ceil(len(events) / COLS)
+    fig, axes = plt.subplots(rows_n, COLS, figsize=(COLS * 3.6, rows_n * 2.6), squeeze=False)
+    axes = axes.ravel()
+    for ax in axes[len(events):]:
+        ax.axis("off")
+    for k, (_, row) in enumerate(events.iterrows()):
+        ax = axes[k]
+        traces, skipped, n_assoc = event_traces(row)
+        if skipped:
+            print(f"  {pd.Timestamp(row['time']):%Y-%m-%d %H:%M:%S}: {len(traces)}/{n_assoc} stations plotted; "
+                  f"skipped {skipped}")
+        if not traces:
+            ax.text(0.5, 0.5, "no waveforms", ha="center", va="center", transform=ax.transAxes)
+            ax.axis("off"); continue
+        dmax = max(d for d, *_ in traces) or 1.0
+        off = 0.10 * dmax
+        for d, tr, p_rel, s_rel, p_aug, s_aug in traces:
+            t = tr.times() - PRE_S
+            y = tr.data / (np.max(np.abs(tr.data)) or 1.0) * off * 0.9
+            ax.plot(t, y + d, lw=0.4, color="0.25")
+            for rel, col, aug in ((p_rel, "crimson", p_aug), (s_rel, "royalblue", s_aug)):
+                if rel is None:
+                    continue
+                if aug:
+                    ax.plot([rel, rel], [d - off * 0.7, d + off * 0.7], color=col, lw=2.0, ls=(0, (2, 1)))
+                    ax.plot([rel], [d + off * 0.85], marker="v", ms=4, color="darkgreen", mec="k", mew=0.3)
+                else:
+                    ax.plot([rel, rel], [d - off * 0.5, d + off * 0.5], color=col, lw=1.1)
+        ot = pd.Timestamp(row["time"]).tz_localize(None)
+        ax.set_title(f"{ot:%Y-%m-%d %H:%M:%S}  z={row['depth']:.0f} km  ({len(traces)}/{n_assoc} sta)", fontsize=8)
+        ax.set_xlim(-PRE_S, POST_S)
+        ax.set_xlabel("Time after origin (s)", fontsize=7)
+        ax.set_ylabel("Epicentral distance (km)", fontsize=7)
+        ax.tick_params(labelsize=6)
+    fig.legend([Line2D([0], [0], color="crimson", lw=1.5), Line2D([0], [0], color="royalblue", lw=1.5),
+                Line2D([0], [0], color="darkgreen", marker="v", ls="none", ms=5)],
+               ["P pick", "S pick", "added by augmentation"], loc="upper right", ncol=3,
+               framealpha=1.0, edgecolor="0.6")
+    fig.suptitle(title, y=1.005, fontsize=11)
+    plt.tight_layout(); plt.show()
+    return fig
+
+# ---- FIGURE 1: N random located events ----
+plot_sections(pick, f"Record sections — {len(pick)} random located events ({MODEL} {YEAR})")''')
+
+md(r"""## Figure 2 — the augmented events (their own figure)
+
+Augmented picks are rare, so a random draw usually misses them. This figure plots **every located event that
+gained a pick** in the augment stage (up to `N_AUG_MAX`), with the added arrivals drawn as **thick dashed bars
+with a green triangle** and the PyOcto ones as thin solid bars — i.e. before vs after augmentation, per event.""")
+co(r'''if "source" not in ASG.columns:
+    print("assignment has no 'source' column — run the augment stage first")
+else:
+    aug_ids = set(ASG.loc[ASG["source"] != "pyocto", "event_idx"].unique())
+    AUG = EVL[EVL["idx"].isin(aug_ids)].sort_values("time").head(N_AUG_MAX).reset_index(drop=True)
+    n_tot = len(aug_ids)
+    print(f"{n_tot} events gained augmented picks; {len(EVL[EVL['idx'].isin(aug_ids)])} of them are located "
+          f"(only located ones can be shown) -> plotting {len(AUG)}")
+    for _, r in AUG.iterrows():
+        a = ASG[(ASG.event_idx == int(r["idx"])) & (ASG.source != "pyocto")]
+        print(f"  {pd.Timestamp(r['time']):%Y-%m-%d %H:%M:%S}: +{len(a)} "
+              f"({', '.join(a.station.str.rstrip('.') + ' ' + a.phase)})")
+    plot_sections(AUG, f"Record sections — {len(AUG)} AUGMENTED events ({MODEL} {YEAR})")''')
 
 md(r"""## Augmentation — what the added picks are
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Relocate a prepared HypoDD directory with the VALIDATED UF whole-box config: kim2011 velocity + ISTART=2
 (start from catalog HYPOINVERSE locations, not the centroid) + ISOLV=2 (LSQR) + per-set ADAPTIVE damping
-(condition number driven into 40-80). This is the method the prior UF work used (run_kim2011_dtcc.swap_velocity
+(condition number driven into 60-80). This is the method the prior UF work used (run_kim2011_dtcc.swap_velocity
 + run_generic_istart2_adaptive.adaptive + run_svd_volumes engine); the korea-cluster pipeline's DEFAULT dtct
 is only a fixed-DAMP=8/ISTART=1 regression baseline that diverges (negative-depth airquakes -> empty reloc) on
 this 3856-event GJ-densified cluster.
@@ -42,7 +42,7 @@ def make_inp(template, damps, istart=2, isolv=2):
     return "".join(lines)
 
 
-def adaptive(d, template, cnd_range=(40.0, 80.0), max_attempts=12, damp0=60):
+def adaptive(d, template, cnd_range=(60.0, 80.0), max_attempts=12, damp0=60):
     """Per-set adaptive LSQR damping targeting CND in cnd_range (vendored from run_generic_istart2_adaptive)."""
     lo, hi = cnd_range; mid = (lo + hi) / 2.0
     damps, best, hist = [int(damp0)] * 7, None, []
@@ -82,6 +82,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dir", help="HypoDD run dir with hypoDD.inp + event.dat + dt.ct[/dt.cc] + station.dat")
     ap.add_argument("--damp0", type=int, default=60)
+    ap.add_argument("--cnd", default="60,80",
+                    help="target condition-number band LO,HI for the per-set adaptive damping (default 60,80). "
+                         "HIGHER CND = LESS damping = more resolution but closer to instability; the loop "
+                         "floors damping at 10, retries with 1.6x damping on a crash, and falls back to the "
+                         "closest attempt if the band cannot be met.")
     a = ap.parse_args()
     d = os.path.abspath(a.dir)
     inp = os.path.join(d, "hypoDD.inp")
@@ -95,7 +100,8 @@ def main():
     if os.path.exists(rl) and os.path.getsize(rl) and not os.path.exists(rl + ".pipeline_default"):
         shutil.copy2(rl, rl + ".pipeline_default")
     print(f"kim2011 + ISTART=2 + adaptive damping on {d}", flush=True)
-    bd, cnd = adaptive(d, template, damp0=a.damp0)
+    _lo, _hi = (float(x) for x in a.cnd.split(","))
+    bd, cnd = adaptive(d, template, cnd_range=(_lo, _hi), damp0=a.damp0)
     n = sum(1 for _ in open(rl)) if os.path.exists(rl) else 0
     print(f"\nchosen DAMP per set: {list(bd)}")
     print(f"per-set CND: {{{', '.join(f'{k}: {v:.1f}' for k, v in sorted(cnd.items()))}}}")
