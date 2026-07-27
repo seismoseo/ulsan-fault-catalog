@@ -289,6 +289,24 @@ catalogue would have quietly used only the KS/KG minority (7 of 46 stations in 2
 while appearing to succeed. Run the coverage check before trusting any ML catalogue.
 \end{warnbox}
 
+\begin{warnbox}{Renamed stations --- why the response lookup is epoch-aware}
+KMA renames a station when it is re-installed: \code{BUS} $\rightarrow$ \code{BUS2} $\rightarrow$ \code{BUS3},
+\code{DAG} $\rightarrow$ \code{DAG2}, \code{USN} $\rightarrow$ \code{USN2} --- \emph{identical coordinates},
+strictly sequential response epochs. \code{responses.epoch\_families()} discovers these from the StationXML
+coordinates (never from the trailing digit, so \code{GKP1} and \code{N001} are safe) and requires the epochs to
+be \textbf{non-overlapping}, which correctly excludes co-located \emph{contemporaries} such as \code{CHS}/\code{CSO}
+and \code{INC}/\code{INCA} --- genuinely different instruments that must never be aliased. 23 families, 49 codes.
+
+\smallskip
+This matters because of one archive quirk: \code{KS\_KG/BUS2/} holds \textbf{both} epochs' data, and its
+miniSEED headers read \code{BUS} until 2015 --- long after the Nov-2010 rename. Association rewrites those
+picks to \code{BUS2}, which is right for \emph{position} (identical coordinates, so location and HypoDD are
+unaffected) but wrong for the \emph{response}, whose epochs are strict. Without the epoch-aware lookup, 89\% of
+2010's BUS picks silently lost their response. An archive-wide header audit found \textbf{this is the only
+station affected} --- \code{DAG2}, \code{ULJ2}, \code{USN2}, \code{GKP1/2}, \code{BUS3} and all GJ/NS dirs have
+headers matching their directory.
+\end{warnbox}
+
 \begin{warnbox}{\code{ns\_derived/} rests on an assumption --- N2xx magnitudes are provisional}
 The MARA dataless (2020-06-03) predates the \code{N201}--\code{N220} deployment (first data 2022.237), so those 20
 stations have no authoritative response. All 600 authoritative NS RESP files are byte-identical apart from

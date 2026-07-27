@@ -155,9 +155,23 @@ def remove_response_to_disp(stream, inventory, *,
     warned = set()
     for tr in stream:
         key = (tr.stats.network, tr.stats.station, tr.stats.channel)
+        # Epoch-aware lookup: a station renamed on re-installation (BUS -> BUS2 -> BUS3, same site,
+        # same coordinates, strict non-overlapping response epochs) may reach here under the code
+        # association assigned rather than the one in force at `tr.stats.starttime`. Position is
+        # unaffected (the codes share coordinates) but the RESPONSE epochs are strict, so without
+        # this the station is dropped silently. See ufpipe.responses.resolve_code.
+        resp = None
         try:
-            inventory.get_response(f"{key[0]}.{key[1]}..{key[2]}", tr.stats.starttime)
+            resp = inventory.get_response(f"{key[0]}.{key[1]}..{key[2]}", tr.stats.starttime)
         except Exception:                             # noqa: BLE001
+            try:
+                from ufpipe import responses as _r
+                alt = _r.resolve_code(key[1], tr.stats.starttime)
+                if alt != key[1]:
+                    resp = inventory.get_response(f"{key[0]}.{alt}..{key[2]}", tr.stats.starttime)
+            except Exception:                         # noqa: BLE001
+                resp = None
+        if resp is None:
             short = (key[0], key[1])
             if short not in warned:
                 warnings.warn(f"no response for {key[0]}.{key[1]} — skipping all "
@@ -165,8 +179,12 @@ def remove_response_to_disp(stream, inventory, *,
                 warned.add(short)
             continue
         work = tr.copy().detrend("demean").detrend("linear").taper(taper_percent)
+        # Attach the resolved Response and call with inventory=None: obspy's Trace._get_response
+        # returns stats.response in that case. (`remove_response` has no `response=` parameter —
+        # passing one would be swallowed by **kwargs and silently ignored.)
+        work.stats.response = resp
         try:
-            work.remove_response(inventory=inventory, output="DISP",
+            work.remove_response(output="DISP",
                                  pre_filt=list(pre_filt), water_level=water_level,
                                  plot=False)
         except Exception as exc:                      # noqa: BLE001

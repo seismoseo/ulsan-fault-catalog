@@ -103,6 +103,73 @@ def coverage_report(year, inv=None, networks=None):
     return pd.DataFrame(rows)
 
 
+def epoch_families(networks=("KS", "KG")):
+    """Group station codes that are the SAME PHYSICAL SITE recorded under sequential codes.
+
+    KMA renames a station when it is re-installed: ``BUS`` (--2010-10-31) becomes ``BUS2``
+    (2010-11-01--2020-03-18) becomes ``BUS3`` (2020-03-18--), at *identical* coordinates with
+    abutting epochs. Same for DAG/DAG2, ULJ/ULJ2, USN/USN2. Grouping is done on the coordinates
+    from the StationXML, not on the trailing digit, so codes like GKP1 or N001 are never mistaken
+    for epoch variants.
+
+    Identical coordinates are necessary but NOT sufficient: KS also runs co-located stations that
+    operate at the SAME TIME under different codes (CHS/CSO, BUY/BUYB, INC/INCA -- typically a
+    second instrument at one site), and those are distinct stations with distinct responses that
+    must never be aliased to each other. A family therefore also requires the epochs to be
+    **sequential**, i.e. non-overlapping apart from the day they abut on.
+
+    Returns ``{code: [(code, t0, t1), ...]}`` with each family sorted by epoch."""
+    K = _stations.load_kskg()
+    K = K[K.net.isin(networks)]
+    fam = {}
+    for _, g in K.groupby([K.lat.round(5), K.lon.round(5)]):
+        if len(g) < 2:
+            continue
+        members = sorted(((r.sta, r.t0, r.t1) for _, r in g.iterrows()), key=lambda m: m[1])
+        # sequential = each member starts no earlier than the previous one ends (1-day slack for
+        # the abutment convention, where t1 of one equals t0 of the next).
+        slack = pd.Timedelta(days=1)
+        if any(members[i + 1][1] + slack < members[i][2] for i in range(len(members) - 1)):
+            continue                                   # co-located contemporaries, not a rename
+        for sta, _, _ in members:
+            fam[sta] = members
+    return fam
+
+
+def resolve_code(sta, time, families=None):
+    """The station code that was in force at `time` for the site `sta` belongs to.
+
+    Returns `sta` unchanged when it is not part of an epoch family, or when no member covers
+    `time`. This is what makes a response lookup survive the archive's one folded directory:
+    ``KS_KG/BUS2/`` holds BOTH epochs' data, the pre-2010-11-01 files carry ``BUS`` headers, and
+    association rewrites them to ``BUS2`` (correct for position -- the coordinates are identical --
+    but wrong for the response, whose epochs are strict). Resolving by time recovers ``BUS``."""
+    fam = families if families is not None else epoch_families()
+    members = fam.get(sta)
+    if not members:
+        return sta
+    t = pd.Timestamp(str(time)).tz_localize(None)
+    for code, t0, t1 in members:
+        if t0 <= t < t1:
+            return code
+    return sta
+
+
+def get_response(inv, net, sta, cha, time, families=None):
+    """Epoch-aware ``inv.get_response`` for a station that may have been renamed.
+
+    Tries the code as given, then the code in force at `time` for that site. Raises the original
+    exception if neither resolves, so a genuinely missing response still fails loudly."""
+    seed = f"{net}.{sta}..{cha}"
+    try:
+        return inv.get_response(seed, time)
+    except Exception:
+        alt = resolve_code(sta, time, families)
+        if alt == sta:
+            raise
+        return inv.get_response(f"{net}.{alt}..{cha}", time)
+
+
 def _first_day_on_disk(sta, archive=None):
     """(year, jday) of the earliest day this NS station has on local disk, or None."""
     archive = archive or config.NS_DIR
