@@ -876,36 +876,60 @@ def write_phs(model, year, force=False):
     out = config.phs_file(model, year)
 
     # ---- pick-probability lookup for HYPOINVERSE weighting (scheme="probability") ----
-    # The PyOcto assignment carries no probability, so recover it from the daily pick CSVs and key on
-    # (NET.STA, phase, peak_time rounded to 10 ms). Falls back to the fixed P=0/S=1 scheme if unavailable.
-    prob_lut = {}
+    # The PyOcto assignment carries no probability, so recover it from the daily pick CSVs:
+    # per (NET.STA, phase), the pick whose time is NEAREST the assignment time within
+    # config.PHS_PROB_MATCH_TOL_S. (The previous exact-10 ms-bucket key missed ~26% of picks —
+    # peak_time is written ms-rounded while assignment times keep full precision, and any station
+    # renamed by the association alias remap, e.g. BUS -> BUS2, never matched at all. Unmatched
+    # picks then defaulted to FULL weight, the opposite of conservative.)
+    prob_idx = {}                    # (NET.STA, phase) -> (sorted times [s], probs)
+    _match_stats = {"hit": 0, "miss": 0}
     if config.PHS_WEIGHT_SCHEME == "probability":
         try:
             allpk = load_picks(model, year).copy()
-            t = pd.to_datetime(allpk["peak_time"], utc=True, errors="coerce").astype("int64") // 10_000_000
-            key = list(zip(allpk["station"].astype(str), allpk["phase"].astype(str), t))
-            # keep the max probability per key (dedupe collisions from the ±overlap association windows)
-            for k, p in zip(key, allpk["probability"].astype(float)):
-                if k not in prob_lut or p > prob_lut[k]:
-                    prob_lut[k] = p
+            allpk["_t"] = pd.to_datetime(allpk["peak_time"], utc=True,
+                                         errors="coerce").astype("int64") / 1e9
+            # mirror the association-stage alias remap so renamed stations (pick file says BUS,
+            # assignment says BUS2) still match: index picks under the code the ASSIGNMENT uses.
+            asg_codes = {s.rstrip(".") for s in pk["station"].astype(str)}
+            def _asg_code(s):
+                return s if s in asg_codes else (s + "2" if s + "2" in asg_codes else s)
+            allpk["_key"] = [_asg_code(s) for s in allpk["station"].astype(str)]
+            for (st, ph), g in allpk.dropna(subset=["_t"]).groupby(["_key", "phase"]):
+                g = g.sort_values("_t")
+                prob_idx[(st, ph)] = (g["_t"].to_numpy(), g["probability"].to_numpy(float))
         except Exception as e:
             print(f"  ! probability lookup unavailable ({e}); using fixed P=0/S=1 weights")
 
     def _wcode(net, sta, phase, pt_utc):
-        """HYPOINVERSE weight code from pick probability (0 best..4 worst); S penalized one code."""
-        if config.PHS_WEIGHT_SCHEME != "probability" or not prob_lut:
+        """HYPOINVERSE weight code from pick probability (0 best .. 3 worst; code 4 is never
+        assigned — association is the gatekeeper, the weight is only a prior). S is penalized
+        one code, capped at 3. Unmatched picks get PHS_WEIGHT_UNMATCHED_CODE."""
+        if config.PHS_WEIGHT_SCHEME != "probability" or not prob_idx:
             return 0 if phase == "P" else 1                        # legacy fixed scheme
-        tk = int(pd.Timestamp(pt_utc.datetime, tz="UTC").value // 10_000_000)
-        prob = prob_lut.get((f"{net}.{sta}", phase, tk))
+        ent = prob_idx.get((f"{net}.{sta}", phase))
+        prob = None
+        if ent is not None:
+            times, probs = ent
+            t = float(pd.Timestamp(pt_utc.datetime, tz="UTC").value) / 1e9
+            i = int(np.searchsorted(times, t))
+            best, bd = None, config.PHS_PROB_MATCH_TOL_S
+            for j in (i - 1, i):
+                if 0 <= j < len(times) and abs(times[j] - t) <= bd:
+                    best, bd = j, abs(times[j] - t)
+            if best is not None:
+                prob = probs[best]
         if prob is None:
-            return 0 if phase == "P" else 1                        # unmatched -> legacy default
+            _match_stats["miss"] += 1
+            return config.PHS_WEIGHT_UNMATCHED_CODE
+        _match_stats["hit"] += 1
         code = 4
         for thr, c in config.PHS_WEIGHT_BINS:
             if prob >= thr:
                 code = c
                 break
         if phase == "S":
-            code = min(4, code + config.PHS_WEIGHT_S_PENALTY)
+            code = min(3, code + config.PHS_WEIGHT_S_PENALTY)
         return code
 
     skipped = []                     # (idx, time) of events written with NO nonzero-weight P
@@ -961,8 +985,16 @@ def write_phs(model, year, force=False):
             f.write(" " * 66 + "20" + f"{idn}".zfill(4) + "\n")
             idn += 1
 
+    nm = _match_stats["hit"] + _match_stats["miss"]
     print(f"[phs] {model} {year}: {idn} events -> {os.path.relpath(out, config.MODELS)} "
-          f"(weights: {config.PHS_WEIGHT_SCHEME})")
+          f"(weights: {config.PHS_WEIGHT_SCHEME}"
+          + (f", prob matched {_match_stats['hit']}/{nm} = {100 * _match_stats['hit'] / nm:.1f}%"
+             if nm else "") + ")")
+    if nm and _match_stats["miss"] > 0.05 * nm:
+        print(f"[phs] !! {_match_stats['miss']} pick(s) had no probability within "
+              f"{config.PHS_PROB_MATCH_TOL_S}s and got the conservative weight "
+              f"{config.PHS_WEIGHT_UNMATCHED_CODE} — >5% unmatched suggests a picks/assignment "
+              f"mismatch (wrong picks dir, station alias, or clock convention).")
     if skipped:
         slog = out + ".skipped"
         with open(slog, "w") as f:

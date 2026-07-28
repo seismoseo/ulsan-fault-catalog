@@ -230,10 +230,21 @@ Output schema (events \code{idx,time,x,y,z,picks,latitude,longitude,depth}; assi
 consume it as before.
 
 \smallskip\noindent\textbf{HYPOINVERSE pick weights (stage 4 input).} \code{make\_phs} sets the HYPO71 weight
-code from the picker's own probability (\code{config.PHS\_WEIGHT\_SCHEME="probability"}): \code{PHS\_WEIGHT\_BINS}
-$\ge$0.90$\to$0, $\ge$0.70$\to$1, $\ge$0.50$\to$2, $\ge$0.30$\to$3, else 4 (0 = full weight); S picks one code
-worse (\code{PHS\_WEIGHT\_S\_PENALTY}). This matches the relocation stage's \code{phs\_weight\_scheme="probability"}.
+code from the picker's own probability (\code{config.PHS\_WEIGHT\_SCHEME="probability"}). Design principle
+(revised 2026-07): \emph{association is the gatekeeper; the weight is only a prior} --- every associated pick
+gets a NONZERO weight, and genuinely bad picks are killed by HYPOINVERSE's own distance + residual re-weighting,
+which sees the actual misfit. \code{PHS\_WEIGHT\_BINS} = even quartiles of the emitted range $[0.2, 1.0]$:
+$\ge$0.80$\to$0, $\ge$0.60$\to$1, $\ge$0.40$\to$2, else$\to$3 (0 = full weight; \textbf{code 4 is never
+assigned}). S picks one code worse (\code{PHS\_WEIGHT\_S\_PENALTY}), \textbf{capped at 3}. Probabilities are
+matched to picks by nearest time within \code{PHS\_PROB\_MATCH\_TOL\_S} (50\,ms), alias-aware (BUS/BUS2);
+a pick with no match gets the conservative \code{PHS\_WEIGHT\_UNMATCHED\_CODE}=3, not full weight.
 Set \code{PHS\_WEIGHT\_SCHEME="phase"} for the legacy fixed P=0/S=1.
+
+\smallskip\noindent The previous scheme ($\ge$0.90/0.70/0.50/0.30, else 4, S+1 uncapped) discarded
+\textbf{17.5\%} of associated picks (26\% of S) and matched only 74\% of probabilities, defaulting the rest to
+FULL weight; on 2016 it also produced the 92 all-weight-4-P events that segfaulted \code{hyp1.40}. The revision
+took 2016 from 11{,}807 located / 7{,}830 QC-pass to \textbf{13{,}123 located (99.9\% of associated) /
+9{,}440 QC-pass}, with median RMS unchanged (0.05\,s).
 
 \subsection{Velocity model \& location}
 \code{DEFAULT\_VELMODEL = kim2011}; \code{kim1983} also available (\code{data/metadata/velocity/kim1983.csv},

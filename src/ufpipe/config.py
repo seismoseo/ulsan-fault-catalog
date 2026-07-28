@@ -158,12 +158,23 @@ PHASE_CHANNELS = {"P": "HHZ", "S": "HHN"}
 # HYPOINVERSE pick-weight code (HYPO71 column 8/40) from the picker's own probability, instead of a fixed
 # P=0/S=1. Weight code 0 = full weight (best) .. 4 = zero weight (worst); HYPOINVERSE maps code k to
 # multiplier ~ (1 - k/4). Consistent with the relocation stage's phs_weight_scheme="probability".
-# PHS_WEIGHT_BINS: descending probability thresholds -> weight code. A pick with prob >= bins[k][0] gets
-# code bins[k][1] (first match wins). Anything below the last threshold -> code 4.
+#
+# DESIGN (revised 2026-07): association is the gatekeeper; the weight is only a prior. Every
+# ASSOCIATED pick gets a NONZERO weight — code 4 is never assigned. Rationale: detection keeps
+# prob >= P_THRESHOLD (0.2) precisely so those picks can be used once association vets them against
+# a physical moveout; discarding them again by weight contradicts that (and events whose P picks
+# were all code 4 segfaulted hyp1.40 in hytrl_). Genuinely bad picks are HYPOINVERSE's job to kill
+# via its distance + residual re-weighting, which sees the actual misfit. Bins are even quartiles
+# of the emitted range [P_THRESHOLD, 1.0]; the final (0.0, 3) bin makes "never 4" structural.
 PHS_WEIGHT_SCHEME = "probability"          # "probability" (default) | "phase" (legacy fixed P=0/S=1)
-PHS_WEIGHT_BINS = [(0.90, 0), (0.70, 1), (0.50, 2), (0.30, 3)]   # else -> 4
-PHS_WEIGHT_S_PENALTY = 1                   # S picks are one code worse than their probability bin
-#                                            (S onsets are intrinsically less precise; +1, capped at 4)
+PHS_WEIGHT_BINS = [(0.80, 0), (0.60, 1), (0.40, 2), (0.00, 3)]   # quartiles of [0.2, 1]; never code 4
+PHS_WEIGHT_S_PENALTY = 1                   # S one code worse than its bin (S onsets in the P coda are
+#                                            mechanically less precise than the picker's confidence
+#                                            suggests), CAPPED at 3 — an associated S is never discarded.
+PHS_WEIGHT_UNMATCHED_CODE = 3              # pick with no matchable probability -> WORST kept weight
+#                                            (was full weight — unknown confidence must not outrank known)
+PHS_PROB_MATCH_TOL_S = 0.05                # pick<->probability matching: nearest |dt| within this many
+#                                            seconds (was an exact 10 ms bucket, which missed ~26%)
 
 # ------------------------------------------------ picker backends (by model)
 # SeisBench PhaseNet weights run via the default backend; EQNet PhaseNet+ runs
