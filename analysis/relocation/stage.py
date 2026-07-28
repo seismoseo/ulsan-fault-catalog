@@ -51,6 +51,7 @@ def main():
     seen_ts = {}
 
     n_wf = 0
+    cleaned = set()          # sensor dirs purged of stale links this run (see below)
     for eid in members:
         ts = ts_of.get(eid)
         if ts is None:
@@ -69,6 +70,17 @@ def main():
             if sensor not in ("HH", "HG", "EL"):
                 continue
             d = os.path.join(stp_root, ts, sensor); os.makedirs(d, exist_ok=True)
+            # First touch of a sensor dir this run: purge ALL pre-existing symlinks. Staging from an
+            # earlier catalog (e.g. the Jul-2026 pilot, whose targets moved in the restructure) leaves
+            # stale/dangling links in the SAME timestamp dirs; the engine's waveform gather then reads
+            # a dangling link and dies (OSError: File not found ... .sac). Links here are pure staging
+            # artifacts — always safe to regenerate.
+            if d not in cleaned:
+                cleaned.add(d)
+                for old in os.listdir(d):
+                    p = os.path.join(d, old)
+                    if os.path.islink(p):
+                        os.unlink(p)
             dst = os.path.join(d, ".".join([ts] + parts[1:]))  # rename prefix event_idx -> timestamp
             if not os.path.lexists(dst):
                 os.symlink(os.path.realpath(f), dst); n_wf += 1
