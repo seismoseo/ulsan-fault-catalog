@@ -535,6 +535,7 @@ Wrong \code{pipeline} imported & \code{ufpipe} is renamed precisely to avoid the
 Events look over/under-associated & \code{ASSOC\_GATE} vs \code{-{}-strict} (\code{ASSOC\_GATE\_STRICT}); \code{ASSOC\_PICK\_MATCH\_TOL} is the primary knob. \\
 GPU not used & inference is GPU-preferred and warns loudly; check the torch/CUDA install (never silently CPU). \\
 Sparse early years, few events & expected --- KS/KG-only network (2010--2015) has larger azimuthal gaps; GJ joins 2016, the dense NS array 2017+; the QC gate honestly reflects what the network resolves. \\
+\code{.sum} stops mid-year; months missing & \code{hyp1.40} \textbf{segfaulted} partway (2016 once died on 25 Jun, dropping the whole Gyeongju sequence): it crashes in \code{hytrl\_} on any event whose P picks are ALL weight code 4 (only possible under the probability weight scheme, every P below the last \code{PHS\_WEIGHT\_BINS} threshold). Fixed 2026-07: \code{write\_phs} skips such unlocatable events (logged to \code{PHS/UF<year>.phs.skipped}) and \code{run\_hypoinverse\_year} now raises on a nonzero exit code instead of shipping the partial \code{.sum}. If you see this, regenerate from stage \code{phs}. \\
 \bottomrule
 \end{tabular}
 \end{center}

@@ -908,6 +908,7 @@ def write_phs(model, year, force=False):
             code = min(4, code + config.PHS_WEIGHT_S_PENALTY)
         return code
 
+    skipped = []                     # (idx, time) of events written with NO nonzero-weight P
     with open(out, "w") as f:
         idn = 0
         for i in range(len(ev)):
@@ -917,8 +918,16 @@ def write_phs(model, year, force=False):
             ms = str(int(ot.microsecond / 1000)).zfill(2)
             la_d, la_m = _deg2min(ev["latitude"][i])
             lo_d, lo_m = _deg2min(ev["longitude"][i])
-            f.write(f"{cat}{ms}{la_d}N{str(la_m).zfill(4)}{lo_d}E{str(lo_m).zfill(4)}\n")
+            hdr = f"{cat}{ms}{la_d}N{str(la_m).zfill(4)}{lo_d}E{str(lo_m).zfill(4)}\n"
 
+            # Buffer the event so it can be dropped whole: hyp1.40 SEGFAULTS (in hytrl_, the
+            # trial-origin routine) on any event whose P picks ALL carry weight code 4 — it needs a
+            # weighted first arrival to seed the trial location. Such events are unlocatable anyway
+            # (their only usable readings are down-weighted S), so skip them rather than crash the
+            # whole year. Only the probability weight scheme can produce them (all P below the last
+            # PHS_WEIGHT_BINS threshold); the legacy scheme always writes P at weight 0.
+            body = []
+            has_weighted_p = False
             ept = pk[pk["event_idx"] == eid].reset_index(drop=True)
             for j in range(len(ept)):
                 pt = utc(datetime.fromtimestamp(ept["time"][j], tz=timezone.utc))
@@ -927,26 +936,42 @@ def write_phs(model, year, force=False):
                 phase = ept["phase"][j]
                 wc = _wcode(net, sta, phase, pt)
                 if phase == "P":
-                    f.write(sta.ljust(5)); f.write(net.ljust(4))
-                    f.write(config.PHASE_CHANNELS["P"][:3].ljust(4))
-                    f.write("IP".ljust(3)); f.write(str(wc))
-                    f.write(str(pt.year)); f.write(str(pt.month).zfill(2)); f.write(str(pt.day).zfill(2))
-                    f.write(str(pt.hour).zfill(2)); f.write(str(pt.minute).zfill(2).ljust(3))
-                    f.write(str(pt.second).zfill(2)); f.write(str(pt.microsecond).zfill(6)[:2])
-                    f.write("\n")
+                    if wc < 4:
+                        has_weighted_p = True
+                    body.append(sta.ljust(5) + net.ljust(4)
+                                + config.PHASE_CHANNELS["P"][:3].ljust(4)
+                                + "IP".ljust(3) + str(wc)
+                                + str(pt.year) + str(pt.month).zfill(2) + str(pt.day).zfill(2)
+                                + str(pt.hour).zfill(2) + str(pt.minute).zfill(2).ljust(3)
+                                + str(pt.second).zfill(2) + str(pt.microsecond).zfill(6)[:2]
+                                + "\n")
                 elif phase == "S":
-                    f.write(sta.ljust(5)); f.write(net.ljust(4))
-                    f.write(config.PHASE_CHANNELS["S"].ljust(4)); f.write("    ")
-                    f.write(str(pt.year)); f.write(str(pt.month).zfill(2)); f.write(str(pt.day).zfill(2))
-                    f.write(str(pt.hour).zfill(2)); f.write(str(pt.minute).zfill(2).ljust(15))
-                    f.write(str(pt.second).zfill(2)); f.write(str(pt.microsecond).zfill(6)[:2])
-                    f.write("ES".ljust(3)); f.write(str(wc)); f.write("\n")
+                    body.append(sta.ljust(5) + net.ljust(4)
+                                + config.PHASE_CHANNELS["S"].ljust(4) + "    "
+                                + str(pt.year) + str(pt.month).zfill(2) + str(pt.day).zfill(2)
+                                + str(pt.hour).zfill(2) + str(pt.minute).zfill(2).ljust(15)
+                                + str(pt.second).zfill(2) + str(pt.microsecond).zfill(6)[:2]
+                                + "ES".ljust(3) + str(wc) + "\n")
 
+            if not has_weighted_p:
+                skipped.append((int(eid), str(ev["time"][i])))
+                continue
+            f.write(hdr)
+            f.writelines(body)
             f.write(" " * 66 + "20" + f"{idn}".zfill(4) + "\n")
             idn += 1
 
-    print(f"[phs] {model} {year}: {len(ev)} events -> {os.path.relpath(out, config.MODELS)} "
+    print(f"[phs] {model} {year}: {idn} events -> {os.path.relpath(out, config.MODELS)} "
           f"(weights: {config.PHS_WEIGHT_SCHEME})")
+    if skipped:
+        slog = out + ".skipped"
+        with open(slog, "w") as f:
+            f.write("event_idx,time\n")
+            for eid, t in skipped:
+                f.write(f"{eid},{t}\n")
+        print(f"[phs] !! {len(skipped)} event(s) skipped: no P pick above the last PHS_WEIGHT_BINS "
+              f"threshold (all weight 4 = unlocatable; would segfault hyp1.40) — list in "
+              f"{os.path.relpath(slog, config.MODELS)}")
     return out
 
 
@@ -1069,6 +1094,16 @@ def run_hypoinverse_year(model, year, velmodel=None, force=False, networks=None,
     proc = subprocess.run(["hyp1.40"], input=control, text=True, cwd=hd, capture_output=True)
 
     sumf = os.path.join(config.velmodel_dir(model, velmodel), f"{region}.sum")
+    # A crash partway through leaves a PLAUSIBLE-looking partial .sum (hyp1.40 flushes as it goes),
+    # so the returncode must be checked — 2016 once shipped 1508 of 13138 events because a segfault
+    # (exit 139, poison all-weight-4-P event) passed every downstream sanity gate silently.
+    if proc.returncode != 0:
+        print("---- hyp1.40 stdout (tail) ----\n", proc.stdout[-2000:])
+        print("---- hyp1.40 stderr (tail) ----\n", proc.stderr[-2000:])
+        raise RuntimeError(
+            f"hyp1.40 exited with code {proc.returncode} for {model} {year} ({velmodel}) — "
+            f"the {region}.sum/.arc on disk are PARTIAL up to the crash point; do not use them. "
+            f"(code 139 = segfault; see the stderr backtrace above)")
     if not os.path.exists(sumf):
         print("---- hyp1.40 stdout (tail) ----\n", proc.stdout[-2000:])
         print("---- hyp1.40 stderr (tail) ----\n", proc.stderr[-2000:])
