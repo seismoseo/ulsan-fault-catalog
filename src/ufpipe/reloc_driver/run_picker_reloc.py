@@ -87,11 +87,13 @@ def inject_full_hypoinverse(picker, full_slug, qc_slug, root):
     QC HypoInverse re-run so rereference/ph2dt/xcorr/dt.cc all use the one solution QC gated on. Reuses the
     validated subset+renumber helpers in fix_qc_rerun_bug.py."""
     import fix_qc_rerun_bug as FX
-    full_rows, mem_qc = FX.qc_to_fullrow(os.path.basename(root.rstrip("/")))
+    # (qc_row, engine cuspid) via ORIGIN-TIME matching — never 200000+members-row arithmetic, which
+    # silently breaks when same-second doublets shift the engine's id space (see member_to_cuspid).
+    pairs, mem_qc = FX.qc_pairs(os.path.basename(root.rstrip("/")), full_slug)
     hyp_qc = os.path.join(RUNS, qc_slug, "1.HypoInv", "kim2011")
     os.makedirs(hyp_qc, exist_ok=True)
-    FX.subset_renumber_sum(full_slug, qc_slug, full_rows)
-    FX.subset_renumber_arc(full_slug, qc_slug, full_rows)
+    FX.subset_renumber_sum(full_slug, qc_slug, pairs)
+    FX.subset_renumber_arc(full_slug, qc_slug, pairs)
     # ph2dt (now run on the injected solution) needs the HYPOINVERSE station file in 1.HypoInv/STA/. The QC
     # subset skips the hypoinverse stage, so that file is never generated -- but stations are picker/subset-
     # independent, so copy the full-run's <full_slug>{_hyp.sta,.sta} across, renamed to the QC slug.

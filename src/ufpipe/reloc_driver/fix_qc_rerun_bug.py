@@ -20,6 +20,7 @@ DRY-RUN by default (prints the plan + verifies the .sum/.arc subset). Pass --app
   python fix_qc_rerun_bug.py --picker phasenet_plus --apply
 """
 import argparse, os, shutil, subprocess, sys, time
+import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -75,41 +76,93 @@ def build_full_sum_index(full_slug):
     return sm.set_index("full_row")
 
 
-def subset_renumber_sum(full_slug, qc_slug, full_rows):
+def member_to_cuspid(root, full_slug):
+    """members row -> full-run engine CUSPID, matched by ORIGIN TIME (monotonic two-pointer, 10 s tol,
+    auto tz offset). Returns (dict row->cuspid, dict cuspid->sum-body-line-index).
+
+    NEVER trust ``cuspid == OFFSET + members row``: the engine derives its event list from its own
+    staging, and same-second doublets can insert/drop entries — 2011 had 446 id slots for 445 members,
+    so every cuspid >= 18 was OFF BY ONE and id arithmetic would have attached WRONG origins to most
+    events (silently, had the KeyError not fired). Time alignment against catalog_kma is exact; a
+    member with no matching solution is simply absent from the map (caller drops it loudly)."""
+    from pipeline.core import sumio
+    rd = _root_dir(root)
+    cat = pd.read_csv(f"{rd}/catalog_kma.csv")
+    cat_t = pd.to_datetime(dict(year=cat.Year, month=cat.Month, day=cat.Day, hour=cat.Hour,
+                                minute=cat.Minute, second=cat.Second.clip(0, 59))).to_numpy()
+    sm = sumio.read_sum(f"{RUNS}/{full_slug}/1.HypoInv/kim2011/{full_slug}.sum")
+    line_of_cuspid = {int(i): k for k, i in enumerate(sm.id.astype(int).tolist())}
+    # sumio yields obspy UTCDateTime origin times — convert to numpy datetimes (None -> NaT)
+    sm_t = pd.to_datetime([t.datetime if t is not None else pd.NaT for t in sm.time]).to_numpy()
+    ok = ~pd.isna(sm_t)
+    order = np.argsort(sm_t[ok], kind="stable")
+    sm_ids = sm.id.astype(int).to_numpy()[ok][order]
+    sm_ts = sm_t[ok][order]
+
+    def med_nn(o):
+        s = sm_ts - np.timedelta64(int(o), "s")
+        k = np.clip(np.searchsorted(cat_t, s), 0, len(cat_t) - 1)
+        d = np.abs(cat_t[k] - s).astype("timedelta64[s]").astype(float)
+        km = np.clip(k - 1, 0, len(cat_t) - 1)
+        dm = np.abs(cat_t[km] - s).astype("timedelta64[s]").astype(float)
+        return np.median(np.minimum(d, dm))
+    off = min([0, 32400, -32400], key=med_nn)
+    sm_ts = sm_ts - np.timedelta64(int(off), "s")
+
+    TOL = np.timedelta64(10, "s")
+    m2c = {}
+    j = 0
+    for i in range(len(cat_t)):
+        while j < len(sm_ts) and sm_ts[j] < cat_t[i] - TOL:
+            j += 1
+        if j < len(sm_ts) and abs(sm_ts[j] - cat_t[i]) <= TOL:
+            m2c[i] = int(sm_ids[j])
+            j += 1
+    return m2c, line_of_cuspid
+
+
+def subset_renumber_sum(full_slug, qc_slug, pairs):
     """Write the QC .sum as the FULL-run rows for QC members, id renumbered to 200000+qc_row (raw-line copy so the
-    HYPOINVERSE column format is byte-preserved; only the ID-NUM field is rewritten)."""
+    HYPOINVERSE column format is byte-preserved; only the ID-NUM field is rewritten).
+
+    `pairs` = [(qc_row, full_cuspid or None), ...] from member_to_cuspid — a None cuspid (member with
+    no full-run solution, e.g. an unlocated same-second doublet twin) is SKIPPED: its qc_row id is
+    simply absent from the subset .sum, so downstream stages exclude that event instead of crashing
+    (or worse, inheriting a wrong origin)."""
     src = f"{RUNS}/{full_slug}/1.HypoInv/kim2011/{full_slug}.sum"
     dst = f"{RUNS}/{qc_slug}/1.HypoInv/kim2011/{qc_slug}.sum"
     lines = open(src).readlines()
     header = lines[0] if lines and not lines[0][:4].isdigit() else None
     body = lines[1:] if header else lines
-    # map full .sum body-row -> its cuspid; we need full_row -> line. sumio row order == body order.
-    # find the ID-NUM column: last field on each summary line (10-char). Detect from the pipeline sumio id vs raw.
     from pipeline.core import sumio
     sm = sumio.read_sum(src)
     ids = sm.id.astype(int).tolist()                # same order as body
-    fr_of_line = {i % OFFSET: k for k, i in enumerate(ids)}   # full_row -> body line index
+    line_of = {i: k for k, i in enumerate(ids)}     # cuspid -> body line index
     out = [header] if header else []
-    for qc_row, fr in enumerate(full_rows):
-        ln = body[fr_of_line[fr]]
+    n = 0
+    for qc_row, cusp in pairs:
+        if cusp is None:
+            continue
+        ln = body[line_of[cusp]]
         new_id = OFFSET + qc_row
         # replace the OLD cuspid (fixed 10-char field) with the new, preserving width.
-        old_id = ids[fr_of_line[fr]]
-        os_ = ln.rfind(f"{old_id:>10}")
+        os_ = ln.rfind(f"{cusp:>10}")
         if os_ < 0:
-            os_ = ln.rfind(str(old_id))
-            ln = ln[:os_] + f"{new_id}" + ln[os_+len(str(old_id)):]
+            os_ = ln.rfind(str(cusp))
+            ln = ln[:os_] + f"{new_id}" + ln[os_+len(str(cusp)):]
         else:
             ln = ln[:os_] + f"{new_id:>10}" + ln[os_+10:]
         out.append(ln)
+        n += 1
     with open(dst, "w") as f:
         f.writelines(out)
-    return dst, len(full_rows)
+    return dst, n
 
 
-def subset_renumber_arc(full_slug, qc_slug, full_rows):
+def subset_renumber_arc(full_slug, qc_slug, pairs):
     """Write the QC .arc as the FULL-run event blocks for QC members, cuspid (cols 136:146) renumbered to
-    200000+qc_row. Preserves phase lines exactly. Full-run arc cuspid = 200000 + full_row order."""
+    200000+qc_row. Preserves phase lines exactly. Blocks are looked up by the engine's ACTUAL cuspid
+    (from `pairs`, time-matched), never by 200000+members-row arithmetic. None cuspids are skipped."""
     src = f"{RUNS}/{full_slug}/1.HypoInv/kim2011/{full_slug}.arc"
     dst = f"{RUNS}/{qc_slug}/1.HypoInv/kim2011/{qc_slug}.arc"
     lines = open(src).readlines()
@@ -124,19 +177,43 @@ def subset_renumber_arc(full_slug, qc_slug, full_rows):
     for a, b in zip(hdr_idx, hdr_idx[1:] + [len(lines)]):
         blocks[int(lines[a][136:146])] = lines[a:b]
     out = []
-    for qc_row, fr in enumerate(full_rows):
-        full_cusp = OFFSET + fr
-        blk = list(blocks[full_cusp]); new_id = OFFSET + qc_row
+    n = 0
+    for qc_row, cusp in pairs:
+        if cusp is None or cusp not in blocks:
+            continue
+        blk = list(blocks[cusp]); new_id = OFFSET + qc_row
         blk[0] = blk[0][:136] + f"{new_id:>10}" + blk[0][146:]      # header cuspid
         # terminator shadow card = the LAST line of the block if it holds the old cuspid at its tail
-        old_tag = f"{full_cusp}"
+        old_tag = f"{cusp}"
         for j in range(len(blk) - 1, 0, -1):
             if blk[j].strip() == old_tag:                          # spaces + cuspid
-                blk[j] = blk[j].replace(f"{full_cusp}", f"{new_id}"); break
+                blk[j] = blk[j].replace(f"{cusp}", f"{new_id}"); break
         out.extend(blk)
+        n += 1
     with open(dst, "w") as f:
         f.writelines(out)
-    return dst, len(full_rows)
+    return dst, n
+
+
+def qc_pairs(root, full_slug, max_drop_frac=0.02):
+    """(qc_row, cuspid) pairs for the injection, via time matching; LOUD about any drops.
+
+    A dropped member (no full-run solution) is scientifically correct to exclude — it has no valid
+    origin to re-reference against. But a LARGE drop fraction means something structural is wrong
+    (stale staging, wrong catalog), so fail hard beyond `max_drop_frac`."""
+    full_rows, mem_qc = qc_to_fullrow(root)
+    m2c, _ = member_to_cuspid(root, full_slug)
+    pairs = [(qc_row, m2c.get(fr)) for qc_row, fr in enumerate(full_rows)]
+    dropped = [(qc_row, full_rows[qc_row], mem_qc[qc_row]) for qc_row, c in pairs if c is None]
+    if dropped:
+        print(f"  !! {len(dropped)}/{len(pairs)} QC member(s) have NO full-run HypoInverse solution "
+              f"(unlocated same-second doublet twins etc.) — EXCLUDED from the injected subset:")
+        for qc_row, fr, eidx in dropped[:10]:
+            print(f"       qc_row {qc_row}  members_row {fr}  event_idx {eidx}")
+    if len(dropped) > max(2, max_drop_frac * len(pairs)):
+        raise RuntimeError(f"{len(dropped)} of {len(pairs)} QC members unmatched in the full-run .sum — "
+                           f"far beyond doublet losses; check for stale staging (picks/, stp_download/SAC).")
+    return pairs, mem_qc
 
 
 def run(cmd, cwd, conda_env=None):
@@ -148,27 +225,22 @@ def run(cmd, cwd, conda_env=None):
 
 def fix_one(picker, apply, year=2016):
     full_slug, qc_slug, root = pickers_for(year)[picker]
-    full_rows, mem_qc = qc_to_fullrow(root)
+    pairs, mem_qc = qc_pairs(root, full_slug)
     n = len(mem_qc)
     hyp_qc = f"{RUNS}/{qc_slug}/1.HypoInv/kim2011"
     print(f"\n=== {picker} ===  QC members {n}   (full-run HypoInverse -> QC cuspids 200000..{OFFSET+n-1})")
 
-    # verify the full .sum covers every QC member (origins valid)
-    fsum = build_full_sum_index(full_slug)
-    miss = [fr for fr in full_rows if fr not in fsum.index]
-    bad = [fr for fr in full_rows if fr in fsum.index and pd.isna(fsum.loc[fr].time)]
-    print(f"  full .sum coverage: {n-len(miss)}/{n} rows present, {len(bad)} with NaN origin  (want 0/0)")
-    assert not miss and not bad, "full-run .sum does not cover all QC members cleanly"
-
     # compare old (rerun) vs new (full) origin for a few, to show the correction magnitude
     from pipeline.core import sumio
     try:
+        fsum = sumio.read_sum(f"{RUNS}/{full_slug}/1.HypoInv/kim2011/{full_slug}.sum")
+        fsum = fsum.set_index(fsum.id.astype(int))
         old = sumio.read_sum(f"{hyp_qc}/{qc_slug}.sum"); old["r"] = old.id.astype(int) % OFFSET
         old = old.set_index("r")
         dts = []
-        for qc_row, fr in enumerate(full_rows):
-            if qc_row in old.index:
-                a, b = fsum.loc[fr].time, old.loc[qc_row].time
+        for qc_row, cusp in pairs:
+            if cusp is not None and qc_row in old.index:
+                a, b = fsum.loc[cusp].time, old.loc[qc_row].time
                 if isinstance(a, pd.Timestamp) and isinstance(b, pd.Timestamp) and pd.notna(a) and pd.notna(b):
                     dts.append(abs((a - b).total_seconds()))
         if dts:
@@ -188,8 +260,8 @@ def fix_one(picker, apply, year=2016):
     bak = f"{hyp_qc}.rerun_backup"
     if not os.path.exists(bak):
         shutil.copytree(hyp_qc, bak); print(f"  backed up {hyp_qc} -> {bak}")
-    sdst, ns = subset_renumber_sum(full_slug, qc_slug, full_rows)
-    adst, na = subset_renumber_arc(full_slug, qc_slug, full_rows)
+    sdst, ns = subset_renumber_sum(full_slug, qc_slug, pairs)
+    adst, na = subset_renumber_arc(full_slug, qc_slug, pairs)
     print(f"  wrote corrected .sum ({ns} events) + .arc ({na} events) from the full run")
 
     # 2) re-run the relative chain from rereference (correct origins) through dtcc, then adaptive HypoDD
