@@ -63,6 +63,13 @@ def main():
                        catalog_csv=a.catalog,
                        epicenter=epi, region_bounds=rb,
                        networks=("KS", "KG", "GJ"),          # <-- GJ included
+                       # LSQR, never SVD: our recompiled hypoDD (MAXDATA=15M / MAXEVE=6500) sizes
+                       # the SVD workspace by its huge static arrays, so an SVD solve grinds for
+                       # HOURS even on a ~90-event cluster (2012: 4.7 h in the engine's internal
+                       # dtcc baseline). 2016 only escaped via the MAXDATA0-overflow LSQR fallback.
+                       # The driver's adaptive kim2011/ISTART=2 LSQR run is the published result;
+                       # this makes the engine's internal baseline take the same fast path.
+                       dtct_isolv=2,
                        wf_backend="stp", loc_backend="hypoinverse", reloc_backend="hypodd")
     src = spec.src_root
     for sub in ("event_catalog", "station_table", "stp_download"):
