@@ -88,6 +88,17 @@ def main():
 
     if a.reuse_picks:
         pdir = config.picks_dir(cfg); os.makedirs(pdir, exist_ok=True)
+        # Purge converted picks from any PREVIOUS staging first. The engine derives its event list
+        # (and cuspid <-> row numbering) from this directory, so leftovers from an older catalog
+        # version silently grow the id space and break the members-row mapping downstream
+        # (2010: 4 stale CSVs -> 498 events for a 494-member catalog -> inject KeyError). These are
+        # pure conversions of <wf_root>/<eid>_picks.csv — always safe to regenerate.
+        n_stale = 0
+        for old in os.listdir(pdir):
+            if old.endswith(".csv"):
+                os.remove(os.path.join(pdir, old)); n_stale += 1
+        if n_stale:
+            print(f"purged {n_stale} previously-converted pick CSVs from {pdir}")
         n_pk = 0
         for eid in members:
             ts = ts_of.get(eid)
