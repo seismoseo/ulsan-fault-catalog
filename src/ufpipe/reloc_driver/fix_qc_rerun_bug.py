@@ -195,6 +195,44 @@ def subset_renumber_arc(full_slug, qc_slug, pairs):
     return dst, n
 
 
+def subset_by_ids(full_slug, qc_slug, keep_ids):
+    """MANIFEST-ERA injection: cuspids are 200000+event_idx in BOTH the full and QC runs (assigned
+    from the staging manifest), so the full-run solution for the QC members is a pure row subset —
+    copy .sum lines / .arc blocks whose cuspid is in `keep_ids`, byte-identical, NO renumbering and
+    NO matching of any kind. Returns (n_sum, n_arc, missing_ids)."""
+    src_sum = f"{RUNS}/{full_slug}/1.HypoInv/kim2011/{full_slug}.sum"
+    dst_sum = f"{RUNS}/{qc_slug}/1.HypoInv/kim2011/{qc_slug}.sum"
+    from pipeline.core import sumio
+    sm = sumio.read_sum(src_sum)
+    ids = sm.id.astype(int).tolist()
+    lines = open(src_sum).readlines()
+    header = lines[0] if lines and not lines[0][:4].isdigit() else None
+    body = lines[1:] if header else lines
+    keep = set(int(k) for k in keep_ids)
+    out = [header] if header else []
+    found = set()
+    for ln, i in zip(body, ids):
+        if i in keep:
+            out.append(ln); found.add(i)
+    with open(dst_sum, "w") as f:
+        f.writelines(out)
+
+    src_arc = f"{RUNS}/{full_slug}/1.HypoInv/kim2011/{full_slug}.arc"
+    dst_arc = f"{RUNS}/{qc_slug}/1.HypoInv/kim2011/{qc_slug}.arc"
+    lines = open(src_arc).readlines()
+    def is_header(ln):
+        return len(ln) >= 146 and ln[:8].isdigit()
+    hdr_idx = [k for k, ln in enumerate(lines) if is_header(ln)]
+    out = []; n_arc = 0
+    for a, b in zip(hdr_idx, hdr_idx[1:] + [len(lines)]):
+        if int(lines[a][136:146]) in keep:
+            out.extend(lines[a:b]); n_arc += 1
+    with open(dst_arc, "w") as f:
+        f.writelines(out)
+    missing = sorted(keep - found)
+    return len(found), n_arc, missing
+
+
 def qc_pairs(root, full_slug, max_drop_frac=0.02):
     """(qc_row, cuspid) pairs for the injection, via time matching; LOUD about any drops.
 

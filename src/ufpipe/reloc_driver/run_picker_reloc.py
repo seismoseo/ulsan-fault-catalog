@@ -86,14 +86,25 @@ def inject_full_hypoinverse(picker, full_slug, qc_slug, root):
     (renumbered to the QC cuspids 200000+qc_row that match the event dirs). This REPLACES the redundant, buggy
     QC HypoInverse re-run so rereference/ph2dt/xcorr/dt.cc all use the one solution QC gated on. Reuses the
     validated subset+renumber helpers in fix_qc_rerun_bug.py."""
+    import pandas as pd
     import fix_qc_rerun_bug as FX
-    # (qc_row, engine cuspid) via ORIGIN-TIME matching — never 200000+members-row arithmetic, which
-    # silently breaks when same-second doublets shift the engine's id space (see member_to_cuspid).
-    pairs, mem_qc = FX.qc_pairs(os.path.basename(root.rstrip("/")), full_slug)
+    # MANIFEST era: cuspid = 200000 + event_idx in BOTH runs (assigned from stage.py's
+    # event_manifest.csv), so the injection is a pure id subset — byte-identical row copy, no
+    # renumbering, no positional arithmetic, no time matching. A QC member missing from the full
+    # .sum (HYPOINVERSE failed it, or a same-second doublet twin that owns no waveform dir) is
+    # excluded loudly; the QC run simply proceeds without it.
+    rd = FX._root_dir(os.path.basename(root.rstrip("/")))
+    mem_qc = pd.read_csv(os.path.join(rd, "members_qc.txt"), header=None)[0].tolist()
+    keep_ids = [FX.OFFSET + int(e) for e in mem_qc]
     hyp_qc = os.path.join(RUNS, qc_slug, "1.HypoInv", "kim2011")
     os.makedirs(hyp_qc, exist_ok=True)
-    FX.subset_renumber_sum(full_slug, qc_slug, pairs)
-    FX.subset_renumber_arc(full_slug, qc_slug, pairs)
+    n_sum, n_arc, missing = FX.subset_by_ids(full_slug, qc_slug, keep_ids)
+    if missing:
+        print(f"  !! {len(missing)} QC member(s) have no full-run solution — excluded: "
+              f"event_idx {[m - FX.OFFSET for m in missing[:10]]}")
+    if len(missing) > max(2, 0.02 * len(keep_ids)):
+        raise RuntimeError(f"{len(missing)}/{len(keep_ids)} QC members missing from the full-run "
+                           f".sum — structural problem (stale staging? wrong manifest?), not doublets.")
     # ph2dt (now run on the injected solution) needs the HYPOINVERSE station file in 1.HypoInv/STA/. The QC
     # subset skips the hypoinverse stage, so that file is never generated -- but stations are picker/subset-
     # independent, so copy the full-run's <full_slug>{_hyp.sta,.sta} across, renamed to the QC slug.

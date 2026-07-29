@@ -86,6 +86,18 @@ def main():
                 os.symlink(os.path.realpath(f), dst); n_wf += 1
     print(f"staged {n_wf} SAC symlinks -> {stp_root}  ({len(seen_ts)} timestamp dirs)")
 
+    # Event manifest: ts (engine event_id / waveform-dir name) -> OUR event_idx. The engine's evmap
+    # reads this and assigns cuspid = 200000 + event_idx, so the SAME unique id flows through
+    # .sum/.arc/event.dat/dt.ct/dt.cc/hypoDD.reloc — no positional numbering, no time matching, and
+    # stale dirs (not in the manifest) contribute nothing. For a same-second doublet, the first
+    # member owns the dir (seen_ts), matching which SACs/picks were actually staged.
+    mf = os.path.join(cfg.output_root, "event_manifest.csv")
+    with open(mf, "w") as fh:
+        fh.write("event_id,event_idx\n")
+        for ts, eid in sorted(seen_ts.items()):
+            fh.write(f"{ts},{int(eid)}\n")
+    print(f"wrote event manifest ({len(seen_ts)} events) -> {mf}")
+
     if a.reuse_picks:
         pdir = config.picks_dir(cfg); os.makedirs(pdir, exist_ok=True)
         # Purge converted picks from any PREVIOUS staging first. The engine derives its event list
