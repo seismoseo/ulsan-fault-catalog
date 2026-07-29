@@ -322,11 +322,14 @@ if not os.path.exists(frel):
     print(f"(no dt.cc result yet at {frel} — run stage 5 with RELOC_THROUGH='dtcc')")
 else:
     RL = pd.read_csv(frel, sep=r"\s+", names=RELOC_COLS)
-    # which events relocated further: the QC candidates that got >=1 cc link survive into RL; the rest
-    # (cc-poor: no waveform-similar neighbour above the cc threshold) do not move to dt.cc precision.
+    # The dt.cc leg runs IDAT=3 (cc + catalog dt.ct in ONE inversion, cc up-weighted late), so an
+    # event with NO cc link still relocates on dt.ct rather than being dropped — RL contains BOTH
+    # populations, at different relative precision. OBSCC=4 governs cc-link *clustering* only.
+    RL["ncc"] = RL.nccp + RL.nccs
     ncand = len(inbox) if "inbox" in dir() else None
     print(f"dt.cc-relocated events: {len(RL):,}"
-          + (f" of {ncand} QC candidates ({100*len(RL)/max(ncand,1):.0f}% got >=1 cc link)" if ncand else ""))
+          + (f" of {ncand} QC candidates fed in" if ncand else "")
+          + f" — {int((RL.ncc > 0).sum())} with >=1 cc link, {int((RL.ncc == 0).sum())} dt.ct-only")
     print(f"  cc links per event: median NCCP {RL.nccp.median():.0f}, NCCS {RL.nccs.median():.0f}; "
           f"best-linked event NCCP {int(RL.nccp.max())}")
     from scipy.spatial import cKDTree
@@ -347,9 +350,19 @@ else:
     fig.shift_origin(xshift="10c")
     fig.basemap(region=list(UF_BOX), projection="M9c", frame=["af", "wSen+tHypoDD dt.cc"])
     fig.coast(shorelines="0.4p,gray30", land="gray97", water="azure1")
-    fig.plot(x=RL.lon, y=RL.lat, style="c0.10c", fill="#d62728", pen="0.1p,black")
+    # cc-linked (>=1 cc pair, waveform precision) vs dt.ct-only (catalog-pick precision): plot BOTH,
+    # visually distinct, so the map never overstates how much of the cloud is at cc precision.
+    ct_only = RL[RL.ncc == 0]
+    cc_link = RL[RL.ncc > 0]
+    if len(ct_only):
+        fig.plot(x=ct_only.lon, y=ct_only.lat, style="c0.10c", fill="#f2b8b8", pen="0.1p,gray40",
+                 label=f"dt.ct-only ({len(ct_only)})")
+    if len(cc_link):
+        fig.plot(x=cc_link.lon, y=cc_link.lat, style="c0.10c", fill="#d62728", pen="0.1p,black",
+                 label=f">=1 cc link ({len(cc_link)})")
+    fig.legend(position="jTR+o0.15c", box="+gwhite+p0.5p,gray40")
     fig.basemap(map_scale="jBL+w10k+o0.4c/0.4c")
-    fig.show()''')
+    fig.show(width=1000)''')
 
 # ---------------------------------------------------------------- summary
 md(r"""## Summary — the year at a glance""")
