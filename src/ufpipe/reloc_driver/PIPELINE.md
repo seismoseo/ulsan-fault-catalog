@@ -35,9 +35,15 @@ that class of mistake.
    corrupts the dt.cc *values*, not merely the `event.dat` seeds. The `.sum` used by `rereference` must be the
    authoritative full-run solution.
 
-4. **`members.txt` row order defines the cuspid (200000 + row) that ties `.sum`, `.arc`, `event.dat`, and `dt.cc`
-   together.** Never reorder members without regenerating all four consistently. QC cuspid = 200000 + qc_row;
-   full cuspid = 200000 + full_row; the mapping between them is `members_qc[event_idx] → members[event_idx]`.
+4. **The cuspid is `200000 + event_idx` — ufpipe's global event index — in BOTH the full and QC runs**
+   *(manifest era, 2026-07-29)*. `stage.py` writes `<run_dir>/event_manifest.csv` (`event_id,event_idx`) and the
+   engine's `evmap` assigns ids from it, so one unique key ties `.sum`, `.arc`, `event.dat`, `dt.ct`, `dt.cc`, and
+   `hypoDD.reloc` together and joins directly to the PyOcto tables and `event_sac/<event_idx>/`. The QC injection
+   is therefore a pure id **subset** (`subset_by_ids`) — no renumbering, no positional arithmetic, no time
+   matching. NEVER key events by position over `sorted(dirs)`: a single stale directory shifts every subsequent
+   id (the 2011 off-by-one), and stale staging must instead be impossible (stage.py purges symlinks + converted
+   picks; dirs absent from the manifest contribute nothing). Pre-manifest run dirs fall back to the legacy
+   positional scheme.
 
 5. **The catalog is fed to the pipeline in KST and round-trips to UTC. Do not "fix" this to UTC.** See the boxed
    note below — feeding UTC directly would shift every event by 9 h.
