@@ -92,6 +92,7 @@ def main():
     # stale dirs (not in the manifest) contribute nothing. For a same-second doublet, the first
     # member owns the dir (seen_ts), matching which SACs/picks were actually staged.
     mf = os.path.join(cfg.output_root, "event_manifest.csv")
+    os.makedirs(cfg.output_root, exist_ok=True)      # virgin year: run dir may not exist yet
     with open(mf, "w") as fh:
         fh.write("event_id,event_idx\n")
         for ts, eid in sorted(seen_ts.items()):
