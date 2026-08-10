@@ -336,12 +336,21 @@ def _make_antialias_dataset_cls():
                 # (e.g. 1000->200 Hz native SAC), and merge() refuses traces with the same id at differing
                 # rates. Anti-alias + interpolate every trace to `sampling_rate` first, then merge cleanly.
                 unified = obspy.Stream()
+                _n_short_taper = 0
                 for trace in stream:
                     if trace.stats.sampling_rate != sampling_rate:
                         try:
                             if trace.stats.sampling_rate > sampling_rate:      # anti-alias before downsampling
                                 trace = trace.detrend("demean")
-                                trace = trace.taper(max_percentage=None, max_length=1.0)
+                                # a gappy day fragments into segments; ones shorter than the 2x1 s
+                                # taper make obspy warn "taper is longer than the trace" PER SEGMENT.
+                                # Harmless (taper shortened, filter fine) — collapse the spam into
+                                # one summary line per station-day, like the Steim2 handling above.
+                                with warnings.catch_warnings(record=True) as _tw:
+                                    warnings.simplefilter("always", UserWarning)
+                                    trace = trace.taper(max_percentage=None, max_length=1.0)
+                                _n_short_taper += sum(1 for w in _tw
+                                                      if "taper is longer" in str(w.message))
                                 trace = trace.filter("lowpass", **config.ANTIALIAS)
                             trace = trace.interpolate(sampling_rate, method="linear")
                         except Exception as e:
@@ -351,6 +360,9 @@ def _make_antialias_dataset_cls():
                     # and merge() refuses same-id traces with differing dtypes. Cast all to float64.
                     trace.data = trace.data.astype("float64")
                     unified.append(trace)
+                if _n_short_taper:
+                    print(f"  . [{os.path.basename(fname.split(',')[0])}] {_n_short_taper} "
+                          f"sub-2s fragment(s) got a shortened anti-alias taper (gappy day; harmless)")
                 stream = unified.merge(fill_value="latest")
                 if (response_path is None) and (response_xml is not None):
                     response = obspy.read_inventory(response_xml)
