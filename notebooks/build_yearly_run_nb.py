@@ -176,9 +176,12 @@ md(r"""## Stage 1 — detection (shells out to the `eqnet` env)
 
 Idempotent: days whose picks CSV already exists are skipped, so this is safe to re-run (it only fills
 gaps). A full un-detected year takes hours on GPU.""")
-co(r'''cmd = ["conda", "run", "--no-capture-output", "-n", "eqnet",
+co(r'''# --workers 8: DataLoader prefetch — reads the next station-days in parallel while the GPU
+# infers the current one. Detection is ~85% miniSEED reading, so this measured 2.1x on a dense
+# 2020 day (18.3 -> 8.7 min). Picks are identical; only wall-clock changes.
+cmd = ["conda", "run", "--no-capture-output", "-n", "eqnet",
        "python", "-m", "ufpipe.detection", "--model", MODEL, "--year", str(YEAR),
-       "--min-prob", str(MIN_PROB), "--highpass", str(HIGHPASS)]
+       "--min-prob", str(MIN_PROB), "--highpass", str(HIGHPASS), "--workers", "8"]
 if NETWORKS:
     cmd += ["--networks", NETWORKS]
 print("$", " ".join(cmd)); subprocess.run(cmd, check=True)''')
