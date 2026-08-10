@@ -37,7 +37,7 @@
 \begin{center}
 {\huge\bfseries\sffamily\color{accent} Ulsan-Fault earthquake catalog pipeline}\\[2mm]
 {\large\sffamily Reference manual: detection $\rightarrow$ association $\rightarrow$ location $\rightarrow$ relocation (HypoDD dt.ct + dt.cc)}\\[2mm]
-{\small\color{soft} Long-term (2010–present) catalog for the Ulsan Fault, SE Korea\hfill rev.\ 2026-07-27 · \code{src/ufpipe}}
+{\small\color{soft} Long-term (2010–present) catalog for the Ulsan Fault, SE Korea\hfill rev.\ 2026-08-04 · \code{src/ufpipe}}
 \end{center}
 \vspace{1mm}\hrule\vspace{3mm}
 
@@ -493,6 +493,17 @@ association, builds the reloc inputs from it (\code{ufpipe.reloc\_inputs} --- SA
 table, merged archive), then invokes the validated orchestrator
 \code{src/ufpipe/reloc\_driver/run\_picker\_reloc.py -{}-skip-build}, which drives the external
 HypoDD/xcorr engine. Internal stages (all KS/KG/GJ/NS):
+
+\begin{keybox}{One id end-to-end --- the manifest era (2026-07-29)}
+Every event is keyed by \code{id = 200000 + event\_idx} (ufpipe's global PyOcto index) in EVERY engine product:
+\code{.sum}, \code{.arc}, \code{event.dat}, \code{dt.ct}, \code{dt.cc}, \code{hypoDD.reloc}. The staging step
+writes \code{event\_manifest.csv} into the engine run dir and the engine's \code{evmap} assigns cuspids from it
+--- never from position over sorted directories, which silently shifted ids whenever stale staging or a
+same-second doublet changed the directory count (the 2010/2011 failures). The QC injection is therefore a pure
+id \emph{subset} (byte-identical row copy, no renumbering, no time matching), and \code{hypoDD.reloc.dtcc} joins
+directly to the PyOcto tables and \code{event\_sac/<event\_idx>/} with no lookup. All hypoDD solves everywhere
+use \textbf{LSQR} (\code{ISOLV=2}): the recompiled large-array binary makes SVD pathologically slow at any size.
+\end{keybox}
 
 \begin{center}
 \small
