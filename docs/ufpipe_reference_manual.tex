@@ -200,6 +200,22 @@ associated and only events whose \emph{origin} falls in-day are kept (dedup). Th
 single pass (local events are seconds long) but keeps each PyOcto solve to seconds --- a whole-year single pass is
 intractable on the dense $\sim$200-station NS array ($\gg$1 h, 12 GB). Station coordinates come from the
 multi-network year table (\code{stations.py}), so KS/KG/GJ/NS all associate.
+
+\begin{warnbox}{NS station epochs --- moved stations are SPLIT and association is the rename boundary}
+22 of the 220 GHBSN (NS) stations were physically relocated during operation (12\,m--5.2\,km; N108 and N166
+twice). Each position epoch is its OWN station: lowercase suffixes from the \emph{first} epoch
+(\code{N010a}, \code{N010b}; a plain code always means never-moved). The canonical epoch table
+(\code{ufpipe.ns\_epochs}, generated from the user-validated SOTA list
+\code{stations/ns/20240715/GHBSN\_info\_ver202312\_modified.csv}) is the single source; the old list carried a
+13\,km paste error at N019 and the epochs were previously AVERAGED into fictitious midpoints. Detection and the
+raw picks always use BASE codes (position-free; the archive stores base-code dirs); at the association input,
+each NS pick is stamped with the epoch code in force at its pick time, and every downstream product ---
+assignment, \code{.phs}, \code{.sta}, \code{station.dat}, SAC filenames and headers --- knows only epoch codes.
+xcorr therefore never pairs waveforms across a move (correct: the differential geometry is broken by it), and
+responses alias epoch $\rightarrow$ base code (a move is not a re-equip). The NS\_100hz mirror is retired (it
+was a partial 2021 test build, 8\% coverage, and its per-station swap silently dropped stations in other
+years); NS is read native 200\,Hz with the same anti-alias path as GJ.
+\end{warnbox}
 \begin{center}
 \small
 \begin{tabular}{@{}lcc l@{}}

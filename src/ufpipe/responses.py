@@ -98,8 +98,9 @@ def coverage_report(year, inv=None, networks=None):
     for n in inv:
         for st in n:
             have[(n.code, st.code)] = have.get((n.code, st.code), 0) + len(st)
-    rows = [dict(net=r.net, sta=r.sta, covered=(r.net, r.sta) in have,
-                 n_channels=have.get((r.net, r.sta), 0)) for _, r in S.iterrows()]
+    # NS epoch codes (N010a) alias to their base-code response (a move is not a re-equip)
+    rows = [dict(net=r.net, sta=r.sta, covered=(r.net, ns_base(r.sta)) in have,
+                 n_channels=have.get((r.net, ns_base(r.sta)), 0)) for _, r in S.iterrows()]
     return pd.DataFrame(rows)
 
 
@@ -136,6 +137,14 @@ def epoch_families(networks=("KS", "KG")):
     return fam
 
 
+def ns_base(code):
+    """NS epoch code -> base code (N010a -> N010); anything else unchanged. A moved NS station's
+    epochs (see ns_epochs.py) share one instrument — a move is not a re-equip — so every epoch
+    aliases to the base-code RESP."""
+    import re
+    return code[:-1] if re.fullmatch(r"N\d{3}[a-z]", str(code)) else code
+
+
 def resolve_code(sta, time, families=None):
     """The station code that was in force at `time` for the site `sta` belongs to.
 
@@ -165,6 +174,8 @@ def get_response(inv, net, sta, cha, time, families=None):
         return inv.get_response(seed, time)
     except Exception:
         alt = resolve_code(sta, time, families)
+        if alt == sta:
+            alt = ns_base(sta)              # NS epoch code -> base-code RESP (same instrument)
         if alt == sta:
             raise
         return inv.get_response(f"{net}.{alt}..{cha}", time)

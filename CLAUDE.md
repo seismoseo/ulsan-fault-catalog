@@ -205,6 +205,10 @@ GJ/  NS/  NS_100hz/   the other network waveform dirs (pure waveforms; NOT in gi
 data/
   metadata/     *** single home for all metadata, organized BY KIND ***
     stations/     ks_kg/  gj/  ns/  kigam/     — per-network station tables
+                  NS SOTA = ns/20240715/GHBSN_info_ver202312_modified.csv (validated 2026-08-04);
+                  22 moved stations get epoch codes N010a/N010b (ufpipe.ns_epochs, canonical table
+                  in stations/derived/). Picks/detection use BASE codes; association stamps epoch
+                  codes; SAC + all location products carry epoch identity. NS_100hz mirror RETIRED.
     responses/    ALL FOUR networks — master/ (148 MB KS_KG StationXML, gitignored) + fetched/ (7 KS)
                   + gj/ (30 sta) + ns/ (200 sta) + ns_derived/ (N201-N220 CLONED, provisional)
                   + source/ (raw MARA drop, gitignored). Loaded by src/ufpipe/responses.py

@@ -245,7 +245,17 @@ def _continuous_glob_for_station(continuous_root, network, code, year, julday):
     Returns a list (possibly empty if the station has no data for that day)."""
     pat = os.path.join(continuous_root, code, "*.D",
                        f"{network}.{code}..*.D.{year}.{julday:03d}")
-    return sorted(glob.glob(pat))
+    files = sorted(glob.glob(pat))
+    if not files and code[-1:].islower():
+        # NS EPOCH code (N010a/N010b — a moved station's per-position identity, see ufpipe.ns_epochs):
+        # the ARCHIVE stores waveforms under the BASE code (dir and filename both), so strip the
+        # epoch suffix for reading. The epoch code stays the station's identity everywhere else
+        # (SAC filename, kstnm, stla/stlo), which is exactly the point: data by base, position by epoch.
+        base = code[:-1]
+        pat = os.path.join(continuous_root, base, "*.D",
+                           f"{network}.{base}..*.D.{year}.{julday:03d}")
+        files = sorted(glob.glob(pat))
+    return files
 
 
 def read_continuous_for_event(continuous_root, network, code, origin_utc,

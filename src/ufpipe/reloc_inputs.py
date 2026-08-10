@@ -81,11 +81,13 @@ def build_merged_archive(model, year, out_root):
     os.makedirs(ma, exist_ok=True)
     S = _stations.build_year_table(year)
     n = 0
-    for _, r in S.iterrows():
-        src = os.path.join(_net_dir(r.net), r.sta)
+    # link by BASE code (datadir) — the archive knows nothing of NS epoch codes; the SAC exporter's
+    # glob strips the epoch suffix when reading, so one base-dir link serves every epoch of a station.
+    for _, r in S.drop_duplicates("datadir").iterrows():
+        src = os.path.join(_net_dir(r.net), r.datadir)
         if not os.path.isdir(src):
             continue
-        link = os.path.join(ma, r.sta)
+        link = os.path.join(ma, r.datadir)
         if os.path.lexists(link):
             if os.path.realpath(link) == os.path.realpath(src):
                 n += 1

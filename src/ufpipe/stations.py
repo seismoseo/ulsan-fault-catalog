@@ -81,7 +81,7 @@ def load_kskg(path=None):
         st = [x for x in (_ts(a) for a, b in use if a) if x is not None]
         en = [x for x in (_ts(b) for a, b in use if b) if x is not None]
         me = max(en) if en else None
-        rows.append(dict(net=net, sta=code, lat=d["lat"], lon=d["lon"], elev=d["elev"],
+        rows.append(dict(net=net, sta=code, datadir=code, lat=d["lat"], lon=d["lon"], elev=d["elev"],
                          t0=min(st) if st else pd.Timestamp("2000-01-01"),
                          t1=(pd.Timestamp("2030-01-01") if (me is None or me.year >= 2098) else me),
                          bands="/".join(sorted(d["bands"])), archive=config.KS_KG_DIR))
@@ -89,22 +89,20 @@ def load_kskg(path=None):
 
 
 def load_ns(path=None):
-    """NS dense local array: base code (N003a->N003), coords, epoch, band HH, archive NS/.
-    Ported from build_stations.load_ns."""
-    path = path or config.NS_STATION_CSV
-    if not os.path.exists(path):
+    """NS dense local array: ONE ROW PER STATION-EPOCH from the canonical epoch table.
+
+    22 stations physically moved (12 m – 5.2 km); each epoch is its own station with a lowercase
+    suffix (N010a/N010b; plain code = never moved). `sta` is the EPOCH code (identity/coordinates);
+    `datadir` is the BASE code (waveform archive dir; detection and picks use this). The previous
+    implementation AVERAGED the epochs' coordinates into one fictitious midpoint — never do that.
+    See ns_epochs.py for the SOTA source and its validation."""
+    import ns_epochs
+    e = ns_epochs.load()
+    if not len(e):
         return pd.DataFrame()
-    d = pd.read_csv(path)
-    d["sta"] = d.station.str.replace(r"[a-z]$", "", regex=True)
-    d["t0"] = pd.to_datetime(d.starttime, errors="coerce")
-    d["t1"] = pd.to_datetime(d.endtime, errors="coerce")
-    d = d.dropna(subset=["stla", "stlo"])
-    g = d.groupby("sta").agg(lat=("stla", "mean"), lon=("stlo", "mean"), elev=("stel", "mean"),
-                             t0=("t0", "min"), t1=("t1", "max")).reset_index()
-    g["net"] = "NS"
-    g["bands"] = "HH"
+    g = e.rename(columns={"band": "bands"}).copy()
     g["archive"] = config.NS_DIR
-    return g[["net", "sta", "lat", "lon", "elev", "t0", "t1", "bands", "archive"]]
+    return g[["net", "sta", "datadir", "lat", "lon", "elev", "t0", "t1", "bands", "archive"]]
 
 
 def load_gj(path=None):
@@ -114,7 +112,7 @@ def load_gj(path=None):
     if not os.path.exists(path):
         return pd.DataFrame()
     d = pd.read_csv(path)
-    g = pd.DataFrame(dict(net="GJ", sta=d.Code, lat=d.Latitude, lon=d.Longitude,
+    g = pd.DataFrame(dict(net="GJ", sta=d.Code, datadir=d.Code, lat=d.Latitude, lon=d.Longitude,
                           elev=d.get("Elevation", 0.0),
                           t0=pd.Timestamp("2000-01-01"), t1=pd.Timestamp("2030-01-01"),
                           bands="HH", archive=config.GJ_DIR))
@@ -153,9 +151,12 @@ def build_year_table(year, networks=None, use_cache=True):
     Cached to config.STATION_TABLE_CACHE/stations_<year>.csv (per full-network build)."""
     networks = tuple(networks) if networks else config.DETECT_NETWORKS
     cache = os.path.join(config.STATION_TABLE_CACHE, f"stations_{year}.csv")
+    S = None
     if use_cache and os.path.exists(cache):
         S = pd.read_csv(cache, parse_dates=["t0", "t1"])
-    else:
+        if "datadir" not in S.columns:                          # pre-epoch-era cache — rebuild
+            S = None
+    if S is None:
         S = pd.concat([load_kskg(), load_ns(), load_gj()], ignore_index=True)
         S = S[S.lat.notna()].copy()
         y0 = pd.Timestamp(f"{year}-01-01")
@@ -163,7 +164,8 @@ def build_year_table(year, networks=None, use_cache=True):
         S = S[(S.t0 <= y1) & (S.t1 >= y0)].copy()               # metadata epoch overlaps the year
         S["band"] = S.bands.map(_pick_band)
         S = S[S.band.notna()].copy()
-        S["days_local"] = [_days_local(r.archive, r.sta, r.band, year) for _, r in S.iterrows()]
+        # data presence is per BASE code (the archive knows nothing of epochs)
+        S["days_local"] = [_days_local(r.archive, r.datadir, r.band, year) for _, r in S.iterrows()]
         S = S[S.days_local > 0].reset_index(drop=True)          # has real data on disk this year
         os.makedirs(config.STATION_TABLE_CACHE, exist_ok=True)
         S.to_csv(cache, index=False)
@@ -173,21 +175,20 @@ def build_year_table(year, networks=None, use_cache=True):
 def discover_rows(year, networks=None, stations=None, use_ns_100hz=None):
     """Detection-facing station rows for `year`: list of dicts (net, sta, band, archive).
 
-    - restricts to `networks` (default all four) and optionally an explicit `stations` list;
-    - for NS, swaps archive -> NS_100hz mirror when config.USE_NS_100HZ and the station is mirrored
-      (falls back to the native 200 Hz NS/ archive otherwise — read there is anti-alias decimated)."""
-    use_ns_100hz = config.USE_NS_100HZ if use_ns_100hz is None else use_ns_100hz
+    Detection is position-free, so rows are keyed by the BASE code (`datadir`) — a station that
+    moved mid-year appears ONCE here (one waveform dir), even though the year table carries both
+    epoch rows. The epoch code enters at the association boundary, never in detection.
+
+    NS is read NATIVE at 200 Hz (anti-alias decimated in the reader, same path as GJ). The old
+    NS_100hz mirror is retired: it was a partial 2021 test build (8% of that year's station-days),
+    and its per-station swap silently dropped mirrored stations in every other year."""
     S = build_year_table(year, networks=networks)
     if stations:
         want = set(stations)
-        S = S[S.sta.isin(want)]
-    rows = []
-    for _, r in S.iterrows():
-        archive = r.archive
-        if r.net == "NS" and use_ns_100hz and os.path.isdir(os.path.join(config.NS_100HZ_DIR, r.sta)):
-            archive = config.NS_100HZ_DIR
-        rows.append(dict(net=r.net, sta=r.sta, band=r.band, archive=archive))
-    return rows
+        S = S[S.sta.isin(want) | S.datadir.isin(want)]
+    S = S.drop_duplicates("datadir")
+    return [dict(net=r.net, sta=r.datadir, band=r.band, archive=r.archive)
+            for _, r in S.iterrows()]
 
 
 # ---------------------------------------------------------------- HYPOINVERSE station files

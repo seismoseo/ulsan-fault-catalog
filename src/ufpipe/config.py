@@ -33,15 +33,19 @@ VELOCITY_CSV = os.path.join(_META, "velocity", "kim1983.csv")
 KS_KG_DIR = os.path.join(REPO, "KS_KG")                              # KS + KG velocity/accel stations
 GJ_DIR = os.path.join(REPO, "GJ")                                    # GJ 2016-2017 temporary arrays
 NS_DIR = os.path.join(REPO, "NS")                                    # NS dense array (native 200 Hz)
-NS_100HZ_DIR = os.path.join(REPO, "NS_100hz")                        # pre-decimated 100 Hz NS mirror (detection speed-up)
-USE_NS_100HZ = True                                                  # read NS from the mirror when a station is present there
+NS_100HZ_DIR = os.path.join(REPO, "NS_100hz")                        # DEPRECATED partial 2021 test mirror (8% coverage)
+USE_NS_100HZ = False                                                 # retired 2026-08: NS is read native 200 Hz (GJ path);
+#                                                                      the per-station mirror swap silently dropped
+#                                                                      mirrored stations in every non-2021 year
 DETECT_NETWORKS = ("KS", "KG", "GJ", "NS")                           # default network scope for detection + association
 BANDS = ("HH", "EL", "HG")                                           # channel priority, one band per station (velocity > accel)
 
 # station-table source metadata (consumed by stations.py; paths moved into data/metadata/ 2026-07)
 STATION_XML = os.path.join(_META, "responses", "master", "KS_KG_metadata_1.0.2.xml")   # KS/KG coords/epochs/bands
-NS_STATION_CSV = os.path.join(_META, "stations", "ns", "20231227",
-                              "GHBSN_station_list_240220_modified_code.csv")            # NS coords/epochs
+# SOTA per user 2026-08-04 (validated against original list + 240220 list + dataless SEED — see
+# ns_epochs.py; the previous 240220 file has N019 pasted from N018, 12.9 km off).
+NS_STATION_CSV = os.path.join(_META, "stations", "ns", "20240715",
+                              "GHBSN_info_ver202312_modified.csv")                       # NS coords/epochs
 GJ_STATION_CSV = os.path.join(_META, "stations", "gj", "gj_temporary_station_list.csv")  # GJ coords
 STATION_TABLE_CACHE = os.path.join(_META, "stations", "derived")                        # per-year built tables cache
 HYPOINV_STA_DIR = os.path.join(REPO, "data", "hypoinv", "STA")   # per-year HYPOINVERSE station files (GENERATED from the year table)

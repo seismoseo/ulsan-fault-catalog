@@ -725,6 +725,30 @@ def run_association_year(model, year, force=False, strict=False, networks=None, 
         picks_df["station"] = picks_df["net"] + "." + picks_df["code"]
         print(f"  station-code alias applied (same station, renamed code): {alias}")
 
+    # ---- NS EPOCH REMAP (the rename boundary) -------------------------------------------------
+    # Detection/picks carry BASE codes (position-free); 22 NS stations physically MOVED and each
+    # epoch is its own station (N010a/N010b, lowercase, suffixed from the first epoch — see
+    # ns_epochs.py). Here, and only here, each NS pick is stamped with the epoch code in force at
+    # its pick time; every downstream product (assignment, .phs, .sta, station.dat, SAC) then knows
+    # only epoch codes, so no solver or xcorr pair can ever mix two positions under one name.
+    ep = ST[(ST.net == "NS") & (ST.sta != ST.datadir)]
+    if len(ep):
+        ns_mask = picks_df["net"].eq("NS") & picks_df["code"].isin(set(ep.datadir))
+        if ns_mask.any():
+            pt = pd.to_datetime(picks_df.loc[ns_mask, "peak_time"], utc=True).dt.tz_localize(None)
+            code = picks_df.loc[ns_mask, "code"].copy()
+            for (base,), g in ep.groupby(["datadir"]):
+                m = code.eq(base)
+                if not m.any():
+                    continue
+                for _, r in g.iterrows():
+                    sel = m & (pt >= r.t0) & (pt <= r.t1)
+                    code.loc[sel] = r.sta
+            picks_df.loc[ns_mask, "code"] = code
+            picks_df["station"] = picks_df["net"] + "." + picks_df["code"]
+            print(f"  NS epoch remap: {int(ns_mask.sum())} picks at {ep.datadir.nunique()} moved "
+                  f"station(s) stamped with epoch codes ({', '.join(sorted(set(code))[:6])} ...)")
+
     used = set(picks_df["code"].dropna())
     ST = ST[ST.sta.isin(used)].copy()
     stations_xy = pd.DataFrame({"id": ST.net + "." + ST.sta + ".", "latitude": ST.lat,
