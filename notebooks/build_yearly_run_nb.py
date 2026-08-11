@@ -69,9 +69,9 @@ NETWORKS      = None                # None = all of KS,KG,GJ,NS; or e.g. "KS,KG"
 
 # ---- stage 2: association (daily-chunked PyOcto; defaults = the validated values) ----------
 ASSOC = dict(
-    gate           = dict(n_picks=4, n_p=2, n_s=2, n_ps=1),   # permissive gate (strict = 6/3/3/2)
+    gate           = dict(n_picks=6, n_p=3, n_s=3, n_ps=2),   # PRODUCTION gate — every 2010-2019 run used this
     overlap_s      = 150,           # daily-chunk overlap (s)
-    pick_match_tol = 1.5,           # PyOcto residual cap (s) — the primary association-quality knob
+    pick_match_tol = 1.0,           # PyOcto residual cap (s) — the primary association-quality knob
     zlim           = (0.0, 30.0),   # depth search range (km)
     center         = (35.856, 129.224),   # Gyeongju reference point
     lat_pad        = 1.0,           # association area = center +/- pads (deg)
