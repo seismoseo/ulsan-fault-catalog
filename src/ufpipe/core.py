@@ -403,6 +403,12 @@ def _make_antialias_dataset_cls():
             data = np.zeros([3, nt, nx], dtype=np.float32)
             for i, sta in enumerate(station_keys):
                 for c in station_ids[sta]:
+                    # EQNet's original code printed "Unknown component" for a nonstandard channel
+                    # letter but then indexed it anyway -> KeyError killed the whole year on the
+                    # first such trace (2020.015 has a channel ending in 'X'). Skip it: an unknown
+                    # component can't be placed in the E/N/Z tensor regardless.
+                    if c not in comp2idx:
+                        continue
                     j = comp2idx[c]
                     if len(stream.select(id=sta + c)) == 0:
                         print(f"Empty trace: {sta+c} {begin_time}")
