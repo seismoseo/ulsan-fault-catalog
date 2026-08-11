@@ -63,6 +63,8 @@ UF_BOX        = (129.25, 129.55, 35.60, 35.90)   # lon0, lon1, lat0, lat1 (the r
 MIN_PROB      = 0.2                 # PhaseNet+ pick threshold (0.2 = validated benchmark; config default 0.3.
                                     # SeisBench pickers use config.P/S_THRESHOLD=0.2 instead and ignore this)
 HIGHPASS      = 0.0                 # Hz; 0 = raw input (PhaseNet+ normalizes internally)
+WORKERS       = 8                   # DataLoader prefetch readers (measured 2.1x on dense years;
+                                    # 0 = serial read like the pre-2020 runs — picks identical either way)
 NETWORKS      = None                # None = all of KS,KG,GJ,NS; or e.g. "KS,KG" to restrict
 
 # ---- stage 2: association (daily-chunked PyOcto; defaults = the validated values) ----------
@@ -181,7 +183,7 @@ co(r'''# --workers 8: DataLoader prefetch — reads the next station-days in par
 # 2020 day (18.3 -> 8.7 min). Picks are identical; only wall-clock changes.
 cmd = ["conda", "run", "--no-capture-output", "-n", "eqnet",
        "python", "-m", "ufpipe.detection", "--model", MODEL, "--year", str(YEAR),
-       "--min-prob", str(MIN_PROB), "--highpass", str(HIGHPASS), "--workers", "8"]
+       "--min-prob", str(MIN_PROB), "--highpass", str(HIGHPASS), "--workers", str(WORKERS)]
 if NETWORKS:
     cmd += ["--networks", NETWORKS]
 print("$", " ".join(cmd)); subprocess.run(cmd, check=True)''')
