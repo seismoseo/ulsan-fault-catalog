@@ -113,3 +113,4 @@ data/metadata/stations/kigam/*.xml
 data/metadata/catalogs/ghbsn_heo/*.pdf
 # per-year station-table cache built by ufpipe/stations.py (regenerable)
 data/metadata/stations/derived/
+_header_fix_backups/
