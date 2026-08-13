@@ -730,6 +730,7 @@ def run_association_year(model, year, force=False, strict=False, networks=None, 
 
     # station coords from the multi-network year table (all four networks)
     ST = _stations.build_year_table(year, networks=networks)
+    ST_all = ST.copy()                    # unfiltered — the pick-loss gate below classifies against it
     table_codes = set(ST.sta)
 
     # station-code alias: a picked code X missing from the table but present as X2 is the SAME physical
@@ -772,10 +773,35 @@ def run_association_year(model, year, force=False, strict=False, networks=None, 
     stations_xy = pd.DataFrame({"id": ST.net + "." + ST.sta + ".", "latitude": ST.lat,
                                 "longitude": ST.lon, "elevation": ST.elev}).reset_index(drop=True)
     have = set(ST.sta)
+    # ---- PICK-LOSS GATE ---------------------------------------------------------------------
+    # A pick that detection produced, at a station that genuinely exists, MUST reach the
+    # associator. Silently ignoring such picks is a defect, not a warning: 2020 lost ~148k picks
+    # at N103/N160 (both real, both in the table under epoch codes) to a code-matching failure
+    # that surfaced only as one log line. So classify every dropped code and FAIL on the
+    # recoverable ones; only codes with no station behind them may be dropped, and even those are
+    # reported as a data-integrity finding rather than buried.
     dropped = sorted(used - have)
     if dropped:
-        print(f"  ! {len(dropped)} picked station(s) absent from the {year} station table (no coords) "
-              f"-> their picks are ignored: {dropped[:12]}{'...' if len(dropped) > 12 else ''}")
+        base_of = {}                       # dropped code -> the epoch codes it should have become
+        for c in dropped:
+            fam = sorted(ST_all.sta[ST_all.datadir == c]) if "datadir" in ST_all.columns else []
+            if fam:
+                base_of[c] = fam
+        n_lost = int(picks_df["code"].isin(dropped).sum())
+        unknown = [c for c in dropped if c not in base_of]
+        print(f"  ! {len(dropped)} picked station code(s) not in the {year} station table "
+              f"({n_lost:,} picks): {dropped[:12]}{'...' if len(dropped) > 12 else ''}")
+        if unknown:
+            print(f"    - no such station (malformed/corrupt header codes, correctly dropped): {unknown}")
+        if base_of:
+            det = "; ".join(f"{c} -> should be {'/'.join(v)}" for c, v in base_of.items())
+            raise RuntimeError(
+                f"[association] {year}: {sum(int(picks_df['code'].eq(c).sum()) for c in base_of):,} picks at "
+                f"REAL station(s) would be discarded because their base code was never remapped to an "
+                f"epoch code ({det}). This is a bug, not a data problem — the picks exist and the station "
+                f"has coordinates. Common cause: a stale kernel holding a pre-epoch ufpipe.stations/core "
+                f"(restart the kernel), or a station-table cache written before the epoch split "
+                f"(delete data/metadata/stations/derived/stations_{year}.csv and re-run).")
 
     # side-output: stations_<year>.csv into the model tree
     os.makedirs(config.station_table_dir(model), exist_ok=True)
