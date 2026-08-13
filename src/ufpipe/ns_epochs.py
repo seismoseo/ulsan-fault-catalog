@@ -56,12 +56,18 @@ def build(out=CANONICAL):
     d = d.dropna(subset=["stla", "stlo"]).sort_values(["station", "t0"]).reset_index(drop=True)
     rows = []
     for base, g in d.groupby("station", sort=True):
-        g = g.sort_values("t0")
+        g = g.sort_values("t0").reset_index(drop=True)
         multi = len(g) > 1
-        for k, (_, r) in enumerate(g.iterrows()):
+        for k, r in g.iterrows():
             code = f"{base}{chr(ord('a') + k)}" if multi else base
+            # HALF-OPEN epochs: an epoch runs up to the NEXT epoch's start, not to its own listed
+            # end date. The source list stores `endtime` as a bare DATE (2020-02-19 = midnight), so
+            # taking it literally leaves the whole move day in a gap between epochs — picks there
+            # match no epoch, keep the base code, and get discarded (2020: 238 N103 + 110 N160
+            # picks lost exactly this way). Consumers test t0 <= t < t1.
+            t1 = g.t0[k + 1] if k + 1 < len(g) else r.t1
             rows.append(dict(net="NS", sta=code, datadir=base, lat=r.stla, lon=r.stlo,
-                             elev=r.stel, t0=r.t0, t1=r.t1, band=str(r.channel).strip()))
+                             elev=r.stel, t0=r.t0, t1=t1, band=str(r.channel).strip()))
     out_df = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as fh:

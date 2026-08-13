@@ -761,7 +761,9 @@ def run_association_year(model, year, force=False, strict=False, networks=None, 
                 if not m.any():
                     continue
                 for _, r in g.iterrows():
-                    sel = m & (pt >= r.t0) & (pt <= r.t1)
+                    # half-open [t0, t1): epochs abut exactly (t1 == next t0), so every pick lands
+                    # in exactly one epoch and the move day is never a gap. See ns_epochs.build.
+                    sel = m & (pt >= r.t0) & (pt < r.t1)
                     code.loc[sel] = r.sta
             picks_df.loc[ns_mask, "code"] = code
             picks_df["station"] = picks_df["net"] + "." + picks_df["code"]
