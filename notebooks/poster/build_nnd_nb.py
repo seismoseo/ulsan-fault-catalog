@@ -91,6 +91,12 @@ SIG = 1.5                                       # Gaussian sigma (cells) -> ~0.6
 SIG_ALT = (0.75, 3.0)                           # sensitivity row: ~0.3 km and ~1.2 km
 FAULTS_GMT = REPO + "/data/hypoinv/faults_lonlat.gmt"
 COAST_GMT  = REPO + "/analysis/reloc_analysis/coastline_lonlat.gmt"
+DENS_CMAP  = "hot_r"                            # hot, reversed: white (empty) -> dark red (dense),
+                                                # so the background stays light and the overlaid
+                                                # open circles remain readable on top
+MAG_S0, MAG_K = 2.0, 9.0                        # marker area = MAG_S0 * 10**(MAG_K*... ) see below:
+                                                # s = MAG_S0 * 2**(2*ML) -> area doubles per 0.5 ML,
+                                                # i.e. radius ~ rupture length scaling
 
 CAT   = REPO + "/analysis/local_magnitudes/catalog_ml_heo_ufonly_reloc.csv"
 BLAST = REPO + "/analysis/local_magnitudes/blast_event_idx_deblast.csv"
@@ -345,8 +351,12 @@ smoothing, `Blues` with a **square-root (PowerNorm 0.5)** stretch so the low end
 without exaggerating the peaks.
 
 Smoothing width comes from the data: formal HypoDD errors are ~100 m and median event spacing 20 m,
-so σ ≈ 0.6 km (6× the location uncertainty) resolves the ~1 km fault-patch scale without rendering
-location noise as structure.""")
+so σ ≈ 0.7 km (≈7× the location uncertainty) resolves the ~1 km fault-patch scale without rendering
+location noise as structure.
+
+Individual epicentres are overlaid as **open circles scaled by magnitude** (area doubles per 0.5 ML,
+so the radius follows rupture-dimension scaling) — the density shows where activity concentrates,
+the circles show the events themselves and which of them are large.""")
 
 co(r'''from scipy.ndimage import gaussian_filter
 import matplotlib as mpl
@@ -381,25 +391,42 @@ def dens(d, sig):
     H,_,_ = np.histogram2d(d.svi_lon.values, d.svi_lat.values, bins=[XB, YB])
     return gaussian_filter(H, sig).T / CELL_KM2
 
-def basemap(ax, title):
+def mag_size(ml):
+    """Marker AREA scaled with magnitude: area doubles per 0.5 ML, so the circle RADIUS grows
+    like 10^(0.5*ML) — the same scaling as rupture dimension. Clipped at ML 0 so the smallest
+    events stay visible."""
+    return MAG_S0 * 2.0**(2.0*np.clip(np.asarray(ml, float), 0.0, None))
+
+def basemap(ax, title, quakes=None, ring="0.15"):
     for sgm in FSEG: ax.plot(sgm[:,0], sgm[:,1], color="0.45", lw=0.7, zorder=3)
     for sgm in CSEG: ax.plot(sgm[:,0], sgm[:,1], color="black", lw=0.9, zorder=4)
     ax.plot([UF_BOX[0],UF_BOX[1],UF_BOX[1],UF_BOX[0],UF_BOX[0]],
             [UF_BOX[2],UF_BOX[2],UF_BOX[3],UF_BOX[3],UF_BOX[2]], "--", lw=0.9, color="0.3", zorder=5)
+    if quakes is not None and len(quakes):
+        ax.scatter(quakes.svi_lon, quakes.svi_lat, s=mag_size(quakes.kma_mag),
+                   facecolor="none", edgecolor=ring, lw=0.45, alpha=0.85, zorder=6)
     ax.set(xlim=(MAP_BOX[0],MAP_BOX[1]), ylim=(MAP_BOX[2],MAP_BOX[3]),
            xlabel="Longitude", ylabel="Latitude", title=title)
+
+def mag_legend(ax, mags=(1.0, 2.0, 3.0), loc="lower left"):
+    h=[plt.scatter([],[],s=mag_size(m),facecolor="none",edgecolor="0.15",lw=0.6,
+                   label=f"ML {m:.0f}") for m in mags]
+    leg=ax.legend(handles=h, loc=loc, labelspacing=1.15, borderpad=0.8, frameon=True,
+                  fontsize=8, title="Magnitude", title_fontsize=8)
+    leg.set_zorder(10); return leg
 
 Zb = dens(bg, SIG); Zc = dens(cl, SIG)
 VMAX = float(np.nanmax([Zb.max(), Zc.max()]))          # SHARED scale -> the two are comparable
 
 fig, axes = plt.subplots(1, 2, figsize=(12.4, 6.4))
-for ax, (Z, lab, n) in zip(axes, [(Zb, "Background / spontaneous", len(bg)),
-                                  (Zc, "Clustered / triggered",   len(cl))]):
-    im = ax.imshow(Z, origin="lower", extent=EXT, cmap="Blues",
+for ax, (Z, lab, n, d_) in zip(axes, [(Zb, "Background / spontaneous", len(bg), bg),
+                                      (Zc, "Clustered / triggered",   len(cl), cl)]):
+    im = ax.imshow(Z, origin="lower", extent=EXT, cmap=DENS_CMAP,
                    norm=mpl.colors.PowerNorm(0.5, vmin=0, vmax=VMAX),
                    aspect=ASP, interpolation="bilinear", zorder=1)
-    basemap(ax, f"{lab} (n={n})")
+    basemap(ax, f"{lab} (n={n})", quakes=d_)
     cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03); cb.set_label("Events / km$^2$")
+mag_legend(axes[0])
 fig.suptitle(f"Smoothed seismicity density — Gaussian sigma {SIG*SP*111:.1f} km "
              f"(relocation uncertainty ~0.1 km)", y=0.98)
 fig.tight_layout()
@@ -417,10 +444,10 @@ real; the single ridge that appears at the widest setting is a smoothing artifac
 co(r'''fig, axes = plt.subplots(1, 3, figsize=(15.5, 5.4))
 for ax, sg in zip(axes, (SIG_ALT[0], SIG, SIG_ALT[1])):
     Z = dens(cl, sg)
-    im = ax.imshow(Z, origin="lower", extent=EXT, cmap="Blues",
+    im = ax.imshow(Z, origin="lower", extent=EXT, cmap=DENS_CMAP,
                    norm=mpl.colors.PowerNorm(0.5, vmin=0, vmax=Z.max()),
                    aspect=ASP, interpolation="bilinear", zorder=1)
-    basemap(ax, f"Clustered, $\\sigma$ = {sg*SP*111:.1f} km")
+    basemap(ax, f"Clustered, $\\sigma$ = {sg*SP*111:.1f} km", quakes=cl)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
 fig.tight_layout()
 for ext in ("pdf","png"):
