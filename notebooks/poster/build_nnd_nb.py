@@ -22,8 +22,18 @@ Outputs: figs/N1..N5 (PDF+PNG 600 dpi), figs/nnd_numbers.csv (citable), figs/nnd
 import os
 import nbformat as nbf
 
+import argparse
+_ap = argparse.ArgumentParser(description="Build the NND declustering notebook (Df is the variant knob).")
+_ap.add_argument("--df", type=float, default=1.2,
+                 help="fractal dimension: 1.2 = data-driven for these hypocentres (nb27); "
+                      "1.6 = generic Zaliapin-Ben-Zion")
+_ap.add_argument("--nb", default=None, help="output notebook name (default derived from --df)")
+_A = _ap.parse_args()
+DF_VALUE = _A.df
+TAG = "" if abs(DF_VALUE - 1.2) < 1e-9 else f"_Df{DF_VALUE:g}".replace(".", "p")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-NB = os.path.join(HERE, "01.NND_declustering.ipynb")
+NB = os.path.join(HERE, _A.nb or f"01.NND_declustering{TAG}.ipynb")
 os.makedirs(os.path.join(HERE, "figs"), exist_ok=True)
 
 cells = []
@@ -51,8 +61,9 @@ REPO   = "/home/msseo/works/02.Ulsan_Fault_detection"
 NNDPKG = "/home/msseo/works/16.kma_absolute_location"
 
 # --- NND parameters (Ulsan-adopted; see the markdown note below each) ---
-DF_UF   = 1.2      # fractal dimension: DATA-DRIVEN for these hypocentres (nb27 box-counting),
-                   # not the generic Z&B 1.6. Sensitivity to this choice is shown in N2b.
+DF_UF   = __DF__      # fractal dimension (build-time knob: 1.2 = data-driven for these
+                   # hypocentres from nb27 box-counting; 1.6 = the generic Zaliapin-Ben-Zion value)
+FIGTAG  = "__TAG__"   # appended to every figure/CSV name so the Df variants never overwrite each other
 B_NND   = 1.0      # fixed b (the catalog b drifts in time; fixing it keeps eta comparable)
 METRIC  = "3d"     # depth is resolved in the dt.cc catalog
 MMIN    = None     # NO Mc cut: eta depends only on the PARENT magnitude, so small events are
@@ -132,9 +143,9 @@ os.makedirs(FIGS, exist_ok=True)
 
 def save(fig, name, pygmt_fig=False):
     for ext in ("pdf","png"):
-        p=os.path.join(FIGS,f"{name}.{ext}")
+        p=os.path.join(FIGS,f"{name}{FIGTAG}.{ext}")
         (fig.savefig(p) if pygmt_fig else fig.savefig(p, bbox_inches="tight"))
-    print(f"  saved figs/{name}.pdf + .png")
+    print(f"  saved figs/{name}{FIGTAG}.pdf + .png")
 
 print(f"NND parameters: Df={DF_UF}  b={B_NND}  metric={METRIC}  mmin={MMIN}  link_rmax={LINKR} km")''')
 
@@ -461,8 +472,8 @@ fig.suptitle(f"Smoothed seismicity density — Gaussian sigma {SIG*SP*111:.1f} k
              f"(relocation uncertainty ~0.1 km)", y=0.98)
 fig.tight_layout()
 for ext in ("pdf","png"):
-    fig.savefig(os.path.join(FIGS, f"N7_spatial_density.{ext}"), bbox_inches="tight", dpi=400)
-print("  saved figs/N7_spatial_density.pdf + .png")
+    fig.savefig(os.path.join(FIGS, f"N7_spatial_density{FIGTAG}.{ext}"), bbox_inches="tight", dpi=400)
+print(f"  saved figs/N7_spatial_density{FIGTAG}.pdf + .png")
 plt.show()
 print(f"peak density: background {Zb.max():.1f}  clustered {Zc.max():.1f} events/km^2")''')
 
@@ -481,8 +492,8 @@ for ax, sg in zip(axes, (SIG_ALT[0], SIG, SIG_ALT[1])):
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
 fig.tight_layout()
 for ext in ("pdf","png"):
-    fig.savefig(os.path.join(FIGS, f"N7b_density_sensitivity.{ext}"), bbox_inches="tight", dpi=400)
-print("  saved figs/N7b_density_sensitivity.pdf + .png")
+    fig.savefig(os.path.join(FIGS, f"N7b_density_sensitivity{FIGTAG}.{ext}"), bbox_inches="tight", dpi=400)
+print(f"  saved figs/N7b_density_sensitivity{FIGTAG}.pdf + .png")
 plt.show()''')
 
 md(r"""## Summary — numbers for the poster""")
@@ -510,17 +521,20 @@ for lab,(t0,t1) in [("pre-Gyeongju (12 mo)", (GJ-pd.DateOffset(months=12), GJ)),
     rows.append((f"{lab}: background / clustered per week", f"{rb:.2f} / {rc:.2f}"))
 S=pd.DataFrame(rows,columns=["quantity","value"])
 print(S.to_string(index=False))
-S.to_csv(os.path.join(FIGS,"nnd_numbers.csv"),index=False)
+S.to_csv(os.path.join(FIGS,f"nnd_numbers{FIGTAG}.csv"),index=False)
 
 # event-level split for downstream poster notebooks
 g[["event_idx","event_time","svi_lon","svi_lat","svi_dep","kma_mag",
-   "Cluster","Cluster_merged","background"]].to_csv(os.path.join(FIGS,"nnd_events.csv"),index=False)
-print(f"\n-> figs/nnd_numbers.csv (cite these)  +  figs/nnd_events.csv ({len(g):,} rows, "
+   "Cluster","Cluster_merged","background"]].to_csv(os.path.join(FIGS,f"nnd_events{FIGTAG}.csv"),index=False)
+print(f"\n-> figs/nnd_numbers{FIGTAG}.csv (cite these)  +  figs/nnd_events{FIGTAG}.csv ({len(g):,} rows, "
       f"reusable background/cluster labels)")''')
 
 nb = nbf.v4.new_notebook(cells=cells,
                          metadata={"kernelspec":{"name":"python3","display_name":"Python 3 (base)",
                                                  "language":"python"}})
+for _c in nb.cells:
+    if _c.cell_type == "code":
+        _c.source = _c.source.replace("__DF__", repr(DF_VALUE)).replace("__TAG__", TAG)
 with open(NB, "w") as f:
     nbf.write(nb, f)
-print(f"wrote {NB} ({len(cells)} cells, unexecuted)")
+print(f"wrote {NB} ({len(cells)} cells, unexecuted)  Df={DF_VALUE}  figtag='{TAG}'")
