@@ -76,6 +76,17 @@ UF_BOX  = (129.25, 129.55, 35.60, 35.90)        # selection box
 MAP_BOX = (129.20, 129.58, 35.58, 35.92)        # display box (reloc moves events slightly outside)
 GJ_T    = "2016-09-12T11:32:54"                 # Gyeongju Mw 5.5 (UTC), OUTSIDE the box ~10 km W
 GJ_WINDOW_M = 6                                 # months of elevated response
+YEAR_RANGE  = (2010, 2024)                      # full catalog window for the time axes (archive
+                                                # ends 2024 day 305; no 2025+ data exists)
+
+# --- smoothed spatial density (N7) ---
+# Kernel width is set from the DATA, not by eye: formal HypoDD relocation errors are ~100 m
+# (median ex/ey = 0.1 km), median inter-event spacing is 20 m, over a ~27 x 32 km region.
+# 500 m = 5x the location uncertainty -> smooths away location noise while still resolving the
+# ~1 km fault-patch scale. The sensitivity row shows 250 m (near the uncertainty floor) and 1 km.
+KDE_BW_KM   = 0.5
+KDE_BW_ALT  = (0.25, 1.0)
+KDE_GRID_KM = 0.1                               # output grid step (must be << bandwidth)
 
 CAT   = REPO + "/analysis/local_magnitudes/catalog_ml_heo_ufonly_reloc.csv"
 BLAST = REPO + "/analysis/local_magnitudes/blast_event_idx_deblast.csv"
@@ -276,14 +287,21 @@ ax.set_ylabel("Cumulative events"); ax.set_title("Background vs clustered seismi
 leg=ax.legend(loc="upper left"); leg.set_zorder(10)
 
 ax=axes[1]
-yrs=np.arange(int(g.event_time.dt.year.min()), int(g.event_time.dt.year.max())+1)
+# bars placed on the SAME datetime axis as the cumulative panel (sharex=True): using year numbers
+# here would collide with the datetime scale and blow up the render.
+yrs=np.arange(YEAR_RANGE[0], YEAR_RANGE[1]+1)
 wb=bg.event_time.dt.year.value_counts().reindex(yrs,fill_value=0)
 wc=cl.event_time.dt.year.value_counts().reindex(yrs,fill_value=0)
-ax.bar(yrs-0.19,wb.values,width=0.38,color="#1f77b4",label="background")
-ax.bar(yrs+0.19,wc.values,width=0.38,color="#d62728",label="clustered")
-ax.axvline(GJ.year+ (GJ.dayofyear/365.25) - 0.5, color="0.25", lw=1.2)
+centres=[pd.Timestamp(f"{y}-07-01", tz="UTC") for y in yrs]
+w=pd.Timedelta(days=150)
+ax.bar([c-w/2 for c in centres], wb.values, width=w, color="#1f77b4", label="background")
+ax.bar([c+w/2 for c in centres], wc.values, width=w, color="#d62728", label="clustered")
+ax.axvline(GJ, color="0.25", lw=1.2)
 ax.set(xlabel="Year", ylabel="Events / year")
 leg=ax.legend(); leg.set_zorder(10)
+# full catalog window on the shared (datetime) axis — 2010-2024, not just the data extent
+ax.set_xlim(pd.Timestamp(f"{YEAR_RANGE[0]}-01-01", tz="UTC"),
+            pd.Timestamp(f"{YEAR_RANGE[1]}-12-31", tz="UTC"))
 save(fig,"N4_time_series"); plt.show()''')
 
 md(r"""## N5 — Family sizes and the largest sequences
@@ -313,6 +331,75 @@ leg=ax.legend(fontsize=7,loc="upper left"); leg.set_zorder(10)
 save(fig,"N5_families"); plt.show()
 
 print("largest families:", sizes.head(TOPN).to_dict())''')
+
+md(r"""## N7 — Smoothed spatial density
+
+Gaussian-kernel density for each population on a common colour scale, so the two are directly
+comparable. **Bandwidth 500 m** — five times the ~100 m formal relocation uncertainty, chosen so
+location error is not rendered as structure, while the ~1 km fault-patch scale stays resolved. The
+bottom row repeats the clustered field at 250 m and 1 km to show which features are bandwidth-robust.""")
+
+co(r'''from scipy.stats import gaussian_kde as _gkde
+LAT0 = float(g.svi_lat.mean()); KX = 111.0*np.cos(np.radians(LAT0)); KY = 111.0
+
+def density(d, bw_km, box, step_km=KDE_GRID_KM):
+    """Gaussian KDE in KM space (so the bandwidth is isotropic and physical), returned on a lon/lat grid.
+    Events per km^2: the KDE integrates to 1, so multiply by N."""
+    x = d.svi_lon.values*KX; y = d.svi_lat.values*KY
+    if len(d) < 5: return None, None, None
+    gx = np.arange(box[0]*KX, box[1]*KX, step_km); gy = np.arange(box[2]*KY, box[3]*KY, step_km)
+    XX, YY = np.meshgrid(gx, gy)
+    kde = _gkde(np.vstack([x, y]))
+    kde.set_bandwidth(bw_km / np.sqrt(kde.covariance_factor()**2 * np.cov(np.vstack([x,y])).trace()/2))
+    Z = kde(np.vstack([XX.ravel(), YY.ravel()])).reshape(XX.shape) * len(d)
+    return XX/KX, YY/KY, Z
+
+# NOTE 6 pcolormesh panels at savefig.dpi=600 exhausts the Agg renderer (bad_alloc); this figure
+# is saved at 300 dpi, which is still well beyond poster print resolution for a raster this size.
+fig, axes = plt.subplots(2, 3, figsize=(13.5, 8.6),
+                         gridspec_kw=dict(height_ratios=[1.0, 1.0]))
+# --- top row: background vs clustered at the chosen bandwidth, SHARED colour scale ---
+Xb, Yb, Zb = density(bg, KDE_BW_KM, MAP_BOX)
+Xc, Yc, Zc = density(cl, KDE_BW_KM, MAP_BOX)
+vmax = float(np.nanmax([Zb.max(), Zc.max()]))
+for ax, (X, Y, Z, lab, n) in zip(axes[0], [(Xb,Yb,Zb,"Background / spontaneous",len(bg)),
+                                           (Xc,Yc,Zc,"Clustered / triggered",len(cl))]):
+    pc = ax.pcolormesh(X, Y, Z, cmap="magma_r", vmin=0, vmax=vmax, shading="auto")
+    ax.plot([UF_BOX[0],UF_BOX[1],UF_BOX[1],UF_BOX[0],UF_BOX[0]],
+            [UF_BOX[2],UF_BOX[2],UF_BOX[3],UF_BOX[3],UF_BOX[2]], "--", lw=1, color="0.35")
+    ax.set(title=f"{lab} (n={n}), bw={KDE_BW_KM*1000:.0f} m", xlabel="Longitude", ylabel="Latitude",
+           xlim=(MAP_BOX[0],MAP_BOX[1]), ylim=(MAP_BOX[2],MAP_BOX[3]))
+    ax.set_aspect(KY/KX)
+    fig.colorbar(pc, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
+# --- ratio panel: where clustered dominates background ---
+ax = axes[0][2]
+with np.errstate(divide="ignore", invalid="ignore"):
+    ratio = np.log10(np.where(Zb > 1e-6, Zc/np.maximum(Zb,1e-9), np.nan))
+pc = ax.pcolormesh(Xb, Yb, ratio, cmap="RdBu_r", vmin=-1.5, vmax=1.5, shading="auto")
+ax.plot([UF_BOX[0],UF_BOX[1],UF_BOX[1],UF_BOX[0],UF_BOX[0]],
+        [UF_BOX[2],UF_BOX[2],UF_BOX[3],UF_BOX[3],UF_BOX[2]], "--", lw=1, color="0.35")
+ax.set(title="log$_{10}$ (clustered / background)", xlabel="Longitude", ylabel="Latitude",
+       xlim=(MAP_BOX[0],MAP_BOX[1]), ylim=(MAP_BOX[2],MAP_BOX[3]))
+ax.set_aspect(KY/KX)
+fig.colorbar(pc, ax=ax, fraction=0.046, pad=0.03).set_label("log$_{10}$ ratio")
+# --- bottom row: bandwidth sensitivity on the clustered field ---
+for ax, bw in zip(axes[1], (KDE_BW_ALT[0], KDE_BW_KM, KDE_BW_ALT[1])):
+    X, Y, Z = density(cl, bw, MAP_BOX)
+    pc = ax.pcolormesh(X, Y, Z, cmap="magma_r", shading="auto")
+    ax.set(title=f"Clustered, bw = {bw*1000:.0f} m", xlabel="Longitude", ylabel="Latitude",
+           xlim=(MAP_BOX[0],MAP_BOX[1]), ylim=(MAP_BOX[2],MAP_BOX[3]))
+    ax.set_aspect(KY/KX)
+    fig.colorbar(pc, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
+fig.suptitle("Smoothed spatial density — background vs clustered "
+             f"(Gaussian KDE; relocation uncertainty ~100 m)", y=0.995)
+fig.tight_layout()
+for ext in ("pdf","png"):
+    fig.savefig(os.path.join(FIGS, f"N7_spatial_density.{ext}"), bbox_inches="tight", dpi=300)
+print("  saved figs/N7_spatial_density.pdf + .png (300 dpi)")
+plt.show()
+
+print(f"peak density: background {Zb.max():.1f}  clustered {Zc.max():.1f} events/km^2 "
+      f"(bw {KDE_BW_KM*1000:.0f} m)")''')
 
 md(r"""## Summary — numbers for the poster""")
 
