@@ -58,6 +58,16 @@ METRIC  = "3d"     # depth is resolved in the dt.cc catalog
 MMIN    = None     # NO Mc cut: eta depends only on the PARENT magnitude, so small events are
                    # valid children; cutting them would discard real cluster membership
 LINKR   = 1.0      # km, family-linking cap (module default 10 km is whole-peninsula scale)
+BACKGROUND_DEF = "above_diagonal"   # "above_diagonal" (DEFAULT) | "roots" | "strict"
+#   above_diagonal : the event's OWN nearest-neighbour eta >= eta0 -> it was not triggered by any
+#                    earlier event. This is literally "above the eta0 diagonal" in the R-T plot, so
+#                    the figures and the definition agree with no hidden second rule.
+#   roots          : above_diagonal PLUS the 54 events whose eta < eta0 but whose link exceeded the
+#                    LINKR distance cap (family roots by the linking step).
+#   strict         : the old, BIASED set - untriggered events that also produced NO offspring. It
+#                    silently drops every family's first event (245 here), i.e. exactly the
+#                    productive spontaneous events, understating the spontaneous rate by ~20% and
+#                    capping background magnitudes at ML 2.70 vs 3.93 for the full catalog.
 MERGE_D, MERGE_Z = 5.0, 5.0     # spatial_merge: co-located but temporally separate families
 
 # --- catalog selection (user decision 2026-08-16) ---
@@ -182,20 +192,40 @@ labels = nnd.build_families(nd, e0, g.event_id.values, link_rmax_km=LINKR)
 merged = nnd.spatial_merge(g, labels, dmax_km=MERGE_D, dz_km=MERGE_Z)
 g["Cluster"]        = g.event_id.map(labels).fillna(-1).astype(int)
 g["Cluster_merged"] = g.event_id.map(merged).fillna(-1).astype(int)
-g["background"]     = g.Cluster < 0
 
-n_fam = int(g.Cluster.max())+1; n_clu = int((g.Cluster>=0).sum()); n_bg = int(g.background.sum())
+# ---- BACKGROUND = SPONTANEOUS (untriggered), not "clustered==-1" ----------------------------
+# An event is spontaneous when nothing earlier triggered it, i.e. its OWN nearest-neighbour eta is
+# above eta0 (above the diagonal in N1). A family's FIRST event satisfies this: it has no parent,
+# only offspring - so it is spontaneous and MUST be counted as background. The earlier
+# `Cluster < 0` definition excluded all 245 family roots, biasing the spontaneous set against
+# exactly the productive (and largest) events.
+triggered = set(nd.loc[nd.eta < e0, "event_id"].astype(str))          # has a strong parent link
+if BACKGROUND_DEF == "above_diagonal":
+    g["background"] = ~g.event_id.isin(triggered)
+elif BACKGROUND_DEF == "roots":
+    _roots = {sub.sort_values("t_year").iloc[0].event_id
+              for _, sub in g[g.Cluster >= 0].groupby("Cluster")}
+    g["background"] = (g.Cluster < 0) | g.event_id.isin(_roots)
+else:
+    g["background"] = g.Cluster < 0
+g["spontaneous"] = g.background                                       # explicit alias
+
+n_fam = int(g.Cluster.max())+1
+n_bg  = int(g.background.sum()); n_trig = len(g) - n_bg
+n_roots = int(((g.Cluster >= 0) & g.background).sum())
 print(f"log10(eta0) = {LE0:.2f}   (GMM means {np.round(info['means'],2)}, weights {np.round(info['weights'],2)})")
-print(f"clustered {n_clu}/{len(g)} ({100*n_clu/len(g):.0f}%)   background {n_bg} ({100*n_bg/len(g):.0f}%)"
-      f"   families {n_fam} (merged {int(g.Cluster_merged.max())+1})")
+print(f"BACKGROUND_DEF = '{BACKGROUND_DEF}'")
+print(f"  spontaneous / background {n_bg}/{len(g)} ({100*n_bg/len(g):.0f}%)"
+      f"   -- of which {n_roots} are family FIRST events (spontaneous parents of a sequence)")
+print(f"  triggered {n_trig} ({100*n_trig/len(g):.0f}%)   families {n_fam} "
+      f"(merged {int(g.Cluster_merged.max())+1})")
+print(f"  for comparison, the old biased 'no-offspring' set would have been "
+      f"{int((g.Cluster<0).sum())} ({100*(g.Cluster<0).mean():.0f}%)")
 
-# --- VERIFICATION: the two background definitions must agree ---
-bg_alt = ~g.event_id.isin(set(nd.loc[nd.eta < e0, "event_id"]))
-assert int(bg_alt.sum()) == n_bg or abs(int(bg_alt.sum()) - n_bg) <= n_fam, \
-    f"background mismatch: labels {n_bg} vs eta-threshold {int(bg_alt.sum())}"
 assert info["means"][0] < LE0 < info["means"][1], "eta0 must lie between the two GMM modes"
-print(f"  checks OK: eta0 between GMM modes; eta-threshold background {int(bg_alt.sum())} "
-      f"(differs from label-based only by family roots, expected)")''')
+assert n_bg >= int((g.Cluster < 0).sum()), "spontaneous set must include every no-offspring event"
+print(f"  checks OK: eta0 in the GMM valley; spontaneous set contains all no-offspring events "
+      f"plus the family roots")''')
 
 md(r"""## N1 — Rescaled time–distance density, with $\eta_0$
 
@@ -267,10 +297,10 @@ md(r"""## N3 — Where the two populations sit
 Background (spontaneous) events versus clustered (triggered) events. The distinction the poster
 rests on: whether persistent activity is distributed background or a few episodic sequences.""")
 
-co(r'''bg = g[g.background]; cl = g[~g.background]
+co(r'''bg = g[g.background]; cl = g[~g.background]     # spontaneous vs triggered
 fig=pygmt.Figure()
-for i,(lab,d,color) in enumerate([(f"Background / spontaneous (n={len(bg)})", bg, "#1f77b4"),
-                                  (f"Clustered / triggered (n={len(cl)})",   cl, "#d62728")]):
+for i,(lab,d,color) in enumerate([(f"Spontaneous / background (n={len(bg)})", bg, "#1f77b4"),
+                                  (f"Triggered (n={len(cl)})",              cl, "#d62728")]):
     if i: fig.shift_origin(xshift="9.6c")
     fig.basemap(region=list(MAP_BOX), projection="M9c",
                 frame=["af", ("WSen" if i==0 else "wSen")+f'+t"{lab}"'])
@@ -290,8 +320,8 @@ co(r'''GJ = pd.Timestamp(GJ_T, tz="UTC")
 fig,axes=plt.subplots(2,1,figsize=(11,7),sharex=True,
                       gridspec_kw=dict(height_ratios=[1.25,1]))
 ax=axes[0]
-ax.plot(bg.event_time, np.arange(1,len(bg)+1), color="#1f77b4", lw=1.8, label=f"background (n={len(bg)})")
-ax.plot(cl.event_time, np.arange(1,len(cl)+1), color="#d62728", lw=1.8, label=f"clustered (n={len(cl)})")
+ax.plot(bg.event_time, np.arange(1,len(bg)+1), color="#1f77b4", lw=1.8, label=f"spontaneous (n={len(bg)})")
+ax.plot(cl.event_time, np.arange(1,len(cl)+1), color="#d62728", lw=1.8, label=f"triggered (n={len(cl)})")
 ax.axvline(GJ,color="0.25",lw=1.2); ax.text(GJ,ax.get_ylim()[1],"  Gyeongju Mw 5.5",fontsize=9,va="top")
 ax.set_ylabel("Cumulative events"); ax.set_title("Background vs clustered seismicity through time")
 leg=ax.legend(loc="upper left"); leg.set_zorder(10)
@@ -304,8 +334,8 @@ wb=bg.event_time.dt.year.value_counts().reindex(yrs,fill_value=0)
 wc=cl.event_time.dt.year.value_counts().reindex(yrs,fill_value=0)
 centres=[pd.Timestamp(f"{y}-07-01", tz="UTC") for y in yrs]
 w=pd.Timedelta(days=150)
-ax.bar([c-w/2 for c in centres], wb.values, width=w, color="#1f77b4", label="background")
-ax.bar([c+w/2 for c in centres], wc.values, width=w, color="#d62728", label="clustered")
+ax.bar([c-w/2 for c in centres], wb.values, width=w, color="#1f77b4", label="spontaneous")
+ax.bar([c+w/2 for c in centres], wc.values, width=w, color="#d62728", label="triggered")
 ax.axvline(GJ, color="0.25", lw=1.2)
 ax.set(xlabel="Year", ylabel="Events / year")
 leg=ax.legend(); leg.set_zorder(10)
@@ -419,8 +449,8 @@ Zb = dens(bg, SIG); Zc = dens(cl, SIG)
 VMAX = float(np.nanmax([Zb.max(), Zc.max()]))          # SHARED scale -> the two are comparable
 
 fig, axes = plt.subplots(1, 2, figsize=(12.4, 6.4))
-for ax, (Z, lab, n, d_) in zip(axes, [(Zb, "Background / spontaneous", len(bg), bg),
-                                      (Zc, "Clustered / triggered",   len(cl), cl)]):
+for ax, (Z, lab, n, d_) in zip(axes, [(Zb, "Spontaneous (background)", len(bg), bg),
+                                      (Zc, "Triggered",             len(cl), cl)]):
     im = ax.imshow(Z, origin="lower", extent=EXT, cmap=DENS_CMAP,
                    norm=mpl.colors.PowerNorm(0.5, vmin=0, vmax=VMAX),
                    aspect=ASP, interpolation="bilinear", zorder=1)
@@ -447,7 +477,7 @@ for ax, sg in zip(axes, (SIG_ALT[0], SIG, SIG_ALT[1])):
     im = ax.imshow(Z, origin="lower", extent=EXT, cmap=DENS_CMAP,
                    norm=mpl.colors.PowerNorm(0.5, vmin=0, vmax=Z.max()),
                    aspect=ASP, interpolation="bilinear", zorder=1)
-    basemap(ax, f"Clustered, $\\sigma$ = {sg*SP*111:.1f} km", quakes=cl)
+    basemap(ax, f"Triggered, $\\sigma$ = {sg*SP*111:.1f} km", quakes=cl)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
 fig.tight_layout()
 for ext in ("pdf","png"):
@@ -467,8 +497,10 @@ rows.append(("events analysed (de-blasted)", f"{len(g):,}"))
 rows.append(("selection", f"{SELECTION} (dt.cc {n_cc:,} + dt.ct-only ML>={DTCT_ML_MIN}: {n_ct})"))
 rows.append(("NND parameters", f"Df={DF_UF}, b={B_NND}, {METRIC}, link_rmax={LINKR} km, no Mc cut"))
 rows.append(("log10(eta_0)  [GMM valley]", f"{LE0:.2f}"))
-rows.append(("background (spontaneous)", f"{n_bg:,} ({100*n_bg/len(g):.0f}%)"))
-rows.append(("clustered (triggered)", f"{n_clu:,} ({100*n_clu/len(g):.0f}%)"))
+rows.append(("background definition", BACKGROUND_DEF + " (eta >= eta0: not triggered)"))
+rows.append(("spontaneous / background", f"{n_bg:,} ({100*n_bg/len(g):.0f}%)"))
+rows.append(("  of which family first events", f"{n_roots:,}"))
+rows.append(("triggered", f"{n_trig:,} ({100*n_trig/len(g):.0f}%)"))
 rows.append(("families / after spatial merge", f"{n_fam} / {int(g.Cluster_merged.max())+1}"))
 rows.append(("largest family size", f"{int(sizes.iloc[0])} events"))
 for lab,(t0,t1) in [("pre-Gyeongju (12 mo)", (GJ-pd.DateOffset(months=12), GJ)),
