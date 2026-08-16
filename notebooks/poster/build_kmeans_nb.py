@@ -255,6 +255,50 @@ fig.suptitle("Annual event counts by sub-region — spontaneous vs triggered "
 fig.tight_layout()
 save(fig, "K3_subregion_timeseries"); plt.show()''')
 
+md(r"""## K4 — Continuous cumulative counts by sub-region
+
+Cumulative event count for each sub-region, plotted continuously in time. Slope *is* rate, so this
+shows directly which sub-regions accumulate steadily (chronic) and which jump in steps (episodic).
+The right panel splits each sub-region into its spontaneous and triggered components — a chronic
+patch should track its spontaneous curve closely, an episodic one should show triggered staircases.""")
+
+co(r'''fig, axes = plt.subplots(1, 2, figsize=(14.5, 5.8), sharex=True)
+
+ax = axes[0]
+for k in range(K):
+    s = d[d.kc==k].sort_values("event_time")
+    ax.plot(s.event_time, np.arange(1, len(s)+1), lw=1.8, color=TAB[k%len(TAB)],
+            label=f"C{k} (n={len(s)}, {100*s.background.mean():.0f}% spont.)")
+ax.axvline(GJ, color="0.25", lw=1.2, ls="--")
+ax.text(GJ, ax.get_ylim()[1]*0.98, " Gyeongju Mw 5.5", fontsize=9, va="top", color="0.25")
+ax.set(xlabel="Year", ylabel="Cumulative events", title="Cumulative count by sub-region")
+ax.set_xlim(pd.Timestamp(f"{YEAR_RANGE[0]}-01-01", tz="UTC"),
+            pd.Timestamp(f"{YEAR_RANGE[1]}-12-31", tz="UTC"))
+leg = ax.legend(fontsize=8, loc="upper left"); leg.set_zorder(10)
+
+ax = axes[1]
+for k in range(K):
+    s = d[d.kc==k]
+    sp = s[s.background].sort_values("event_time")
+    tr = s[~s.background].sort_values("event_time")
+    ax.plot(sp.event_time, np.arange(1,len(sp)+1), lw=1.6, color=TAB[k%len(TAB)])
+    ax.plot(tr.event_time, np.arange(1,len(tr)+1), lw=1.6, color=TAB[k%len(TAB)], ls=":")
+ax.axvline(GJ, color="0.25", lw=1.2, ls="--")
+ax.plot([], [], color="0.35", lw=1.6, label="spontaneous (solid)")
+ax.plot([], [], color="0.35", lw=1.6, ls=":", label="triggered (dotted)")
+ax.set(xlabel="Year", ylabel="Cumulative events", title="Split into spontaneous vs triggered")
+leg = ax.legend(fontsize=8, loc="upper left"); leg.set_zorder(10)
+fig.tight_layout()
+save(fig, "K4_cumulative"); plt.show()
+
+# quantify "steady vs episodic": largest single-30-day jump as a fraction of the total
+print(f"{'cluster':>8} {'n':>5} {'spont%':>7} {'max 30-day burst':>17} {'burst/total':>12}")
+for k in range(K):
+    s = d[d.kc==k].sort_values("event_time")
+    t = s.event_time.values
+    burst = max((np.sum((t >= t0) & (t < t0 + np.timedelta64(30,"D"))) for t0 in t), default=0)
+    print(f"{k:>8} {len(s):>5} {100*s.background.mean():>6.0f}% {burst:>17} {burst/len(s):>11.2f}")''')
+
 md(r"""## Summary — sub-region table for the poster""")
 
 co(r'''T2 = T.copy()

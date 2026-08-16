@@ -57,6 +57,10 @@ All computation uses the canonical `kma_absolute_location.nnd` module (cross-val
 Goebel's `clustering-analysis`). **Kernel: base.**""")
 
 co(r'''# ============================ PARAMETERS ============================
+import warnings; warnings.filterwarnings("ignore")
+import os, sys
+import numpy as np, pandas as pd
+
 REPO   = "/home/msseo/works/02.Ulsan_Fault_detection"
 NNDPKG = "/home/msseo/works/16.kma_absolute_location"
 
@@ -107,9 +111,15 @@ YEAR_RANGE  = (2010, 2024)                      # full catalog window for the ti
 # median inter-event spacing 20 m, region ~27 x 32 km. SP=0.004 deg (~0.4 km cells) with SIG=1.5
 # cells gives an effective ~0.6 km kernel = 6x the location uncertainty, resolving the ~1 km
 # fault-patch scale without rendering location noise as structure.
-SP  = 0.004                                     # grid step (deg)
-SIG = 1.5                                       # Gaussian sigma (cells) -> ~0.6 km
-SIG_ALT = (0.75, 3.0)                           # sensitivity row: ~0.3 km and ~1.2 km
+SP        = 0.004                               # grid step (deg) ~ 0.44 km cells
+SMOOTH_KM = 0.5                                 # smoothing sigma in KM — the physical knob.
+SMOOTH_ALT_KM = (0.25, 1.0)                     # sensitivity row
+# sigma in CELLS is derived from the km value, so the two can never drift apart (an earlier
+# version hard-coded SIG=1.5 cells copied from the density-animation nb, which silently became
+# 0.7 km on this grid instead of the 0.5 km the rationale called for).
+_CELL_KM = SP*111.0*np.cos(np.radians(35.75))
+SIG      = SMOOTH_KM/_CELL_KM
+SIG_ALT  = tuple(a/_CELL_KM for a in SMOOTH_ALT_KM)
 FAULTS_GMT = REPO + "/data/hypoinv/faults_lonlat.gmt"
 COAST_GMT  = REPO + "/analysis/reloc_analysis/coastline_lonlat.gmt"
 DENS_CMAP  = "hot_r"                            # hot, reversed: white (empty) -> dark red (dense),
@@ -124,9 +134,6 @@ BLAST = REPO + "/analysis/local_magnitudes/blast_event_idx_deblast.csv"
 MLC   = REPO + "/analysis/local_magnitudes/catalog_ml_heo_const.csv"
 FIGS  = REPO + "/notebooks/poster/figs"
 
-import warnings; warnings.filterwarnings("ignore")
-import os, sys
-import numpy as np, pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
 from scipy.stats import gaussian_kde
@@ -392,7 +399,7 @@ smoothing, `Blues` with a **square-root (PowerNorm 0.5)** stretch so the low end
 without exaggerating the peaks.
 
 Smoothing width comes from the data: formal HypoDD errors are ~100 m and median event spacing 20 m,
-so σ ≈ 0.7 km (≈7× the location uncertainty) resolves the ~1 km fault-patch scale without rendering
+so σ = 0.5 km (5× the location uncertainty) resolves the ~1 km fault-patch scale without rendering
 location noise as structure.
 
 Individual epicentres are overlaid as **open circles scaled by magnitude** (area doubles per 0.5 ML,
@@ -468,7 +475,7 @@ for ax, (Z, lab, n, d_) in zip(axes, [(Zb, "Spontaneous (background)", len(bg), 
     basemap(ax, f"{lab} (n={n})", quakes=d_)
     cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03); cb.set_label("Events / km$^2$")
 mag_legend(axes[0])
-fig.suptitle(f"Smoothed seismicity density — Gaussian sigma {SIG*SP*111:.1f} km "
+fig.suptitle(f"Smoothed seismicity density — Gaussian sigma {SMOOTH_KM:.1f} km "
              f"(relocation uncertainty ~0.1 km)", y=0.98)
 fig.tight_layout()
 for ext in ("pdf","png"):
@@ -488,7 +495,7 @@ for ax, sg in zip(axes, (SIG_ALT[0], SIG, SIG_ALT[1])):
     im = ax.imshow(Z, origin="lower", extent=EXT, cmap=DENS_CMAP,
                    norm=mpl.colors.PowerNorm(0.5, vmin=0, vmax=Z.max()),
                    aspect=ASP, interpolation="bilinear", zorder=1)
-    basemap(ax, f"Triggered, $\\sigma$ = {sg*SP*111:.1f} km", quakes=cl)
+    basemap(ax, f"Triggered, $\\sigma$ = {sg*_CELL_KM:.2f} km", quakes=cl)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
 fig.tight_layout()
 for ext in ("pdf","png"):
