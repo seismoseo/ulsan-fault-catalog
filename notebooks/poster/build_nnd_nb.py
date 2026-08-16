@@ -60,8 +60,18 @@ MMIN    = None     # NO Mc cut: eta depends only on the PARENT magnitude, so sma
 LINKR   = 1.0      # km, family-linking cap (module default 10 km is whole-peninsula scale)
 MERGE_D, MERGE_Z = 5.0, 5.0     # spatial_merge: co-located but temporally separate families
 
-# --- catalog + quality cuts (match the established notebooks) ---
-NUSED_MIN = 3                                   # >=3 stations used for the ML/location
+# --- catalog selection (user decision 2026-08-16) ---
+# NND is driven by inter-event DISTANCE, so select on LOCATION precision, not magnitude quality:
+#   * keep every dt.cc-resolved event (waveform-precise relative locations), and
+#   * add back the dt.ct-only events with ML >= DTCT_ML_MIN, because large events dominate
+#     triggering and must not be missing from the parent population (the catalog's largest,
+#     the 2014-09-23 ML 3.93, is dt.ct-only: it found no waveform-similar neighbour).
+# NUSED_MIN=1 deliberately: `n_used` is the ML-quality count, and magnitude enters eta only as a
+# weak 10^(-q*b*M_parent) weight — cutting n_used<3 would discard 624 well-located cc events (35%
+# of the catalog) for a magnitude-term technicality. Set NUSED_MIN=3 to reproduce the earlier run.
+SELECTION    = "dtcc_plus_large_dtct"           # "dtcc_plus_large_dtct" | "all" | "dtcc_only"
+DTCT_ML_MIN  = 2.0                              # ML floor for the dt.ct-only events added back
+NUSED_MIN    = 1                                # ML-quality floor (1 = no cut; see note above)
 UF_BOX  = (129.25, 129.55, 35.60, 35.90)        # selection box
 MAP_BOX = (129.20, 129.58, 35.58, 35.92)        # display box (reloc moves events slightly outside)
 GJ_T    = "2016-09-12T11:32:54"                 # Gyeongju Mw 5.5 (UTC), OUTSIDE the box ~10 km W
@@ -99,15 +109,33 @@ print(f"NND parameters: Df={DF_UF}  b={B_NND}  metric={METRIC}  mmin={MMIN}  lin
 
 md(r"""## 1 — Catalog: de-blasted, quality-cut, in the NND schema
 
-The input is the **dt.cc-relocated** catalog with homogenized local magnitudes. Two cuts, both
-matching the established notebooks: remove the identified blasts, and require $\geq$3 stations.
-`t_year` comes from `nnd.decimal_year` (exact year length, second precision) — never re-derived.""")
+The input is the HypoDD-relocated catalog. **Every event carries a local magnitude** — `n_used` is
+the ML-*quality* station count, not magnitude availability.
+
+Selection (see the parameters cell): all **dt.cc-resolved** events (waveform-precise relative
+locations) **plus** the **dt.ct-only events with ML $\geq$ 2.0**, since large events dominate
+triggering and must be present in the parent population — the catalog's largest event
+(2014-09-23, ML 3.93) is dt.ct-only. Blasts are removed. `t_year` comes from `nnd.decimal_year`
+(exact year length, second precision) — never re-derived.""")
 
 co(r'''rl = pd.read_csv(CAT)
 blast = set(pd.read_csv(BLAST).event_idx.dropna().astype(int))
 n0 = len(rl)
 rl = rl[~rl.event_idx.isin(blast)].copy()                       # DE-BLAST
 g  = rl[rl.n_used >= NUSED_MIN].dropna(subset=["lat","lon","depth","ml_ufcorr_reloc"]).copy()
+# --- relocation-level selection (see the parameters cell) ---
+n_pre = len(g)
+if SELECTION == "dtcc_plus_large_dtct":
+    keep = g.is_dtcc | (g.ml_ufcorr_reloc >= DTCT_ML_MIN)
+elif SELECTION == "dtcc_only":
+    keep = g.is_dtcc
+else:
+    keep = pd.Series(True, index=g.index)
+n_cc  = int((g.is_dtcc & keep).sum())
+n_ct  = int((~g.is_dtcc & keep).sum())
+g = g[keep].copy()
+print(f"selection '{SELECTION}': {n_pre} -> {len(g)}  "
+      f"(dt.cc-resolved {n_cc}; dt.ct-only kept {n_ct} at ML>={DTCT_ML_MIN})")
 g["event_time"] = pd.to_datetime(g.event_time, format="ISO8601", utc=True, errors="coerce")
 g = g.dropna(subset=["event_time"]).sort_values("event_time").reset_index(drop=True)
 
@@ -119,6 +147,8 @@ g = g.rename(columns={"lon":"svi_lon","lat":"svi_lat","depth":"svi_dep",
 g = g.sort_values("t_year").reset_index(drop=True)
 
 print(f"catalog {n0} -> de-blast {n0-len(rl)} removed -> n_used>={NUSED_MIN} -> {len(g)} events")
+print(f"  NOTE: every event carries a local magnitude (ml_ufcorr_reloc); n_used is the ML-quality "
+      f"station count, not magnitude availability")
 print(f"span {g.event_time.min():%Y-%m-%d} .. {g.event_time.max():%Y-%m-%d}   "
       f"ML {g.kma_mag.min():.1f}..{g.kma_mag.max():.1f}")''')
 
@@ -292,7 +322,8 @@ def rate_per_wk(d, t0, t1):
     return n, n/wk if wk else np.nan
 
 rows=[]
-rows.append(("events analysed (de-blasted, n_used>=3)", f"{len(g):,}"))
+rows.append(("events analysed (de-blasted)", f"{len(g):,}"))
+rows.append(("selection", f"{SELECTION} (dt.cc {n_cc:,} + dt.ct-only ML>={DTCT_ML_MIN}: {n_ct})"))
 rows.append(("NND parameters", f"Df={DF_UF}, b={B_NND}, {METRIC}, link_rmax={LINKR} km, no Mc cut"))
 rows.append(("log10(eta_0)  [GMM valley]", f"{LE0:.2f}"))
 rows.append(("background (spontaneous)", f"{n_bg:,} ({100*n_bg/len(g):.0f}%)"))
