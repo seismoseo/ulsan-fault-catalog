@@ -79,7 +79,11 @@ MMIN     = None           # no Mc cut (eta depends on the PARENT magnitude)
 
 RC   = [125.3, 130.8, 33.8, 38.5]          # peninsula map extent
 UF   = [129.25, 129.55, 35.60, 35.90]      # Ulsan-Fault study box
-ZOOM = [128.95, 129.65, 35.55, 36.05]      # Gyeongju + Ulsan zoom
+ZOOM = [128.95, 129.65, 35.55, 36.05]      # tight Gyeongju + Ulsan zoom (S3)
+# canonical full study area, from uflib.uf_cluster.REGION — spans WEST to the Milyang fault, so the
+# regional plot (S5) shows the whole Gyeongju region rather than only the Gyeongju-Ulsan corridor.
+sys.path.insert(0, REPO + "/src"); from uflib import uf_cluster as _ufc
+GREG = list(_ufc.REGION)                   # [128.5, 130.0, 35.3, 36.5]
 GJ_LON, GJ_LAT, GJ_T = 129.191, 35.766, "2016-09-12T11:32:54"   # 2016 M5.5 Gyeongju
 POH_LON, POH_LAT     = 129.366, 36.109                           # 2017 M5.4 Pohang
 
@@ -100,6 +104,17 @@ def savemp(fig, name):
     for ext in ("pdf","png"):
         fig.savefig(os.path.join(FIGS, f"{name}.{ext}"), bbox_inches="tight")
     print(f"  saved figs/{name}.pdf + .png")
+
+def annotate_mainshocks(fig, size="0.5c", label=True):
+    """Mark the 2016 Gyeongju / 2017 Pohang mainshocks WITHOUT hiding the events beneath them:
+    an OPEN star (no fill) plus an offset label, instead of a filled symbol that blanks the
+    densest part of each aftershock cloud."""
+    for lon, lat, nm, dx, dy in [(GJ_LON, GJ_LAT, "2016 M5.5 Gyeongju", -0.06, -0.14),
+                                 (POH_LON, POH_LAT, "2017 M5.4 Pohang",  0.06,  0.14)]:
+        fig.plot(x=[lon], y=[lat], style=f"a{size}", pen="1.4p,black")      # OPEN star
+        if label:
+            fig.text(x=lon+dx, y=lat+dy, text=nm, font="9p,Helvetica-Bold,black",
+                     justify="RM" if dx < 0 else "LM", fill="white@30", pen="0.3p,gray50")
 
 sv = pd.read_csv(SVI).dropna(subset=["svi_lat","svi_lon","kma_mag"]).copy()
 sv = sv[sv.status.isin(["located","svi_only"])].copy()
@@ -149,8 +164,7 @@ for i,(d_, lab) in enumerate([(g, f"All seismicity (n={len(g):,})"),
               borders="1/0.4p,gray60", resolution="i")
     fig.plot(x=d_.svi_lon, y=d_.svi_lat, style="c0.05c", pen="0.25p,gray25", transparency=40)
     fig.plot(x=[UF[0],UF[1],UF[1],UF[0],UF[0]], y=[UF[2],UF[2],UF[3],UF[3],UF[2]], pen="1.8p,red")
-    fig.plot(x=[GJ_LON], y=[GJ_LAT], style="a0.5c", fill="lightgreen", pen="0.7p,black")
-    fig.plot(x=[POH_LON], y=[POH_LAT], style="a0.5c", fill="lightgreen", pen="0.7p,black")
+    annotate_mainshocks(fig, size="0.45c", label=(i==0))
     fig.text(x=125.6, y=38.28, text=lab, font="8p,Helvetica,black", justify="LM",
              fill="white@20", pen="0.4p,gray40")
     fig.basemap(map_scale="jBL+w50k+o0.4c/0.4c")
@@ -170,21 +184,28 @@ co(r'''def dgrid(lon, lat, ext, sp=0.04, sm=1.3):
 
 dg_all = dgrid(g.svi_lon.values, g.svi_lat.values, RC)
 dg_bg  = dgrid(g[g.background].svi_lon.values, g[g.background].svi_lat.values, RC)
-vcap = float(np.percentile(dg_all.values[dg_all.values>0.1], 99))
-pygmt.makecpt(cmap="hot", series=[0, vcap], reverse=True)   # house style: hot, reversed
+# SEPARATE colour scale per panel: the Gyeongju/Pohang sequences dominate the raw field, so a shared
+# scale would flatten the spontaneous panel into near-uniform pale. Independent p99 caps let each
+# panel use its full dynamic range — the point being WHERE the density sits, not its absolute value.
+vcap_all = float(np.percentile(dg_all.values[dg_all.values>0.05], 99))
+vcap_bg  = float(np.percentile(dg_bg.values[dg_bg.values>0.05], 99))
 
 fig = pygmt.Figure()
-for i,(gr, lab) in enumerate([(dg_all,"All seismicity"), (dg_bg,"Spontaneous only")]):
-    if i: fig.shift_origin(xshift="10.6c")
+for i,(gr, lab, vc) in enumerate([(dg_all,"All seismicity", vcap_all),
+                                  (dg_bg, "Spontaneous only", vcap_bg)]):
+    if i: fig.shift_origin(xshift="11.2c")
+    # hot reversed, and the LOW end forced to white so empty ground is white, not pale yellow
+    pygmt.makecpt(cmap="hot", series=[0, vc], reverse=True, background="o")
     fig.basemap(region=RC, projection="M10c", frame=["WSne" if i==0 else "wSne","xa1","ya1"])
-    fig.grdimage(grid=gr, cmap=True, nan_transparent=True)
+    fig.grdimage(grid=gr.where(gr > 0.02), cmap=True, nan_transparent=True)
     fig.coast(water="lightskyblue1", shorelines="0.5p,gray40", borders="1/0.4p,gray60", resolution="i")
     fig.plot(x=[UF[0],UF[1],UF[1],UF[0],UF[0]], y=[UF[2],UF[2],UF[3],UF[3],UF[2]], pen="1.8p,red")
+    annotate_mainshocks(fig, size="0.45c")
     fig.text(x=125.6, y=38.28, text=lab, font="8p,Helvetica,black", justify="LM",
              fill="white@20", pen="0.4p,gray40")
-fig.colorbar(frame=['x+l"Events per cell (smoothed)"'], position="JBC+w8c/0.35c+h+o-5.3c/0.9c")
-savegmt(fig, "S2_skp_density"); fig.show(width=1400)
-print(f"density cap (p99) = {vcap:.1f} events/cell")''')
+    fig.colorbar(frame=[f'x+l"{lab} — events per cell"'], position="JBC+w7.5c/0.32c+h+o0c/0.9c")
+savegmt(fig, "S2_skp_density"); fig.show(width=1500)
+print(f"density caps (p99): all {vcap_all:.1f}   spontaneous {vcap_bg:.1f} events/cell")''')
 
 md(r"""## S3 — Gyeongju zoom: the aftershock zone vs the Ulsan Fault
 
@@ -214,9 +235,9 @@ fig.plot(data=pd.DataFrame({"x":zb.svi_lon.values,"y":zb.svi_lat.values,"s":zb.s
 fig.plot(x=[UF[0],UF[1],UF[1],UF[0],UF[0]], y=[UF[2],UF[2],UF[3],UF[3],UF[2]], pen="2.0p,red")
 fig.text(x=(UF[0]+UF[1])/2, y=UF[3]+0.035, text="Ulsan Fault study area",
          font="11p,Helvetica-Bold,red", justify="BC")
-fig.plot(x=[GJ_LON], y=[GJ_LAT], style="a0.6c", fill="lightgreen", pen="0.8p,black")
-fig.text(x=GJ_LON-0.015, y=GJ_LAT+0.03, text="2016 M5.5 Gyeongju",
-         font="10p,Helvetica-Bold,black", justify="RB")
+fig.plot(x=[GJ_LON], y=[GJ_LAT], style="a0.6c", pen="1.5p,black")     # OPEN: does not mask events
+fig.text(x=GJ_LON-0.02, y=GJ_LAT+0.05, text="2016 M5.5 Gyeongju",
+         font="10p,Helvetica-Bold,black", justify="RB", fill="white@30", pen="0.3p,gray50")
 
 # boxed legend, lower-left. OPAQUE white (not white@25) so the data underneath does not ghost
 # through the swatches, and generous row spacing so the M-labels never collide with the colour key.
@@ -244,6 +265,51 @@ print(f"{'volume':<26}{'n':>7}{'spontaneous':>13}{'triggered':>11}{'spont %':>9}
 for lab,d_ in (("Gyeongju aftershock zone",gj), ("Ulsan Fault box",uf)):
     print(f"{lab:<26}{len(d_):>7}{int(d_.background.sum()):>13}{int((~d_.background).sum()):>11}"
           f"{100*d_.background.mean():>8.0f}%")''')
+
+md(r"""## S5 — Gyeongju region, all seismicity (no spontaneous/triggered split)
+
+The full study area (`uflib.uf_cluster.REGION`), which extends west to the **Milyang fault** — the
+plain seismicity map, with no declustering applied. Circles are open and scaled by magnitude; the
+Ulsan-Fault box and the two mainshocks are marked. Companion panel: the same events as smoothed
+density, so the spatial pattern is readable where symbols overlap.""")
+
+co(r'''gr_ = g[(g.svi_lon.between(GREG[0],GREG[1])) & (g.svi_lat.between(GREG[2],GREG[3]))].copy()
+gr_["sz"] = 0.040*1.7**np.clip(gr_.kma_mag.values, 0.0, None)
+print(f"Gyeongju region ({GREG}): {len(gr_):,} events, ML {gr_.kma_mag.min():.1f}..{gr_.kma_mag.max():.1f}")
+
+fig = pygmt.Figure()
+fig.basemap(region=GREG, projection="M12c", frame=["WSne","xa0.5","ya0.5"])
+fig.coast(land="gray98", water="lightblue", shorelines="0.4p,gray45", resolution="f")
+fig.plot(data=pd.DataFrame({"x":gr_.svi_lon.values,"y":gr_.svi_lat.values,"s":gr_.sz.values}),
+         style="c", pen="0.5p,gray25")                     # OPEN circles, no population split
+fig.plot(x=[UF[0],UF[1],UF[1],UF[0],UF[0]], y=[UF[2],UF[2],UF[3],UF[3],UF[2]], pen="2.0p,red")
+fig.text(x=(UF[0]+UF[1])/2, y=UF[3]+0.05, text="Ulsan Fault", font="10p,Helvetica-Bold,red",
+         justify="BC")
+annotate_mainshocks(fig, size="0.55c")
+bx0,bx1 = GREG[0]+0.03, GREG[0]+0.30; by0,by1 = GREG[2]+0.03, GREG[2]+0.42
+fig.plot(x=[bx0,bx1,bx1,bx0,bx0], y=[by0,by0,by1,by1,by0], fill="white", pen="0.8p,black")
+cx = bx0+0.05
+for k,m in enumerate([5,4,3,2,1]):
+    ly = by1-0.055-k*0.068
+    fig.plot(x=[cx], y=[ly], style=f"c{0.040*1.7**m:.3f}c", pen="0.7p,black")
+    fig.text(x=cx+0.07, y=ly, text=f"M {m}", font="8p,Helvetica,black", justify="LM")
+fig.basemap(map_scale="jBR+w20k+o0.5c/0.5c")
+savegmt(fig, "S5_gyeongju_region_all"); fig.show(width=1200)''')
+
+co(r'''# companion: smoothed density of the same events (own colour scale, white background)
+dg_reg = dgrid(gr_.svi_lon.values, gr_.svi_lat.values, GREG, sp=0.01, sm=1.5)
+vcap_r = float(np.percentile(dg_reg.values[dg_reg.values>0.05], 99))
+pygmt.makecpt(cmap="hot", series=[0, vcap_r], reverse=True, background="o")
+fig = pygmt.Figure()
+fig.basemap(region=GREG, projection="M12c", frame=["WSne","xa0.5","ya0.5"])
+fig.grdimage(grid=dg_reg.where(dg_reg > 0.02), cmap=True, nan_transparent=True)
+fig.coast(water="lightblue", shorelines="0.4p,gray45", resolution="f")
+fig.plot(x=[UF[0],UF[1],UF[1],UF[0],UF[0]], y=[UF[2],UF[2],UF[3],UF[3],UF[2]], pen="2.0p,red")
+annotate_mainshocks(fig, size="0.55c")
+fig.colorbar(frame=['x+l"Events per cell (smoothed)"'], position="JBC+w8c/0.35c+h+o0c/1.0c")
+fig.basemap(map_scale="jBR+w20k+o0.5c/0.5c")
+savegmt(fig, "S5b_gyeongju_region_density"); fig.show(width=1200)
+print(f"region density cap (p99) = {vcap_r:.1f} events/cell")''')
 
 md(r"""## S4 — The same contrast in time
 
