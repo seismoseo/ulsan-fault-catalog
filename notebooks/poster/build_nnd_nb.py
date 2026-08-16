@@ -79,14 +79,18 @@ GJ_WINDOW_M = 6                                 # months of elevated response
 YEAR_RANGE  = (2010, 2024)                      # full catalog window for the time axes (archive
                                                 # ends 2024 day 305; no 2025+ data exists)
 
-# --- smoothed spatial density (N7) ---
-# Kernel width is set from the DATA, not by eye: formal HypoDD relocation errors are ~100 m
-# (median ex/ey = 0.1 km), median inter-event spacing is 20 m, over a ~27 x 32 km region.
-# 500 m = 5x the location uncertainty -> smooths away location noise while still resolving the
-# ~1 km fault-patch scale. The sensitivity row shows 250 m (near the uncertainty floor) and 1 km.
-KDE_BW_KM   = 0.5
-KDE_BW_ALT  = (0.25, 1.0)
-KDE_GRID_KM = 0.1                               # output grid step (must be << bandwidth)
+# --- smoothed spatial density (N7) — SAME construction as the established
+# build_background_density_anim_nb.py: histogram2d on a fixed lon/lat grid, then gaussian_filter,
+# rendered with Blues + PowerNorm(0.5) (sqrt scale: honest and keeps the low end legible).
+# Smoothing width is set FROM THE DATA: formal HypoDD errors ~100 m (median ex/ey = 0.1 km),
+# median inter-event spacing 20 m, region ~27 x 32 km. SP=0.004 deg (~0.4 km cells) with SIG=1.5
+# cells gives an effective ~0.6 km kernel = 6x the location uncertainty, resolving the ~1 km
+# fault-patch scale without rendering location noise as structure.
+SP  = 0.004                                     # grid step (deg)
+SIG = 1.5                                       # Gaussian sigma (cells) -> ~0.6 km
+SIG_ALT = (0.75, 3.0)                           # sensitivity row: ~0.3 km and ~1.2 km
+FAULTS_GMT = REPO + "/data/hypoinv/faults_lonlat.gmt"
+COAST_GMT  = REPO + "/analysis/reloc_analysis/coastline_lonlat.gmt"
 
 CAT   = REPO + "/analysis/local_magnitudes/catalog_ml_heo_ufonly_reloc.csv"
 BLAST = REPO + "/analysis/local_magnitudes/blast_event_idx_deblast.csv"
@@ -334,72 +338,95 @@ print("largest families:", sizes.head(TOPN).to_dict())''')
 
 md(r"""## N7 — Smoothed spatial density
 
-Gaussian-kernel density for each population on a common colour scale, so the two are directly
-comparable. **Bandwidth 500 m** — five times the ~100 m formal relocation uncertainty, chosen so
-location error is not rendered as structure, while the ~1 km fault-patch scale stays resolved. The
-bottom row repeats the clustered field at 250 m and 1 km to show which features are bandwidth-robust.""")
+Density of each population on a **shared colour scale**, so the two maps are directly comparable,
+with **surface fault traces** and the coastline overlaid. Construction and styling follow the
+established `build_background_density_anim_nb.py`: `histogram2d` on a 0.004° grid, `gaussian_filter`
+smoothing, `Blues` with a **square-root (PowerNorm 0.5)** stretch so the low end stays legible
+without exaggerating the peaks.
 
-co(r'''from scipy.stats import gaussian_kde as _gkde
-LAT0 = float(g.svi_lat.mean()); KX = 111.0*np.cos(np.radians(LAT0)); KY = 111.0
+Smoothing width comes from the data: formal HypoDD errors are ~100 m and median event spacing 20 m,
+so σ ≈ 0.6 km (6× the location uncertainty) resolves the ~1 km fault-patch scale without rendering
+location noise as structure.""")
 
-def density(d, bw_km, box, step_km=KDE_GRID_KM):
-    """Gaussian KDE in KM space (so the bandwidth is isotropic and physical), returned on a lon/lat grid.
-    Events per km^2: the KDE integrates to 1, so multiply by N."""
-    x = d.svi_lon.values*KX; y = d.svi_lat.values*KY
-    if len(d) < 5: return None, None, None
-    gx = np.arange(box[0]*KX, box[1]*KX, step_km); gy = np.arange(box[2]*KY, box[3]*KY, step_km)
-    XX, YY = np.meshgrid(gx, gy)
-    kde = _gkde(np.vstack([x, y]))
-    kde.set_bandwidth(bw_km / np.sqrt(kde.covariance_factor()**2 * np.cov(np.vstack([x,y])).trace()/2))
-    Z = kde(np.vstack([XX.ravel(), YY.ravel()])).reshape(XX.shape) * len(d)
-    return XX/KX, YY/KY, Z
+co(r'''from scipy.ndimage import gaussian_filter
+import matplotlib as mpl
 
-# NOTE 6 pcolormesh panels at savefig.dpi=600 exhausts the Agg renderer (bad_alloc); this figure
-# is saved at 300 dpi, which is still well beyond poster print resolution for a raster this size.
-fig, axes = plt.subplots(2, 3, figsize=(13.5, 8.6),
-                         gridspec_kw=dict(height_ratios=[1.0, 1.0]))
-# --- top row: background vs clustered at the chosen bandwidth, SHARED colour scale ---
-Xb, Yb, Zb = density(bg, KDE_BW_KM, MAP_BOX)
-Xc, Yc, Zc = density(cl, KDE_BW_KM, MAP_BOX)
-vmax = float(np.nanmax([Zb.max(), Zc.max()]))
-for ax, (X, Y, Z, lab, n) in zip(axes[0], [(Xb,Yb,Zb,"Background / spontaneous",len(bg)),
-                                           (Xc,Yc,Zc,"Clustered / triggered",len(cl))]):
-    pc = ax.pcolormesh(X, Y, Z, cmap="magma_r", vmin=0, vmax=vmax, shading="auto")
+def _load_segs(path):
+    """GMT multi-segment lon/lat file -> list of (N,2) arrays (same loader as the density-animation nb)."""
+    segs, cur = [], []
+    if not os.path.exists(path):
+        return segs
+    for ln in open(path):
+        if ln.startswith(">"):
+            if len(cur) > 1: segs.append(np.array(cur))
+            cur = []; continue
+        p = ln.split()
+        if len(p) >= 2:
+            try: cur.append([float(p[0]), float(p[1])])
+            except ValueError: pass
+    if len(cur) > 1: segs.append(np.array(cur))
+    return segs
+
+FSEG = _load_segs(FAULTS_GMT); CSEG = _load_segs(COAST_GMT)
+print(f"overlays: {len(FSEG)} fault segments, {len(CSEG)} coastline segments")
+
+LAT0 = float(g.svi_lat.mean())
+CELL_KM2 = (SP*111.0*np.cos(np.radians(LAT0))) * (SP*111.0)
+XB = np.arange(MAP_BOX[0], MAP_BOX[1]+SP, SP); YB = np.arange(MAP_BOX[2], MAP_BOX[3]+SP, SP)
+EXT = [XB[0], XB[-1], YB[0], YB[-1]]
+ASP = 1.0/np.cos(np.radians(LAT0))
+
+def dens(d, sig):
+    """events / km^2, smoothed — histogram2d + gaussian_filter (house style)."""
+    H,_,_ = np.histogram2d(d.svi_lon.values, d.svi_lat.values, bins=[XB, YB])
+    return gaussian_filter(H, sig).T / CELL_KM2
+
+def basemap(ax, title):
+    for sgm in FSEG: ax.plot(sgm[:,0], sgm[:,1], color="0.45", lw=0.7, zorder=3)
+    for sgm in CSEG: ax.plot(sgm[:,0], sgm[:,1], color="black", lw=0.9, zorder=4)
     ax.plot([UF_BOX[0],UF_BOX[1],UF_BOX[1],UF_BOX[0],UF_BOX[0]],
-            [UF_BOX[2],UF_BOX[2],UF_BOX[3],UF_BOX[3],UF_BOX[2]], "--", lw=1, color="0.35")
-    ax.set(title=f"{lab} (n={n}), bw={KDE_BW_KM*1000:.0f} m", xlabel="Longitude", ylabel="Latitude",
-           xlim=(MAP_BOX[0],MAP_BOX[1]), ylim=(MAP_BOX[2],MAP_BOX[3]))
-    ax.set_aspect(KY/KX)
-    fig.colorbar(pc, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
-# --- ratio panel: where clustered dominates background ---
-ax = axes[0][2]
-with np.errstate(divide="ignore", invalid="ignore"):
-    ratio = np.log10(np.where(Zb > 1e-6, Zc/np.maximum(Zb,1e-9), np.nan))
-pc = ax.pcolormesh(Xb, Yb, ratio, cmap="RdBu_r", vmin=-1.5, vmax=1.5, shading="auto")
-ax.plot([UF_BOX[0],UF_BOX[1],UF_BOX[1],UF_BOX[0],UF_BOX[0]],
-        [UF_BOX[2],UF_BOX[2],UF_BOX[3],UF_BOX[3],UF_BOX[2]], "--", lw=1, color="0.35")
-ax.set(title="log$_{10}$ (clustered / background)", xlabel="Longitude", ylabel="Latitude",
-       xlim=(MAP_BOX[0],MAP_BOX[1]), ylim=(MAP_BOX[2],MAP_BOX[3]))
-ax.set_aspect(KY/KX)
-fig.colorbar(pc, ax=ax, fraction=0.046, pad=0.03).set_label("log$_{10}$ ratio")
-# --- bottom row: bandwidth sensitivity on the clustered field ---
-for ax, bw in zip(axes[1], (KDE_BW_ALT[0], KDE_BW_KM, KDE_BW_ALT[1])):
-    X, Y, Z = density(cl, bw, MAP_BOX)
-    pc = ax.pcolormesh(X, Y, Z, cmap="magma_r", shading="auto")
-    ax.set(title=f"Clustered, bw = {bw*1000:.0f} m", xlabel="Longitude", ylabel="Latitude",
-           xlim=(MAP_BOX[0],MAP_BOX[1]), ylim=(MAP_BOX[2],MAP_BOX[3]))
-    ax.set_aspect(KY/KX)
-    fig.colorbar(pc, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
-fig.suptitle("Smoothed spatial density — background vs clustered "
-             f"(Gaussian KDE; relocation uncertainty ~100 m)", y=0.995)
+            [UF_BOX[2],UF_BOX[2],UF_BOX[3],UF_BOX[3],UF_BOX[2]], "--", lw=0.9, color="0.3", zorder=5)
+    ax.set(xlim=(MAP_BOX[0],MAP_BOX[1]), ylim=(MAP_BOX[2],MAP_BOX[3]),
+           xlabel="Longitude", ylabel="Latitude", title=title)
+
+Zb = dens(bg, SIG); Zc = dens(cl, SIG)
+VMAX = float(np.nanmax([Zb.max(), Zc.max()]))          # SHARED scale -> the two are comparable
+
+fig, axes = plt.subplots(1, 2, figsize=(12.4, 6.4))
+for ax, (Z, lab, n) in zip(axes, [(Zb, "Background / spontaneous", len(bg)),
+                                  (Zc, "Clustered / triggered",   len(cl))]):
+    im = ax.imshow(Z, origin="lower", extent=EXT, cmap="Blues",
+                   norm=mpl.colors.PowerNorm(0.5, vmin=0, vmax=VMAX),
+                   aspect=ASP, interpolation="bilinear", zorder=1)
+    basemap(ax, f"{lab} (n={n})")
+    cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03); cb.set_label("Events / km$^2$")
+fig.suptitle(f"Smoothed seismicity density — Gaussian sigma {SIG*SP*111:.1f} km "
+             f"(relocation uncertainty ~0.1 km)", y=0.98)
 fig.tight_layout()
 for ext in ("pdf","png"):
-    fig.savefig(os.path.join(FIGS, f"N7_spatial_density.{ext}"), bbox_inches="tight", dpi=300)
-print("  saved figs/N7_spatial_density.pdf + .png (300 dpi)")
+    fig.savefig(os.path.join(FIGS, f"N7_spatial_density.{ext}"), bbox_inches="tight", dpi=400)
+print("  saved figs/N7_spatial_density.pdf + .png")
 plt.show()
+print(f"peak density: background {Zb.max():.1f}  clustered {Zc.max():.1f} events/km^2")''')
 
-print(f"peak density: background {Zb.max():.1f}  clustered {Zc.max():.1f} events/km^2 "
-      f"(bw {KDE_BW_KM*1000:.0f} m)")''')
+md(r"""### N7b — smoothing sensitivity
+
+The same clustered field at three smoothing widths. Features that persist across all three are
+real; the single ridge that appears at the widest setting is a smoothing artifact, not a structure.""")
+
+co(r'''fig, axes = plt.subplots(1, 3, figsize=(15.5, 5.4))
+for ax, sg in zip(axes, (SIG_ALT[0], SIG, SIG_ALT[1])):
+    Z = dens(cl, sg)
+    im = ax.imshow(Z, origin="lower", extent=EXT, cmap="Blues",
+                   norm=mpl.colors.PowerNorm(0.5, vmin=0, vmax=Z.max()),
+                   aspect=ASP, interpolation="bilinear", zorder=1)
+    basemap(ax, f"Clustered, $\\sigma$ = {sg*SP*111:.1f} km")
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03).set_label("Events / km$^2$")
+fig.tight_layout()
+for ext in ("pdf","png"):
+    fig.savefig(os.path.join(FIGS, f"N7b_density_sensitivity.{ext}"), bbox_inches="tight", dpi=400)
+print("  saved figs/N7b_density_sensitivity.pdf + .png")
+plt.show()''')
 
 md(r"""## Summary — numbers for the poster""")
 
